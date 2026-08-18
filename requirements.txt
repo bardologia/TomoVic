@@ -1,13 +1,9 @@
-torch==2.11.0
 numpy==2.4.3
-pandas==3.0.1
 scipy==1.17.1
 matplotlib==3.10.8
 pillow==12.1.1
 scikit-image==0.26.0
-tensorboard==2.20.0
-optuna==4.8.0
+h5py==3.16.0
 rich==15.0.0
-tqdm==4.67.3
 psutil==7.2.2
 pynvml==13.0.1

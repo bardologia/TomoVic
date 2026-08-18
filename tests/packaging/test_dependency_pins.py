@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 IMPORT_NAMES = {"pillow": "PIL", "scikit-image": "skimage"}
-SOURCE_ROOTS = ("main", "pipelines", "tools", "models", "configuration", "webui", "scripts", "tests")
+SOURCE_ROOTS = ("main", "pipelines", "tools", "configuration", "webui", "tests")
 
 
 def _pyproject_dependencies(repo_root: Path) -> list[str]:

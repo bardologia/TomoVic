@@ -1,7 +1,7 @@
 """Shared pytest fixtures and logging stubs for the whole test suite.
 
 Session-scoped fixtures expose the gitignored test_data/ tree (preprocessed stacks,
-metadata and extracted Gaussian parameters); they skip when that tree is absent.
+and metadata); they skip when that tree is absent.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
 from tools.monitoring.logger import Logger
 
@@ -24,7 +23,6 @@ if str(_REPO_ROOT) not in sys.path:
 _TEST_DATA = _REPO_ROOT / "test_data"
 _DATA      = _TEST_DATA / "data"
 _META      = _TEST_DATA / "meta"
-_PARAMS    = _TEST_DATA / "params" / "params_k5_lam0.01_sig4_sigma"
 
 _HAS_DATA = _TEST_DATA.is_dir() and (_DATA / "dataset.json").is_file()
 
@@ -177,12 +175,6 @@ def recording_logger() -> RecordingLogger:
     return RecordingLogger()
 
 
-@pytest.fixture
-def force_cpu(monkeypatch):
-    """Patches torch.cuda.is_available to report no GPU."""
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-
-
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     """Returns the repository root directory."""
@@ -211,13 +203,6 @@ def meta_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def params_dir() -> Path:
-    """Returns the extracted-parameter run directory used by the tests."""
-    _require_data()
-    return _PARAMS
-
-
-@pytest.fixture(scope="session")
 def dataset_json(data_dir) -> dict:
     """Returns the parsed dataset.json manifest."""
     return json.loads((data_dir / "dataset.json").read_text())
@@ -233,12 +218,6 @@ def config_state_json(meta_dir) -> dict:
 def baselines_json(meta_dir) -> dict:
     """Returns the parsed baselines.json acquisition metadata."""
     return json.loads((meta_dir / "baselines.json").read_text())
-
-
-@pytest.fixture(scope="session")
-def param_extraction_meta(params_dir) -> dict:
-    """Returns the parsed param_extraction_meta.json of the parameter run."""
-    return json.loads((params_dir / "param_extraction_meta.json").read_text())
 
 
 @pytest.fixture(scope="session")
@@ -275,19 +254,6 @@ def secondaries(data_dir) -> np.ndarray:
 def interferograms(data_dir) -> np.ndarray:
     """Returns the memory-mapped interferogram stack of shape (tracks, azimuth, range)."""
     return np.load(data_dir / "interferograms.npy", mmap_mode="r")
-
-
-@pytest.fixture(scope="session")
-def parameters(params_dir) -> np.ndarray:
-    """Returns the memory-mapped Gaussian parameters of shape (params, azimuth, range)."""
-    return np.load(params_dir / "parameters.npy", mmap_mode="r")
-
-
-@pytest.fixture(scope="session")
-def fit_diagnostics(params_dir) -> dict:
-    """Returns the fit diagnostics of the parameter run keyed by array name."""
-    npz = np.load(params_dir / "fit_diagnostics.npz")
-    return {k: npz[k] for k in npz.files}
 
 
 @pytest.fixture(scope="session")

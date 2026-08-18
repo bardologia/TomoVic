@@ -3,39 +3,33 @@ requires      = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "dlr-tomosar"
+name            = "tomovic"
 version         = "0.1.0"
-description     = "Deep-learning Gaussian-mixture parameter estimation for SAR tomography"
+description     = "Visualization console and preprocessing pipeline for SAR tomograms, DEM and acquisition geometry"
 readme          = "README.md"
 requires-python = ">=3.11"
 dependencies    = [
-    "torch==2.11.0",
     "numpy==2.4.3",
-    "pandas==3.0.1",
     "scipy==1.17.1",
     "matplotlib==3.10.8",
     "pillow==12.1.1",
     "scikit-image==0.26.0",
-    "tensorboard==2.20.0",
-    "optuna==4.8.0",
+    "h5py==3.16.0",
     "rich==15.0.0",
-    "tqdm==4.67.3",
     "psutil==7.2.2",
     "pynvml==13.0.1",
 ]
 
 [project.optional-dependencies]
-processing = ["h5py>=3.11"]
-sigma      = ["jax>=0.4.30"]
-dev        = ["pytest==9.0.3", "pyflakes==3.4.0"]
+dev = ["pytest==9.0.3", "pyflakes==3.4.0"]
 
 [tool.setuptools.packages.find]
-include = ["configuration*", "models*", "pipelines*", "tools*"]
+include = ["configuration*", "pipelines*", "tools*"]
 
 [tool.pytest.ini_options]
 testpaths      = ["tests"]
 strict_markers = true
 markers        = [
     "real_data: test depends on the transferred real SAR data under test_data/",
-    "slow: heavier test (full-frame numerics, many model forwards)",
+    "slow: heavier test (full-frame numerics)",
 ]

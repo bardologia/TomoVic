@@ -1,7 +1,6 @@
 """SAR-domain tools: coherence, acquisition geometry, track parameters, PyRat jobs."""
 
 from .coherence              import ComplexSmoother, CoherenceEstimator
-from .tomo_geometry          import TomoGeometry
 from .interferogram_launcher import InterferogramLauncher
 from .tomogram_launcher      import TomogramLauncher
 from .pyrat_env              import PyRatEnvironment
@@ -12,7 +11,6 @@ from .geometry_field         import GeometryField, GeometryFieldBuilder
 __all__ = [
     "ComplexSmoother",
     "CoherenceEstimator",
-    "TomoGeometry",
     "InterferogramLauncher",
     "TomogramLauncher",
     "PyRatEnvironment",

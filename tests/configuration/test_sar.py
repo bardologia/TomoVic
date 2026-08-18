@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-import json
-from pathlib import Path
 
 import pytest
 
-from configuration.sar.gaussian_config   import DatasetParameterPairing, GaussianConfig
-from configuration.training.general.run  import RunPathsConfig
-from configuration.sar.geometry_config   import GeometryConfig
 from configuration.sar.processing_config import (
     TomogramConfig,
     ParallelConfig,
@@ -20,102 +15,6 @@ from configuration.sar.processing_config import (
 )
 
 from tests.configuration._helpers import make_crop
-
-
-def test_gaussian_config_instantiates():
-    """Verifies GaussianConfig exposes three parameters per Gaussian and an ordered height range."""
-    cfg = GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0)
-    assert cfg.params_per_gaussian == 3
-    assert cfg.x_max > cfg.x_min
-
-
-def test_gaussian_config_asdict_round_trips():
-    """Verifies GaussianConfig survives a dataclasses.asdict round trip."""
-    cfg     = GaussianConfig(n_default_gaussians=3, x_min=0.0, x_max=1.0)
-    payload = dataclasses.asdict(cfg)
-    assert GaussianConfig(**payload) == cfg
-
-
-def test_parameter_pairing_returns_the_relative_run_layout():
-    """Verifies the parameter template is returned relative to the dataset root."""
-    template = DatasetParameterPairing.relative_template(Path("/data/ds"), Path("/data/ds/params/run_a/parameters.npy"))
-    assert template == Path("params/run_a/parameters.npy")
-
-
-def test_parameter_pairing_rejects_a_foreign_parameter_run():
-    """Verifies a parameter run outside the dataset root is rejected."""
-    with pytest.raises(ValueError, match="must live inside"):
-        DatasetParameterPairing.relative_template(Path("/data/ds_b"), Path("/data/ds_a/params/run_a/parameters.npy"))
-
-
-def test_gaussian_from_dataset_rejects_a_foreign_parameter_run(tmp_path):
-    """Verifies GaussianConfig.from_dataset rejects parameters belonging to another dataset."""
-    dataset_a = tmp_path / "ds_a"
-    dataset_b = tmp_path / "ds_b"
-    params    = dataset_a / "params" / "run_a"
-
-    (dataset_b / "meta").mkdir(parents=True)
-    params.mkdir(parents=True)
-
-    (dataset_b / "meta" / "config_state.json").write_text(json.dumps({"tomogram_config": {"height_range": [-20.0, 80.0]}}))
-    (params / "param_extraction_meta.json").write_text(json.dumps({"k_max": 2}))
-
-    with pytest.raises(ValueError, match="must live inside"):
-        GaussianConfig.from_dataset(dataset_b, params / "parameters.npy")
-
-
-def test_training_paths_expose_the_parameter_template():
-    """Verifies RunPathsConfig builds the default parameter template path."""
-    paths = RunPathsConfig()
-    assert paths.parameters_template() == Path("params") / "params_k2_lam0_sig4_sigma_mu_amp" / "parameters.npy"
-
-
-def test_geometry_config_defaults():
-    """Verifies GeometryConfig defaults carry positive geometry and dataset-sourced baselines."""
-    cfg = GeometryConfig()
-    assert cfg.wavelength > 0
-    assert cfg.slant_range > 0
-    assert 0 < cfg.look_angle_deg < 90
-    assert isinstance(cfg.baselines, tuple)
-    assert cfg.baselines_source   == "dataset"
-    assert cfg.baseline_component == "perpendicular"
-
-
-def test_geometry_config_asdict_round_trips():
-    """Verifies GeometryConfig survives a dataclasses.asdict round trip."""
-    cfg     = GeometryConfig()
-    payload = dataclasses.asdict(cfg)
-    assert GeometryConfig(**payload) == cfg
-
-
-def test_geometry_resolved_manual_returns_self(tmp_path):
-    """Verifies resolving a manual-baseline geometry returns the same instance."""
-    cfg      = GeometryConfig(baselines_source="manual")
-    resolved = cfg.resolved(tmp_path)
-    assert resolved is cfg
-
-
-def test_geometry_resolved_with_kz_returns_self(tmp_path):
-    """Verifies a geometry with explicit kz values resolves to itself."""
-    cfg      = GeometryConfig(kz_values=(0.1, 0.2))
-    resolved = cfg.resolved(tmp_path)
-    assert resolved is cfg
-
-
-def test_geometry_resolved_dataset_missing_file_raises(tmp_path):
-    """Verifies resolving dataset baselines without the metadata file raises FileNotFoundError."""
-    cfg = GeometryConfig(baselines_source="dataset")
-    with pytest.raises(FileNotFoundError):
-        cfg.resolved(tmp_path)
-
-
-def test_geometry_resolved_invalid_source_raises(tmp_path):
-    """Verifies an unrecognised baselines_source raises ValueError on resolution."""
-    cfg = GeometryConfig(baselines_source="bogus")
-    with pytest.raises(ValueError):
-        cfg.resolved(tmp_path)
-
-
 def test_tomogram_config_defaults():
     """Verifies TomogramConfig defaults carry an ordered height range and container-typed arguments."""
     cfg = TomogramConfig()

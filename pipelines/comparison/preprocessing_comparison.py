@@ -17,8 +17,7 @@ import matplotlib.pyplot as plt
 import numpy             as np
 
 from pipelines.comparison.metric_table             import MetricTableRenderer
-from pipelines.comparison.spatial_stats            import SpatialDispersion
-from pipelines.processing.param_extraction.metrics import ContrastEstimator
+from pipelines.comparison.spatial_stats            import ContrastEstimator, SpatialDispersion
 from tools.data.io            import FileIO
 from tools.reporting.markdown import MarkdownDoc
 from tools.reporting.plotting import PlotBase

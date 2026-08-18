@@ -1,4 +1,4 @@
-"""Spatial dispersion statistics over per-pixel maps.
+"""Spatial dispersion and profile contrast statistics over per-pixel maps.
 
 Provides the block-wise variability measures and the correlation length used to
 read the bias-variance trade-off of multilook windows and Gaussian fits.
@@ -7,6 +7,10 @@ read the bias-variance trade-off of multilook windows and Gaussian fits.
 from __future__ import annotations
 
 import numpy as np
+
+from typing import Tuple
+
+from tools.monitoring.logger import Logger
 
 
 class SpatialDispersion:
@@ -116,3 +120,81 @@ class SpatialDispersion:
         below    = np.where(mean_acf < np.exp(-1.0))[0]
 
         return float(below[0]) if below.size > 0 else float(length)
+
+
+class ContrastEstimator:
+    """Measures the peak-to-floor contrast of tomographic profiles, in dB.
+
+    The floor is the mean of the lowest ``floor_fraction`` of the profile bins, so the
+    contrast is an uncalibrated proxy for profile SNR rather than a calibrated SNR.
+
+    Attributes:
+        logger: Logger available to the estimator.
+        floor_fraction: Fraction of the lowest profile bins averaged into the floor.
+        range_chunk: Number of range bins processed per streaming chunk.
+    """
+
+    def __init__(self, logger : Logger, floor_fraction : float = 0.25, range_chunk : int = 512) -> None:
+        """Configures the contrast estimator.
+
+        Args:
+            logger: Logger available to the estimator.
+            floor_fraction: Fraction of the lowest profile bins averaged into the floor.
+            range_chunk: Number of range bins processed per streaming chunk.
+        """
+        self.logger         = logger
+        self.floor_fraction = floor_fraction
+        self.range_chunk    = range_chunk
+
+    @staticmethod
+    def contrast_from_amplitude(amp : np.ndarray, floor_fraction : float) -> Tuple[np.ndarray, np.ndarray]:
+        """Returns the peak-to-floor contrast and the profile peak of an amplitude block.
+
+        Args:
+            amp: Profile amplitude of shape (height, azimuth, range_chunk) or
+                (height, ...), with the elevation axis first.
+            floor_fraction: Fraction of the lowest bins averaged into the floor.
+
+        Returns:
+            Tuple of the contrast in dB and the profile peak amplitude, both shaped like
+            ``amp`` with the elevation axis removed; contrast is NaN where the peak or
+            floor is not positive.
+        """
+        n_floor = max(1, int(round(amp.shape[0] * floor_fraction)))
+
+        peak  = amp.max(axis=0)
+        floor = np.partition(amp, n_floor - 1, axis=0)[:n_floor].mean(axis=0)
+        valid = (peak > 0.0) & (floor > 0.0)
+
+        ratio    = np.maximum(peak, 1e-12) / np.maximum(floor, 1e-12)
+        contrast = np.where(valid, 10.0 * np.log10(ratio), np.nan).astype(np.float32)
+
+        return contrast, peak.astype(np.float32)
+
+    def chunk_contrast(self, amp : np.ndarray) -> np.ndarray:
+        """Returns the contrast in dB of one amplitude chunk of shape (height, azimuth, range)."""
+        contrast, _ = self.contrast_from_amplitude(amp, self.floor_fraction)
+
+        return contrast
+
+    def run(self, tomogram : np.ndarray) -> np.ndarray:
+        """Computes the contrast map of a whole tomogram in range chunks.
+
+        Args:
+            tomogram: Complex tomogram of shape (height, azimuth, range).
+
+        Returns:
+            Peak-to-floor contrast of shape (azimuth, range), in dB.
+        """
+        H, Az, R    = tomogram.shape
+        contrast_db = np.full((Az, R), np.nan, dtype=np.float32)
+
+        for r_start in range(0, R, self.range_chunk):
+            r_end = min(r_start + self.range_chunk, R)
+            amp   = np.abs(tomogram[:, :, r_start:r_end]).astype(np.float32, copy=False)
+
+            contrast_db[:, r_start:r_end] = self.chunk_contrast(amp)
+
+            del amp
+
+        return contrast_db

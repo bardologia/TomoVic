@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from types   import SimpleNamespace
 
-import pytest
 
 from tools.reporting.reporting import MetricSectionGrouper, ReportAssets
 
@@ -235,33 +234,3 @@ def test_grouper_section_order_follows_definition():
 
     assert idx("Dataset Statistics") < idx("SSIM")
     assert idx("SSIM") < idx("Matched Gaussian")
-
-
-@pytest.mark.real_data
-def test_report_assembly_with_real_metadata(param_extraction_meta, baselines_json, tmp_path):
-    """Verifies a full report assembled from real metadata carries its header and image link."""
-    assets = ReportAssets(base=tmp_path, timestamp="2026-01-01 00:00:00")
-
-    fig = tmp_path / "figs" / "overview.png"
-    fig.parent.mkdir(parents=True, exist_ok=True)
-    fig.write_bytes(b"\x89PNG\r\n")
-
-    lines  = assets.header("Parameter Extraction Report")
-    lines += [""]
-    lines += assets.image("Overview", fig)
-
-    records = [SimpleNamespace(metrics={k: v for k, v in baselines_json.items() if isinstance(v, (int, float))})]
-    keys    = MetricSectionGrouper.scalar_keys(records)
-    for title, section_keys in MetricSectionGrouper().group(keys):
-        lines += [f"## {title}", ""]
-        lines += [f"- {k}" for k in section_keys]
-
-    report = "\n".join(lines) + "\n"
-    out    = tmp_path / "report.md"
-    out.write_text(report, encoding="utf-8")
-
-    assert out.exists()
-    assert out.stat().st_size > 0
-    content = out.read_text(encoding="utf-8")
-    assert content.startswith("# Parameter Extraction Report")
-    assert "![Overview](figs/overview.png)" in content

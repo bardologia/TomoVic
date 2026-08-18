@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 
 import pytest
 
@@ -336,20 +335,6 @@ def test_doc_save_roundtrip_equals_render(tmp_path):
     doc.kv_table({"k": "v"})
     out = doc.save(tmp_path / "r.md")
     assert out.read_text(encoding="utf-8") == doc.render()
-
-
-@pytest.mark.real_data
-def test_kv_table_with_real_extraction_meta(param_extraction_meta):
-    """Verifies a key-value table built from real extraction metadata renders every scalar key."""
-    scalars = {k: v for k, v in param_extraction_meta.items() if isinstance(v, (str, int, float))}
-    doc     = MarkdownDoc("Extraction")
-    doc.kv_table(scalars)
-    text = doc.render()
-
-    for key in list(scalars)[:5]:
-        assert f"`{key}`" in text
-
-
 @pytest.mark.real_data
 def test_table_render_real_baselines(baselines_json):
     """Verifies a two-column table of real baseline entries renders with consistent separators."""

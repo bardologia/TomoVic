@@ -12,21 +12,17 @@ import math
 import numpy as np
 import pytest
 
-from configuration.sar.gaussian_config import GaussianConfig
-from tools.sar.geometry_field          import GeometryField
-from tools.sar.track_parameters        import TrackParameters
+from tools.sar.geometry_field   import GeometryField
+from tools.sar.track_parameters import TrackParameters
 
 
 @pytest.mark.real_data
-def test_elevation_axis_spans_config_height_range_at_tomogram_resolution(test_data_dir, params_dir, config_state_json, tomogram_full):
-    """Verifies the Gaussian elevation axis spans the configured height range in metres at the tomogram's elevation sampling."""
-    gaussian       = GaussianConfig.from_dataset(test_data_dir, params_dir / "parameters.npy")
+def test_elevation_axis_spans_config_height_range_at_tomogram_resolution(config_state_json, tomogram_full):
+    """Verifies the elevation axis spans the configured height range in metres at the tomogram's elevation sampling."""
     height_range   = config_state_json["tomogram_config"]["height_range"]
     profile_length = int(tomogram_full.shape[0])
 
-    assert [gaussian.x_min, gaussian.x_max] == list(height_range)
-
-    x_axis = np.linspace(gaussian.x_min, gaussian.x_max, profile_length)
+    x_axis = np.linspace(float(height_range[0]), float(height_range[1]), profile_length)
 
     assert float(x_axis[0])  == pytest.approx(height_range[0])
     assert float(x_axis[-1]) == pytest.approx(height_range[1])

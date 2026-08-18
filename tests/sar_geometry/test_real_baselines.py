@@ -10,11 +10,8 @@ import math
 
 import numpy as np
 import pytest
-import torch
 
-from configuration.sar.geometry_config import GeometryConfig
 from tools.baselines.containers        import TrackBaselines, TrackProfiles
-from tools.sar.tomo_geometry           import TomoGeometry
 
 
 @pytest.mark.real_data
@@ -112,37 +109,6 @@ def test_real_subset_preset_secondaries(baselines_json):
     assert subset.labels == ["FL01_PS02", "FL01_PS04", "FL01_PS06", "FL01_PS08"]
     assert subset.n_tracks == 4
     assert subset.vertical[0] == 0.0
-
-
-@pytest.mark.real_data
-def test_real_kz_from_perpendicular_baselines_sign(baselines_json):
-    """Verifies TomoGeometry scales the measured perpendicular baselines into kz in rad/m."""
-    table = TrackBaselines.from_payload(baselines_json)
-    perp  = table.baselines("perpendicular", look_angle_deg=45.0)
-
-    cfg   = GeometryConfig(wavelength=0.23, slant_range=5000.0, look_angle_deg=45.0, baselines=tuple(perp))
-    geom  = TomoGeometry(cfg, torch.linspace(-20.0, 80.0, 150))
-
-    scale = 4.0 * math.pi / (0.23 * 5000.0 * math.sin(math.radians(45.0)))
-
-    assert geom.n_tracks == 29
-    assert float(geom.kz[0]) == 0.0
-    assert geom.kz.tolist() == pytest.approx([scale * b for b in perp], rel=1e-6)
-
-
-@pytest.mark.real_data
-def test_geometry_config_resolved_loads_real_baselines(baselines_json, meta_dir):
-    """Verifies GeometryConfig.resolved pulls the perpendicular baselines from the dataset."""
-    cfg      = GeometryConfig(baselines_source="dataset", baseline_component="perpendicular", look_angle_deg=45.0)
-    dataset  = meta_dir.parent
-    resolved = cfg.resolved(dataset)
-
-    table = TrackBaselines.from_payload(baselines_json)
-    perp  = table.baselines("perpendicular", look_angle_deg=45.0)
-
-    assert len(resolved.baselines) == 29
-    assert resolved.baselines == pytest.approx(perp)
-    assert resolved.baselines_origin.endswith("baselines.json")
 
 
 @pytest.mark.real_data

@@ -380,27 +380,6 @@ def test_imshow_real_dem_window(plotter, dem_full, small_window, tmp_path):
 
 
 @pytest.mark.real_data
-@pytest.mark.slow
-def test_imshow_real_parameter_window_with_clim(plotter, parameters, small_window, tmp_path):
-    """Verifies a real parameter window renders and saves under percentile colour limits."""
-    window = np.asarray(parameters[0][small_window], dtype=np.float32)
-    lo, hi = plotter._shared_clim(window, q_low=2.0, q_high=98.0)
-
-    out = plotter._imshow_figure(
-        window,
-        x_label = "range",
-        y_label = "azimuth",
-        title   = "param 0",
-        cmap    = "viridis",
-        vmin    = lo,
-        vmax    = hi,
-        path    = tmp_path / "param.png",
-    )
-    assert out.exists()
-    assert out.stat().st_size > 0
-
-
-@pytest.mark.real_data
 def test_shared_clim_real_tomogram_intensity(tomogram_full, small_window):
     """Verifies percentile colour limits on a real tomogram layer are finite and ordered."""
     layer = np.abs(np.asarray(tomogram_full[0][small_window]))

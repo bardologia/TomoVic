@@ -13,8 +13,6 @@ _EXPORTS = {
     "ConfigCli"          : "config_cli",
     "CondaEnv"           : "conda_env",
     "CondaJobDispatcher" : "conda_env",
-    "Reproducibility"    : "reproducibility",
-    "WorkerInitializer"  : "reproducibility",
 }
 
 __all__ = [
@@ -23,8 +21,6 @@ __all__ = [
     "ConfigCli",
     "CondaEnv",
     "CondaJobDispatcher",
-    "Reproducibility",
-    "WorkerInitializer",
 ]
 
 
