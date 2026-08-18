@@ -21,26 +21,25 @@ import pytest
 
 import script_config_resolver
 
-from configuration.training.general.ablation import AblationCatalog
-from project_paths                           import ProjectPaths
-from script_config_resolver                  import ScriptConfigResolver
+from project_paths          import ProjectPaths
+from script_config_resolver import ScriptConfigResolver
 
 from tests.webui.conftest import REPO_ROOT
 
 
 @pytest.fixture(scope="module")
-def backbone_leaves():
-    """Returns the leaf descriptors the bootstrap emits for ``BackboneEntryConfig``."""
-    argv = [sys.executable, "-c", ScriptConfigResolver.BOOTSTRAP, str(REPO_ROOT), "configuration.training", "BackboneEntryConfig"]
+def preprocess_leaves():
+    """Returns the leaf descriptors the bootstrap emits for ``PreProcessEntryConfig``."""
+    argv = [sys.executable, "-c", ScriptConfigResolver.BOOTSTRAP, str(REPO_ROOT), "configuration.sar.processing_config", "PreProcessEntryConfig"]
     proc = subprocess.run(argv, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=180)
 
     assert proc.returncode == 0, proc.stderr[-2000:]
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-def test_container_leaves_render_as_python_literals(backbone_leaves):
+def test_container_leaves_render_as_python_literals(preprocess_leaves):
     """List, tuple and dict leaves serialise to values that round-trip through literal_eval."""
-    containers = [leaf for leaf in backbone_leaves if leaf["type"] in ("list", "tuple", "dict")]
+    containers = [leaf for leaf in preprocess_leaves if leaf["type"] in ("list", "tuple", "dict")]
 
     assert containers
     for leaf in containers:
@@ -48,14 +47,14 @@ def test_container_leaves_render_as_python_literals(backbone_leaves):
         ast.literal_eval(leaf["value"])
 
 
-def test_ablation_leaves_expose_the_feature_plan(backbone_leaves):
-    """The ablation feature list is exposed in catalogue order while the catalogue object itself stays hidden."""
-    by_path  = {leaf["path"]: leaf for leaf in backbone_leaves}
-    features = ast.literal_eval(by_path["ablation_features"]["value"])
+def test_the_preprocess_leaves_expose_the_window_sweep(preprocess_leaves):
+    """The window list and height range leaves carry their defaults as evaluable literals."""
+    by_path = {leaf["path"]: leaf for leaf in preprocess_leaves}
 
-    assert [feature["label"] for feature in features] == list(AblationCatalog.DEFAULT_ORDER)
-    assert by_path["ablation_include_full"]["value"] == "True"
-    assert "ablation_catalog" not in by_path
+    assert ast.literal_eval(by_path["win_list"]["value"])     == [[20, 10]]
+    assert ast.literal_eval(by_path["height_range"]["value"]) == [-20.0, 80.0]
+    assert by_path["polarisation"]["value"] == "hv"
+    assert by_path["tomogram_workers"]["type"] == "none"
 
 
 class RecordingPaths:
@@ -81,8 +80,8 @@ class RecordingPaths:
         return {
             "path"          : self.repo_root / "main" / f"{key}.py",
             "rel"           : f"main/{key}.py",
-            "config_module" : "configuration.training",
-            "config_class"  : "BackboneEntryConfig",
+            "config_module" : "configuration.sar.processing_config",
+            "config_class"  : "PreProcessEntryConfig",
         }
 
 
@@ -157,7 +156,7 @@ def test_concurrent_resolves_share_a_single_bootstrap(tmp_path, monkeypatch):
     resolver._run_bootstrap = slow_bootstrap
 
     results = {}
-    threads = [threading.Thread(target=lambda index=index: results.__setitem__(index, resolver.resolve("train_backbone", "python"))) for index in range(4)]
+    threads = [threading.Thread(target=lambda index=index: results.__setitem__(index, resolver.resolve("pre_process", "python"))) for index in range(4)]
 
     threads[0].start()
     assert started.wait(timeout=5.0)
@@ -185,12 +184,12 @@ def test_a_changed_configuration_signature_invalidates_the_cache(tmp_path):
 
     resolver._run_bootstrap = counting_bootstrap
 
-    resolver.resolve("train_backbone", "python")
-    resolver.resolve("train_backbone", "python")
+    resolver.resolve("pre_process", "python")
+    resolver.resolve("pre_process", "python")
     assert len(calls) == 1
 
     (tmp_path / "configuration" / "touched.py").write_text("x = 1\n", encoding="utf-8")
-    resolver.resolve("train_backbone", "python")
+    resolver.resolve("pre_process", "python")
 
     assert len(calls) == 2
 
@@ -214,7 +213,7 @@ def test_a_failing_bootstrap_raises_for_the_waiting_callers(tmp_path):
     def call(index):
         """Resolves the script and stores either the payload or the raised MemoryError."""
         try:
-            outcomes[index] = resolver.resolve("train_backbone", "python")
+            outcomes[index] = resolver.resolve("pre_process", "python")
         except MemoryError as exc:
             outcomes[index] = exc
 

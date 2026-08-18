@@ -12,91 +12,44 @@ from collections import Counter
 
 import pytest
 
-from request_router             import RequestRouter
-from routers.analysis_routers   import AutopsyRouter, FitLabRouter, ProbeRouter, SurveyRouter, TriageRouter
-from routers.cube_routers       import CubeRouter, SliceRouter
-from routers.dispatch           import HttpExchange, RouteConflict, RouteTable, SubRouter
-from routers.launch_routers     import CatalogRouter, JobRouter, RunConfigRouter, SavedRunRouter
-from routers.library_routers    import BackboneRouter, ContentLibraryRouter, ModelLibraryRouter
-from routers.results_routers    import CurvesRouter, DatasetRouter, LeaderboardRouter, ResultsRouter
-from routers.static_router      import StaticRouter
-from routers.system_router      import SystemRouter, TerrabyteRouter
-from routers.tensorboard_router import TensorboardRouter
+from request_router          import RequestRouter
+from routers.cube_routers    import CubeRouter, SliceRouter
+from routers.dispatch        import HttpExchange, RouteConflict, RouteTable, SubRouter
+from routers.launch_routers  import CatalogRouter, JobRouter, RunConfigRouter, SavedRunRouter
+from routers.library_routers import ContentLibraryRouter
+from routers.results_routers import DatasetRouter, ResultsRouter
+from routers.static_router   import StaticRouter
+from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 139
-SECTION_COUNT = 37
+ROUTE_COUNT   = 56
+SECTION_COUNT = 20
 
 RESOLUTIONS = [
-    ("GET",  "/",                                  StaticRouter),
-    ("GET",  "/static/js/app.js",                  StaticRouter),
-    ("GET",  "/resultsmedia",                      StaticRouter),
-    ("GET",  "/api/results/tree",                  ResultsRouter),
-    ("GET",  "/api/fs/runs",                       DatasetRouter),
-    ("GET",  "/api/leaderboard/diff",              LeaderboardRouter),
-    ("GET",  "/api/curves",                        CurvesRouter),
-    ("GET",  "/api/cubes/plane",                   CubeRouter),
-    ("POST", "/api/cubes/save_slices",             CubeRouter),
-    ("GET",  "/api/slices/slice",                  SliceRouter),
-    ("POST", "/api/slices/collect",                SliceRouter),
-    ("GET",  "/api/fitlab/map",                    FitLabRouter),
-    ("POST", "/api/probe/predict",                 ProbeRouter),
-    ("GET",  "/api/probe/runs",                    ProbeRouter),
-    ("GET",  "/api/survey/runs",                   SurveyRouter),
-    ("POST", "/api/survey/start",                  SurveyRouter),
-    ("GET",  "/api/triage/cases",                  TriageRouter),
-    ("GET",  "/api/triage/thumb",                  TriageRouter),
-    ("GET",  "/api/triage/profile",                TriageRouter),
-    ("GET",  "/api/autopsy/compare",               AutopsyRouter),
-    ("GET",  "/api/autopsy/runs",                  AutopsyRouter),
-    ("GET",  "/api/backbones",                     BackboneRouter),
-    ("GET",  "/api/backbones/unet/note",           BackboneRouter),
-    ("GET",  "/api/jepa-variants/jepa_vit/note",   ModelLibraryRouter),
-    ("GET",  "/api/configs",                       ContentLibraryRouter),
-    ("GET",  "/api/physics-loss",                  ContentLibraryRouter),
-    ("GET",  "/api/project",                       CatalogRouter),
-    ("GET",  "/api/scripts/train_backbone",        CatalogRouter),
-    ("GET",  "/api/scripts/train_backbone/config", CatalogRouter),
-    ("POST", "/api/run",                           JobRouter),
-    ("GET",  "/api/jobs/job-1/stream",             JobRouter),
-    ("GET",  "/api/jobs/job-1/log",                JobRouter),
-    ("POST", "/api/saved-runs/abc/delete",         SavedRunRouter),
-    ("GET",  "/api/saved-runs",                    SavedRunRouter),
-    ("GET",  "/api/run-config",                    RunConfigRouter),
-    ("GET",  "/api/run-config/runs",               RunConfigRouter),
-    ("GET",  "/api/system",                        SystemRouter),
-    ("POST", "/api/gpu-schedule",                  SystemRouter),
-    ("GET",  "/api/gpu-guard/history",             SystemRouter),
-    ("GET",  "/api/terrabyte",                     TerrabyteRouter),
-    ("GET",  "/api/terrabyte/log",                 TerrabyteRouter),
-    ("GET",  "/api/terrabyte/quota",               TerrabyteRouter),
-    ("GET",  "/api/terrabyte/launch-info",         TerrabyteRouter),
-    ("GET",  "/api/terrabyte/runs",                TerrabyteRouter),
-    ("GET",  "/api/terrabyte/pulls",               TerrabyteRouter),
-    ("POST", "/api/terrabyte/launch",              TerrabyteRouter),
-    ("POST", "/api/terrabyte/cancel",              TerrabyteRouter),
-    ("POST", "/api/terrabyte/cancel-all",          TerrabyteRouter),
-    ("POST", "/api/terrabyte/pull",                TerrabyteRouter),
-    ("POST", "/api/tensorboard/tb-1/stop",         TensorboardRouter),
-]
-
-TERRABYTE_HANDLERS = [
-    ("GET",  "/api/terrabyte",              "snapshot"),
-    ("GET",  "/api/terrabyte/log",          "log"),
-    ("GET",  "/api/terrabyte/quota",        "quota"),
-    ("GET",  "/api/terrabyte/launch-info",  "launch_info"),
-    ("GET",  "/api/terrabyte/runs",         "runs"),
-    ("GET",  "/api/terrabyte/pulls",        "pulls"),
-    ("POST", "/api/terrabyte/launch",       "launch"),
-    ("POST", "/api/terrabyte/cancel",       "cancel"),
-    ("POST", "/api/terrabyte/cancel-all",   "cancel_all"),
-    ("POST", "/api/terrabyte/pull",         "pull"),
-    ("POST", "/api/terrabyte/pull-missing", "pull_missing"),
-    ("POST", "/api/terrabyte/delete-runs",  "delete_runs"),
-    ("POST", "/api/terrabyte/clean-home",   "clean_home"),
-    ("POST", "/api/terrabyte/verify-pulls", "verify_pulls"),
-    ("POST", "/api/terrabyte/auto-pull",    "auto_pull"),
+    ("GET",  "/",                                StaticRouter),
+    ("GET",  "/static/js/app.js",                StaticRouter),
+    ("GET",  "/resultsmedia",                    StaticRouter),
+    ("GET",  "/api/results/tree",                ResultsRouter),
+    ("GET",  "/api/fs/runs",                     DatasetRouter),
+    ("GET",  "/api/cubes/plane",                 CubeRouter),
+    ("POST", "/api/cubes/save_slices",           CubeRouter),
+    ("GET",  "/api/slices/slice",                SliceRouter),
+    ("POST", "/api/slices/collect",              SliceRouter),
+    ("GET",  "/api/equations",                   ContentLibraryRouter),
+    ("GET",  "/api/configs",                     ContentLibraryRouter),
+    ("GET",  "/api/project",                     CatalogRouter),
+    ("GET",  "/api/scripts/pre_process",         CatalogRouter),
+    ("GET",  "/api/scripts/pre_process/config",  CatalogRouter),
+    ("POST", "/api/run",                         JobRouter),
+    ("GET",  "/api/jobs/job-1/stream",           JobRouter),
+    ("GET",  "/api/jobs/job-1/log",              JobRouter),
+    ("POST", "/api/saved-runs/abc/delete",       SavedRunRouter),
+    ("GET",  "/api/saved-runs",                  SavedRunRouter),
+    ("GET",  "/api/run-config",                  RunConfigRouter),
+    ("GET",  "/api/run-config/runs",             RunConfigRouter),
+    ("GET",  "/api/system",                      SystemRouter),
+    ("POST", "/api/system/detach",               SystemRouter),
 ]
 
 
@@ -183,32 +136,18 @@ def build_routers() -> list:
         StaticRouter(None, None),
         ResultsRouter(None),
         DatasetRouter(None),
-        LeaderboardRouter(None),
-        CurvesRouter(None),
         CubeRouter(None),
         SliceRouter(None),
-        FitLabRouter(None),
-        ProbeRouter(None),
-        SurveyRouter(None),
-        TriageRouter(None),
-        AutopsyRouter(None),
-        ContentLibraryRouter("/api/equations",    None, "groups"),
-        ContentLibraryRouter("/api/physics-loss", None),
-        ContentLibraryRouter("/api/flows",        None, "flows"),
-        ContentLibraryRouter("/api/pipelines",    None, "pipelines"),
-        ContentLibraryRouter("/api/repomap",      None, "folders"),
-        ContentLibraryRouter("/api/configs",      None, "groups"),
-        BackboneRouter("/api/backbones", None),
-        ModelLibraryRouter("/api/profile-autoencoders", None),
-        ModelLibraryRouter("/api/image-autoencoders",   None),
-        ModelLibraryRouter("/api/jepa-variants",        None),
-        CatalogRouter(None, None, None, None, None, None),
-        JobRouter(None, None, None, None),
+        ContentLibraryRouter("/api/equations", None, "groups"),
+        ContentLibraryRouter("/api/flows",     None, "flows"),
+        ContentLibraryRouter("/api/pipelines", None, "pipelines"),
+        ContentLibraryRouter("/api/repomap",   None, "folders"),
+        ContentLibraryRouter("/api/configs",   None, "groups"),
+        CatalogRouter(None, None, None, None, None),
+        JobRouter(None, None, None),
         SavedRunRouter(None, None, None),
         RunConfigRouter(None),
-        SystemRouter(None, None, None, None, None, None, None, None, None),
-        TerrabyteRouter(None, None, None, None),
-        TensorboardRouter(None, None),
+        SystemRouter(None, None, None, None, None),
     ]
 
 
@@ -302,7 +241,7 @@ def test_router_rejects_two_owners_of_a_section():
 
 
 def test_route_inventory_is_stable():
-    """The declared route count, section count and raw section count match the recorded inventory."""
+    """The declared route count and section count match the recorded inventory, with no raw sections."""
     routers = build_routers()
     router  = RequestRouter(None, routers)
 
@@ -311,7 +250,7 @@ def test_route_inventory_is_stable():
 
     assert declared == ROUTE_COUNT
     assert len(router.sections) == SECTION_COUNT
-    assert raw == 1
+    assert raw == 0
 
 
 def test_build_routers_mirrors_the_served_router_list():
@@ -333,45 +272,6 @@ def test_every_frontend_path_resolves_to_one_sub_router(method, path, owner):
     assert len(owners) == 1, path
     assert type(owners[0]) is owner
     assert router.sections[RequestRouter._section_of(path)] is owners[0]
-
-
-@pytest.mark.parametrize("method,path,name", TERRABYTE_HANDLERS)
-def test_terrabyte_paths_bind_their_own_handlers(method, path, name):
-    """Each Terrabyte path binds its own handler method with no wildcard key."""
-    terrabyte   = TerrabyteRouter(None, None, None, None)
-    action, key = terrabyte.table.action_for(method, path)
-
-    assert key is None
-    assert action is not None
-    assert action.__func__ is getattr(TerrabyteRouter, name)
-
-
-def test_terrabyte_pull_and_pulls_do_not_shadow_each_other():
-    """The pull and pulls routes bind distinct handlers and reject each other's verb."""
-    terrabyte = TerrabyteRouter(None, None, None, None)
-
-    pull,  _ = terrabyte.table.action_for("POST", "/api/terrabyte/pull")
-    pulls, _ = terrabyte.table.action_for("GET",  "/api/terrabyte/pulls")
-
-    assert pull.__func__  is TerrabyteRouter.pull
-    assert pulls.__func__ is TerrabyteRouter.pulls
-    assert pull != pulls
-
-    assert terrabyte.table.action_for("GET",  "/api/terrabyte/pull")  == (None, None)
-    assert terrabyte.table.action_for("POST", "/api/terrabyte/pulls") == (None, None)
-
-
-def test_terrabyte_root_is_not_shadowed_by_its_prefixes():
-    """/api/terrabyte resolves to the snapshot handler and owns the section despite longer prefixes."""
-    terrabyte = TerrabyteRouter(None, None, None, None)
-    router    = RequestRouter(None, build_routers())
-
-    snapshot, key = terrabyte.table.action_for("GET", "/api/terrabyte")
-
-    assert key is None
-    assert snapshot.__func__ is TerrabyteRouter.snapshot
-    assert RequestRouter._section_of("/api/terrabyte") == "/api/terrabyte"
-    assert type(router.sections["/api/terrabyte"]) is TerrabyteRouter
 
 
 def test_an_unknown_path_falls_back_to_404():
@@ -445,7 +345,7 @@ def test_a_malformed_post_body_is_refused_and_logged():
     logger = RecordingLogger()
     router = RequestRouter(logger, [echo])
 
-    handler = FakeHandler("POST", "/api/echo", b'{"script_key": "train_ba')
+    handler = FakeHandler("POST", "/api/echo", b'{"script_key": "pre_proc')
     router.route(handler)
 
     assert handler.status == 400
@@ -460,11 +360,11 @@ def test_a_well_formed_post_body_reaches_the_handler():
     echo   = EchoRouter(("/api/echo",))
     router = RequestRouter(RecordingLogger(), [echo])
 
-    handler = FakeHandler("POST", "/api/echo", b'{"script_key": "train_backbone"}')
+    handler = FakeHandler("POST", "/api/echo", b'{"script_key": "pre_process"}')
     router.route(handler)
 
     assert handler.status == 200
-    assert echo.bodies == [{"script_key": "train_backbone"}]
+    assert echo.bodies == [{"script_key": "pre_process"}]
 
 
 def test_an_unhandled_handler_error_answers_500_and_logs_the_traceback():
