@@ -28,8 +28,6 @@
     <div class="nav__group" data-group="reference">
       <button type="button" class="nav__grouphead"><i class="nav__chev" aria-hidden="true"></i>Reference</button>
       <div class="nav__sub">
-        <a href="#/model" data-route="model">Model</a>
-        <a href="#/pipelines" data-route="pipelines">Pipelines</a>
         <a href="#/repomap" data-route="repomap">Repo Map</a>
       </div>
     </div>
@@ -85,39 +83,6 @@
     </div>
   </section>
 
-  <!-- MODEL -->
-  <section class="page page--pad" data-page="model">
-    <div class="page__head">
-      <h2 class="page__title">The mathematics, end to end</h2>
-      <p class="page__lead">
-        Every equation from every pipeline stage, signal model to hyperparameter search,
-        exactly as implemented in the codebase.
-      </p>
-      <div class="model-mode" id="model-mode">
-        <button class="model-mode__btn" data-mode="reference">Reference grid</button>
-        <button class="model-mode__btn is-active" data-mode="walkthrough">Animated walkthrough</button>
-      </div>
-    </div>
-    <div class="model-view is-hidden" data-view="reference">
-      <div class="eq-tabs" id="eq-tabs"></div>
-      <div class="eq-grid" id="eq-grid"></div>
-    </div>
-    <div class="model-view" data-view="walkthrough">
-      <div class="flowx" id="flowx"></div>
-    </div>
-  </section>
-
-  <!-- PIPELINES -->
-  <section class="page page--pad" data-page="pipelines">
-    <div class="page__head">
-      <h2 class="page__title">Pipelines</h2>
-      <p class="page__lead">
-        Orchestrated stages take raw radar acquisitions to analysis-ready tomogram datasets.
-        Each pipeline maps to an entry point you can launch.
-      </p>
-    </div>
-    <div class="flow" id="flow"></div>
-  </section>
 
   <!-- SCRIPTS -->
   <section class="page page--pad" data-page="scripts">
@@ -269,6 +234,15 @@
         <aside class="cube-map" id="cube-map">
           <div class="cube-map__head">
             <h3 class="cube-panel-title">Primary SLC amplitude</h3>
+            <div class="cube-mctl" role="group" aria-label="Hover magnifier">
+              <label for="cube-lens-zoom" title="Magnify the pixels under the cursor at native resolution">lens</label>
+              <select id="cube-lens-zoom" class="cube-mselect">
+                <option value="0">off</option>
+                <option value="2">2&times;</option>
+                <option value="3" selected>3&times;</option>
+                <option value="4">4&times;</option>
+              </select>
+            </div>
           </div>
           <div class="cube-map__frame">
             <span class="cube-axis cube-axis--y">azimuth &rarr;</span>
@@ -283,7 +257,7 @@
 
         <div class="cube-slices" id="cube-slices" hidden>
           <div class="cube-slices__bar">
-            <button type="button" class="btn btn--mini" id="cube-back" hidden>&larr; Back to primary</button>
+            <button type="button" class="btn btn--mini" id="cube-back" hidden>&larr; Unlock</button>
             <span class="cube-slices__at" id="cube-slices-at"></span>
             <div class="cube-jump" role="group" aria-label="Set a cut by azimuth and range">
               <span class="cube-jump__cell">
@@ -299,7 +273,6 @@
               <button type="button" class="btn btn--mini" id="cube-jump-go">Cut</button>
               <button type="button" class="btn btn--mini" id="cube-jump-print" title="Save these cuts as paper-style figures under the run directory">Print</button>
             </div>
-            <div class="cube-sources" id="cube-sources" role="group" aria-label="Visible sources"></div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
@@ -311,10 +284,7 @@
               <span class="cube-cutgroup__at" data-axis="range"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="range" data-source="pred"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="range" data-source="gt"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="range" data-source="reduced"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="range" data-source="full"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
+              <figure class="cube-slice" data-axis="range" data-source="full"><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
           <section class="cube-cutgroup" data-axis="azimuth">
@@ -323,17 +293,14 @@
               <span class="cube-cutgroup__at" data-axis="azimuth"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="azimuth" data-source="pred"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="gt"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="reduced"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="full"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
+              <figure class="cube-slice" data-axis="azimuth" data-source="full"><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
         </div>
 
         <aside class="cube-profiles" id="cube-profiles">
           <div class="cube-profiles__head">
-            <h3 class="cube-panel-title">Vertical profiles</h3>
+            <h3 class="cube-panel-title">Vertical profile</h3>
             <div class="cube-spaces" id="cube-prof-mode" role="group" aria-label="Profile scaling">
               <button type="button" class="cube-space is-active" data-mode="raw">Raw</button>
               <button type="button" class="cube-space" data-mode="unit">Unit area</button>
@@ -341,20 +308,8 @@
           </div>
           <p class="cube-coords" id="cube-prof-at">Hover a slice to read the profiles at that position.</p>
           <div class="cube-profiles__grid">
-            <figure class="cube-prof" data-source="pred"><header class="cube-slice__head"><i class="cube-dot" data-source="pred"></i><span class="cube-slice__src">pred</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
-            <figure class="cube-prof" data-source="gt"><header class="cube-slice__head"><i class="cube-dot" data-source="gt"></i><span class="cube-slice__src">gt</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
-            <figure class="cube-prof" data-source="reduced"><header class="cube-slice__head"><i class="cube-dot" data-source="reduced"></i><span class="cube-slice__src">capon reduced</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
-            <figure class="cube-prof" data-source="full"><header class="cube-slice__head"><i class="cube-dot" data-source="full"></i><span class="cube-slice__src">capon full</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
+            <figure class="cube-prof" data-source="full"><div class="cube-prof__media"><canvas></canvas></div></figure>
           </div>
-          <table class="cube-metrics" id="cube-prof-metrics">
-            <thead>
-              <tr><th scope="col">vs ground truth</th><th scope="col">MAE</th><th scope="col">MSE</th><th scope="col">R&sup2;</th></tr>
-            </thead>
-            <tbody>
-              <tr data-source="pred"><th scope="row"><i class="cube-dot" data-source="pred"></i>pred</th><td data-k="mae">&ndash;</td><td data-k="mse">&ndash;</td><td data-k="r2">&ndash;</td></tr>
-              <tr data-source="reduced"><th scope="row"><i class="cube-dot" data-source="reduced"></i>capon reduced</th><td data-k="mae">&ndash;</td><td data-k="mse">&ndash;</td><td data-k="r2">&ndash;</td></tr>
-            </tbody>
-          </table>
         </aside>
       </div>
       </div>
@@ -364,6 +319,15 @@
           <div class="cube-elev__bar">
             <div class="cube-sweep__controls">
               <button type="button" class="cube-sweep__play" id="cube-elevation-play">Play</button>
+              <div class="cube-mctl" role="group" aria-label="Sweep speed">
+                <label for="cube-elevation-speed">speed</label>
+                <select id="cube-elevation-speed" class="cube-mselect">
+                  <option value="0.5">0.5&times;</option>
+                  <option value="1" selected>1&times;</option>
+                  <option value="2">2&times;</option>
+                  <option value="4">4&times;</option>
+                </select>
+              </div>
               <div class="cube-jump" role="group" aria-label="Set an elevation bin">
                 <span class="cube-jump__cell">
                   <label for="cube-elevation-input">bin</label>
@@ -380,10 +344,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-elevation-fill"></i></div>
           <div class="cube-elev__grid" id="cube-elevation-grid">
-            <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
-            <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
+            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -393,6 +354,15 @@
           <div class="cube-elev__bar">
             <div class="cube-sweep__controls">
               <button type="button" class="cube-sweep__play" id="cube-azimuth-play">Play</button>
+              <div class="cube-mctl" role="group" aria-label="Sweep speed">
+                <label for="cube-azimuth-speed">speed</label>
+                <select id="cube-azimuth-speed" class="cube-mselect">
+                  <option value="0.5">0.5&times;</option>
+                  <option value="1" selected>1&times;</option>
+                  <option value="2">2&times;</option>
+                  <option value="4">4&times;</option>
+                </select>
+              </div>
               <div class="cube-jump" role="group" aria-label="Set an azimuth bin">
                 <span class="cube-jump__cell">
                   <label for="cube-azimuth-input">bin</label>
@@ -409,10 +379,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-azimuth-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-azimuth-grid">
-            <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
-            <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
+            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -421,18 +388,12 @@
       <div class="cube-view" data-view="cloud" hidden>
         <div class="cube-pview">
           <div class="cube-pview__bar">
-            <div class="cube-spaces" id="cube-cloud-source" role="group" aria-label="Point cloud source">
-              <button type="button" class="cube-space is-active" data-source="pred">pred</button>
-              <button type="button" class="cube-space" data-source="gt">gt</button>
-              <button type="button" class="cube-space" data-source="reduced" title="Capon reduced tomogram (metric elevation axis)">capon</button>
-              <button type="button" class="cube-space" data-source="full" title="Capon full raw tomogram (bin elevation axis)">full</button>
-            </div>
             <div class="cube-spaces" id="cube-cloud-color" role="group" aria-label="Colour by">
               <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
               <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
             </div>
-            <div class="cube-mctl" role="group" aria-label="Amplitude threshold">
-              <label for="cube-cloud-thr" id="cube-cloud-thr-label">amp &ge;</label>
+            <div class="cube-mctl" role="group" aria-label="Intensity threshold">
+              <label for="cube-cloud-thr" id="cube-cloud-thr-label">int &ge;</label>
               <input type="range" id="cube-cloud-thr" min="0" max="100" value="0" />
               <span class="cube-mctl__val" id="cube-cloud-thr-val"></span>
             </div>
@@ -457,17 +418,12 @@
       <div class="cube-view" data-view="globe" hidden>
         <div class="cube-pview">
           <div class="cube-pview__bar">
-            <div class="cube-spaces" id="cube-globe-source" role="group" aria-label="Globe point source">
-              <button type="button" class="cube-space is-active" data-source="pred">pred</button>
-              <button type="button" class="cube-space" data-source="gt">gt</button>
-              <button type="button" class="cube-space" data-source="reduced" title="Capon reduced tomogram (metric elevation axis)">capon</button>
-            </div>
             <div class="cube-spaces" id="cube-globe-color" role="group" aria-label="Colour by">
               <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
               <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
             </div>
-            <div class="cube-mctl" role="group" aria-label="Amplitude threshold">
-              <label for="cube-globe-thr" id="cube-globe-thr-label">amp &ge;</label>
+            <div class="cube-mctl" role="group" aria-label="Intensity threshold">
+              <label for="cube-globe-thr" id="cube-globe-thr-label">int &ge;</label>
               <input type="range" id="cube-globe-thr" min="0" max="100" value="0" />
               <span class="cube-mctl__val" id="cube-globe-thr-val"></span>
             </div>
@@ -520,10 +476,7 @@
               </div>
             </figure>
             <div class="cube-elev__grid cube-elev__grid--transect" id="cube-transect-grid">
-              <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-              <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
-              <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
-              <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
+              <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
             </div>
           </div>
         </div>
@@ -535,6 +488,15 @@
           <div class="cube-elev__bar">
             <div class="cube-sweep__controls">
               <button type="button" class="cube-sweep__play" id="cube-range-play">Play</button>
+              <div class="cube-mctl" role="group" aria-label="Sweep speed">
+                <label for="cube-range-speed">speed</label>
+                <select id="cube-range-speed" class="cube-mselect">
+                  <option value="0.5">0.5&times;</option>
+                  <option value="1" selected>1&times;</option>
+                  <option value="2">2&times;</option>
+                  <option value="4">4&times;</option>
+                </select>
+              </div>
               <div class="cube-jump" role="group" aria-label="Set a range bin">
                 <span class="cube-jump__cell">
                   <label for="cube-range-input">bin</label>
@@ -551,10 +513,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-range-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-range-grid">
-            <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
-            <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
+            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -566,7 +525,7 @@
     <div class="page__head">
       <h2 class="page__title">Slice collector</h2>
       <p class="page__lead">
-        Pick any number of saved inference cubes, set one cut position, and read the same
+        Pick any number of preprocessing runs, set one cut position, and read the same
         slice from every run side by side. Collect renders the paper-style figures for all
         selected runs and queued points into a single comparison folder, so nobody has to
         load each run and print its slices one at a time.
@@ -598,12 +557,6 @@
           <div class="cube-spaces" id="sc-axes" role="group" aria-label="Cut axes">
             <button type="button" class="cube-space is-active" data-axis="range">Range cut</button>
             <button type="button" class="cube-space" data-axis="azimuth">Azimuth cut</button>
-          </div>
-          <div class="cube-sources" id="sc-sources" role="group" aria-label="Sources">
-            <button type="button" class="cube-source is-active" data-source="pred"><i class="cube-dot" data-source="pred"></i>pred</button>
-            <button type="button" class="cube-source" data-source="gt"><i class="cube-dot" data-source="gt"></i>gt</button>
-            <button type="button" class="cube-source" data-source="reduced"><i class="cube-dot" data-source="reduced"></i>capon reduced</button>
-            <button type="button" class="cube-source" data-source="full"><i class="cube-dot" data-source="full"></i>capon full</button>
           </div>
           <div class="cube-spaces" id="sc-space" role="group" aria-label="Value space">
             <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
@@ -708,7 +661,6 @@
 <script src="/static/js/results_sources.js"></script>
 <script src="/static/js/shared_charts.js"></script>
 <script src="/static/js/canvas_base.js"></script>
-<script src="/static/js/mathjax.js"></script>
 <script src="/static/js/tomo_anim.js"></script>
 <script src="/static/js/gauges.js"></script>
 <script src="/static/js/server_anim.js"></script>
@@ -716,10 +668,6 @@
 <script src="/static/js/process_anim.js"></script>
 <script src="/static/js/diagram.js"></script>
 <script src="/static/js/router.js"></script>
-<script src="/static/js/equations.js"></script>
-<script src="/static/js/flow_sketches.js"></script>
-<script src="/static/js/flow_view.js"></script>
-<script src="/static/js/pipelines.js"></script>
 <script src="/static/js/repomap.js"></script>
 <script src="/static/js/configs.js"></script>
 <script src="/static/js/scripts.js"></script>

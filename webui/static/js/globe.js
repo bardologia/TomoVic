@@ -7,10 +7,8 @@ class TomogramGlobe {
 
   constructor(refs, host) {
     this.host = host;
-    this.sourceEl = refs.source;
     this.colorEl = refs.color;
     this.thrEl = refs.thr;
-    this.thrLabel = refs.thrLabel;
     this.thrValEl = refs.thrVal;
     this.maxEl = refs.max;
     this.exaggEl = refs.exagg;
@@ -22,7 +20,7 @@ class TomogramGlobe {
     this.atEl = refs.at;
     this.container = refs.container;
 
-    this.source = "pred";
+    this.source = "full";
     this.colorBy = "mu";
     this.available = false;
     this.points = null;
@@ -37,9 +35,6 @@ class TomogramGlobe {
     this.debounceTimer = null;
     this.token = 0;
 
-    this.sourceEl.querySelectorAll(".cube-space").forEach((btn) => {
-      btn.addEventListener("click", () => this._setSource(btn.dataset.source));
-    });
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
     });
@@ -55,9 +50,7 @@ class TomogramGlobe {
   }
 
   configure(meta) {
-    const sources = this._sources(meta);
-    this.available = !!meta.globe && sources.length > 0;
-    if (!sources.includes(this.source)) this.source = sources[0] || "pred";
+    this.available = !!meta.globe && meta.sources.includes("full");
 
     const hasTracks = !!(meta.globe && meta.globe.tracks);
     this.tracksEl.disabled = !hasTracks;
@@ -75,16 +68,6 @@ class TomogramGlobe {
     this._syncThresholdLabel();
   }
 
-  _sources(meta = this.host.meta) {
-    const out = meta.params ? meta.params.sources.slice() : [];
-    if (meta.sources.includes("reduced")) out.push("reduced");
-    return out;
-  }
-
-  _isParam() {
-    return this.source === "pred" || this.source === "gt";
-  }
-
   _ampMin() {
     return TomogramCloud.ampFloor(this.host.meta, this.source, Number(this.thrEl.value) / 100);
   }
@@ -96,33 +79,14 @@ class TomogramGlobe {
   }
 
   _syncThresholdLabel() {
-    const meta = this.host.meta;
-    if (!meta || (this._isParam() && !meta.params)) return;
-    this.thrLabel.textContent = this._isParam() ? "amp ≥" : "int ≥";
+    if (!this.host.meta) return;
     this.thrValEl.textContent = this.host._fmt(this._ampMin());
   }
 
   _syncBtns() {
-    const sources = this._sources();
-    this.sourceEl.querySelectorAll(".cube-space").forEach((btn) => {
-      btn.classList.toggle("is-active", btn.dataset.source === this.source);
-      btn.disabled = !sources.includes(btn.dataset.source);
-    });
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.classList.toggle("is-active", btn.dataset.color === this.colorBy);
     });
-  }
-
-  _setSource(source) {
-    if (source === this.source) return;
-    if (!this._sources().includes(source)) {
-      Toast.show(TomogramCloud.MISSING[source] || "This source is not available.", "warn");
-      return;
-    }
-    this.source = source;
-    this._syncBtns();
-    this._syncThresholdLabel();
-    this._fetch();
   }
 
   _setColor(colorBy) {
@@ -302,14 +266,7 @@ class TomogramGlobe {
     const [muLo, muHi] = this.muRange || [meta.x_min, meta.x_max];
     const muSpan = (muHi - muLo) || 1;
 
-    const logAmp = this._isParam();
-    let ampLo, ampHi;
-    if (logAmp) {
-      ampLo = Math.log(Math.max(meta.params.threshold, 1e-6));
-      ampHi = Math.log(Math.max(meta.params.ranges.amp[1], meta.params.threshold * 10));
-    } else {
-      [ampLo, ampHi] = meta.intensity[this.source];
-    }
+    const [ampLo, ampHi] = meta.intensity[this.source];
 
     this.collection.removeAll();
 
@@ -317,7 +274,7 @@ class TomogramGlobe {
       const mu = rows[i + 3];
       const amp = rows[i + 4];
       const t = this.colorBy === "amp"
-        ? ((logAmp ? Math.log(Math.max(amp, 1e-6)) : amp) - ampLo) / Math.max(ampHi - ampLo, 1e-6)
+        ? (amp - ampLo) / Math.max(ampHi - ampLo, 1e-6)
         : (mu - muLo) / muSpan;
       const rgb = TomogramCloud.palette(t);
 
@@ -358,7 +315,7 @@ class TomogramGlobe {
       trackNote = ` · ${globe.tracks.labels.length} tracks · look ${beam.look_near_deg.toFixed(1)}-${beam.look_far_deg.toFixed(1)}°`;
     }
 
-    this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} scatterers${exaggNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
+    this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
   }
 
   _redrawTracks() {

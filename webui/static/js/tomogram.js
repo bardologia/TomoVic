@@ -1,6 +1,8 @@
 "use strict";
 
 class TomogramSweep {
+  static BASE_FRAME_MS = 70;
+
   constructor(refs, host) {
     this.host = host;
     this.axis = refs.axis;
@@ -10,17 +12,25 @@ class TomogramSweep {
     this.input = refs.input;
     this.rangeLabel = refs.range;
     this.playBtn = refs.play;
+    this.speedEl = document.getElementById(`cube-${this.axis}-speed`);
     this.panels = refs.panels || [];
 
     this.idx = 0;
     this.steps = 1;
     this.playing = false;
     this.token = 0;
-    this.frameMs = 70;
 
     if (this.grid)    this.grid.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
     if (this.input)   this.input.addEventListener("change", () => this._onManual());
     if (this.playBtn) this.playBtn.addEventListener("click", () => this.toggle());
+    if (this.speedEl) {
+      this.speedEl.value = String(host.sweepSpeed);
+      this.speedEl.addEventListener("change", () => this.host._setSweepSpeed(Number(this.speedEl.value)));
+    }
+  }
+
+  syncSpeed() {
+    if (this.speedEl) this.speedEl.value = String(this.host.sweepSpeed);
   }
 
   configure() {
@@ -95,7 +105,7 @@ class TomogramSweep {
       const next  = (this.idx + 1) % this.steps;
 
       this._prefetch(next);
-      await Promise.all([frame, this._sleep(this.frameMs)]);
+      await Promise.all([frame, this._sleep(TomogramSweep.BASE_FRAME_MS / this.host.sweepSpeed)]);
       if (!this.playing) break;
 
       this.idx = next;
@@ -191,8 +201,7 @@ class TomogramSweep {
 
   _axisSteps(meta) {
     if (this.axis === "elevation") {
-      const primary = meta.sources.includes("pred") ? "pred" : meta.sources[0];
-      return Math.max(1, meta.n_elev[primary] || 1);
+      return Math.max(1, meta.n_elev[meta.sources[0]] || 1);
     }
     if (this.axis === "azimuth") return Math.max(1, meta.n_az);
     return Math.max(1, meta.n_rg);
@@ -388,21 +397,61 @@ class TomogramTransect {
   }
 }
 
+class TomogramLens {
+  static SIZE = 180;
+
+  constructor(media, container, host) {
+    this.host = host;
+    this.media = media;
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "cube-lens";
+    this.canvas.width = TomogramLens.SIZE;
+    this.canvas.height = TomogramLens.SIZE;
+    this.canvas.hidden = true;
+    container.appendChild(this.canvas);
+
+    media.addEventListener("mousemove", (ev) => this._onMove(ev));
+    media.addEventListener("mouseleave", () => { this.canvas.hidden = true; });
+  }
+
+  _sourceSize() {
+    if (this.media.naturalWidth !== undefined) return { w: this.media.naturalWidth, h: this.media.naturalHeight };
+    return { w: this.media.width, h: this.media.height };
+  }
+
+  _onMove(ev) {
+    const zoom = this.host.lensZoom;
+    const { w, h } = this._sourceSize();
+    if (!zoom || !w || !h) { this.canvas.hidden = true; return; }
+
+    const rect = this.media.getBoundingClientRect();
+    const fx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const fy = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
+
+    const size = TomogramLens.SIZE;
+    const sw = Math.min(w, (size / zoom) * (w / rect.width));
+    const sh = Math.min(h, (size / zoom) * (h / rect.height));
+    const sx = Math.min(w - sw, Math.max(0, fx * w - sw / 2));
+    const sy = Math.min(h - sh, Math.max(0, fy * h - sh / 2));
+
+    const ctx = this.canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(this.media, sx, sy, sw, sh, 0, 0, size, size);
+
+    this.canvas.style.left = `${ev.clientX - rect.left - size / 2}px`;
+    this.canvas.style.top = `${ev.clientY - rect.top - size / 2}px`;
+    this.canvas.hidden = false;
+  }
+}
+
 class TomogramCloud {
   static VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
-  static CURVE_SOURCES = ["reduced", "full"];
-  static MISSING = {
-    gt      : "This run has no ground-truth parameter cube.",
-    reduced : "This run has no Capon reduced cube.",
-    full    : "The raw Capon tomogram is not available for this run.",
-  };
 
   constructor(refs, host) {
     this.host = host;
-    this.sourceEl = refs.source;
     this.colorEl = refs.color;
     this.thrEl = refs.thr;
-    this.thrLabel = refs.thrLabel;
     this.thrValEl = refs.thrVal;
     this.maxEl = refs.max;
     this.demWrap = refs.demWrap;
@@ -412,7 +461,7 @@ class TomogramCloud {
     this.atEl = refs.at;
     this.canvas = refs.canvas;
 
-    this.source = "pred";
+    this.source = "full";
     this.colorBy = "mu";
     this.points = null;
     this.total = 0;
@@ -425,9 +474,6 @@ class TomogramCloud {
     this.zoom = 1.0;
     this.dragging = null;
 
-    this.sourceEl.querySelectorAll(".cube-space").forEach((btn) => {
-      btn.addEventListener("click", () => this._setSource(btn.dataset.source));
-    });
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
     });
@@ -446,9 +492,7 @@ class TomogramCloud {
   }
 
   configure(meta) {
-    const sources = this._sources(meta);
-    this.available = sources.length > 0;
-    if (!sources.includes(this.source)) this.source = sources[0] || "pred";
+    this.available = meta.sources.includes("full");
     this.points = null;
     this.demGrid = null;
     this.demWrap.hidden = !meta.dem;
@@ -458,32 +502,10 @@ class TomogramCloud {
     this._syncThresholdLabel();
   }
 
-  _sources(meta = this.host.meta) {
-    const out = meta.params ? meta.params.sources.slice() : [];
-    TomogramCloud.CURVE_SOURCES.forEach((s) => { if (meta.sources.includes(s)) out.push(s); });
-    return out;
-  }
-
-  _isParam() {
-    return this.source === "pred" || this.source === "gt";
-  }
-
   render() {
     this._syncBtns();
     if (!this.points) this._fetch();
     else this._draw();
-  }
-
-  _setSource(source) {
-    if (source === this.source) return;
-    if (!this._sources().includes(source)) {
-      Toast.show(TomogramCloud.MISSING[source] || "This source is not available.", "warn");
-      return;
-    }
-    this.source = source;
-    this._syncBtns();
-    this._syncThresholdLabel();
-    this._fetch();
   }
 
   _setColor(colorBy) {
@@ -512,12 +534,6 @@ class TomogramCloud {
   }
 
   static ampFloor(meta, source, frac) {
-    if (source === "pred" || source === "gt") {
-      const params = meta.params;
-      const top = Math.max(params.ranges.amp[1], params.threshold * 10);
-      return params.threshold * Math.pow(top / params.threshold, frac);
-    }
-
     const [lo, hi] = meta.intensity[source];
     return lo + frac * (hi - lo);
   }
@@ -539,27 +555,14 @@ class TomogramCloud {
   }
 
   _syncThresholdLabel() {
-    const meta = this.host.meta;
-    if (!meta || (this._isParam() && !meta.params)) return;
-    this.thrLabel.textContent = this._isParam() ? "amp ≥" : "int ≥";
+    if (!this.host.meta) return;
     this.thrValEl.textContent = this.host._fmt(this._ampMin());
   }
 
   _syncBtns() {
-    const sources = this._sources();
-    this.sourceEl.querySelectorAll(".cube-space").forEach((btn) => {
-      btn.classList.toggle("is-active", btn.dataset.source === this.source);
-      btn.disabled = !sources.includes(btn.dataset.source);
-    });
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.classList.toggle("is-active", btn.dataset.color === this.colorBy);
     });
-
-    const binAxis = this.source === "full";
-    this.scaleEl.disabled = binAxis;
-    this.demEl.disabled = binAxis;
-    this.scaleWrap.title = binAxis ? "The raw Capon cube has a bin elevation axis; 1:1 applies to metric sources only" : "Metres on all three axes — no height exaggeration";
-    this.demWrap.title = binAxis ? "The DEM drape needs a metric elevation axis" : "Drape the cloud on the terrain: point height = DEM + elevation";
   }
 
   async _fetchBinary(url) {
@@ -660,7 +663,7 @@ class TomogramCloud {
     const zMid = (muLo + muHi) / 2;
     const zSpan = (muHi - muLo) || 1;
 
-    const spacing = this.scaleEl.checked && !this.scaleEl.disabled && meta.spacing ? meta.spacing : null;
+    const spacing = this.scaleEl.checked && meta.spacing ? meta.spacing : null;
     const azStep = spacing ? spacing.az : 1;
     const rgStep = spacing ? spacing.rg : 1;
     const zScale = spacing ? 1 : (Math.max(meta.n_az, meta.n_rg) * 0.35) / (zSpan / 2);
@@ -683,7 +686,7 @@ class TomogramCloud {
       buf[(sy + 1) * W + sx + 1] = color;
     };
 
-    const grid = this.demEl.checked && !this.demEl.disabled && this.demGrid ? this.demGrid.rows : null;
+    const grid = this.demEl.checked && this.demGrid ? this.demGrid.rows : null;
 
     if (grid) {
       for (let az = 0; az < meta.n_az; az += 4) {
@@ -696,15 +699,7 @@ class TomogramCloud {
     }
 
     const rows = this.points;
-    const logAmp = this._isParam();
-    let ampLo, ampHi;
-    if (logAmp) {
-      const params = meta.params;
-      ampLo = Math.log(Math.max(params.threshold, 1e-6));
-      ampHi = Math.log(Math.max(params.ranges.amp[1], params.threshold * 10));
-    } else {
-      [ampLo, ampHi] = meta.intensity[this.source];
-    }
+    const [ampLo, ampHi] = meta.intensity[this.source];
 
     for (let i = 0; i < rows.length; i += 4) {
       const mu = rows[i + 2];
@@ -718,7 +713,7 @@ class TomogramCloud {
       }
 
       const t = this.colorBy === "amp"
-        ? ((logAmp ? Math.log(Math.max(amp, 1e-6)) : amp) - ampLo) / Math.max(ampHi - ampLo, 1e-6)
+        ? (amp - ampLo) / Math.max(ampHi - ampLo, 1e-6)
         : (mu - muLo) / zSpan;
       plot((rows[i + 1] - cx) * rgStep, (rows[i] - cy) * azStep, z * zScale, this._palette(t));
     }
@@ -726,16 +721,15 @@ class TomogramCloud {
     ctx.putImageData(image, 0, 0);
 
     const shown = rows.length / 4;
-    const unit = logAmp ? "scatterers" : "voxels";
     const scaleNote = spacing
       ? ` · 1:1 in metres · az ${Math.round(meta.n_az * azStep)} m × rg ${Math.round(meta.n_rg * rgStep)} m`
       : "";
-    this.atEl.textContent = `${shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} ${unit}${scaleNote} · drag to orbit · wheel to zoom · double-click to reset`;
+    this.atEl.textContent = `${shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${scaleNote} · drag to orbit · wheel to zoom · double-click to reset`;
   }
 }
 
 class TomogramView {
-  static LABELS = { pred: "pred", gt: "gt", reduced: "capon reduced", full: "capon full" };
+  static LABELS = { full: "capon full" };
   static HOLD_SAVE_MS = 4000;
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
@@ -753,10 +747,8 @@ class TomogramView {
     this.panels = refs.panels;
     this.slicesEl = refs.slices;
     this.slicesAt = refs.slicesAt;
-    this.sourcesEl = refs.sources;
     this.profilesEl = refs.profiles;
     this.profAt = refs.profAt;
-    this.profMetricsEl = refs.profMetrics;
     this.profModeBtns = refs.profModeBtns;
     this.profPanels = refs.profPanels;
     this.spaceBtns = refs.spaceBtns || [];
@@ -796,12 +788,12 @@ class TomogramView {
     this.profData = null;
     this.profQueued = null;
     this.profFetching = false;
-    this.ssimQueued = null;
-    this.ssimFetching = false;
     this.view = "explorer";
     this.colors = {};
     this.visible = new Set();
     this.cmap = localStorage.getItem("cube-cmap") || "jet";
+    this.sweepSpeed = Number(localStorage.getItem("cube-sweep-speed")) || 1;
+    this.lensZoom = Number(localStorage.getItem("cube-lens-zoom") || 3);
     this.bitmapCache = new Map();
     this.bitmapBytes = 0;
 
@@ -811,6 +803,18 @@ class TomogramView {
     this.globe = refs.globe ? new TomogramGlobe(refs.globe, this) : null;
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
+
+    this.lenses = [new TomogramLens(this.topdown, this.mapWrap, this)];
+    this.panels.forEach((panel) => this.lenses.push(new TomogramLens(panel.canvas, panel.canvas.parentElement, this)));
+
+    this.lensZoomSel = document.getElementById("cube-lens-zoom");
+    if (this.lensZoomSel) {
+      this.lensZoomSel.value = String(this.lensZoom);
+      this.lensZoomSel.addEventListener("change", () => {
+        this.lensZoom = Number(this.lensZoomSel.value);
+        localStorage.setItem("cube-lens-zoom", String(this.lensZoom));
+      });
+    }
 
     this.topdown.addEventListener("mousemove", (ev) => this._onMove(ev));
     this.topdown.addEventListener("mousedown", (ev) => this._onHoldStart(ev));
@@ -928,12 +932,9 @@ class TomogramView {
       panel.marker = 0;
       panel.queued = null;
       panel.fetching = false;
-      if (panel.metric) panel.metric.textContent = "";
     });
     this.profQueued = null;
     this.profData = null;
-    this.ssimQueued = null;
-    this._clearProfMetrics();
     this.deck.dataset.mode = "map";
     this.back.hidden = true;
     this.cross.hidden = true;
@@ -1015,9 +1016,6 @@ class TomogramView {
 
     const css = getComputedStyle(this.stage);
     this.colors = {
-      pred    : css.getPropertyValue("--src-pred").trim(),
-      gt      : css.getPropertyValue("--src-gt").trim(),
-      reduced : css.getPropertyValue("--src-reduced").trim(),
       full    : css.getPropertyValue("--src-full").trim(),
       range   : css.getPropertyValue("--cut-range").trim(),
       azimuth : css.getPropertyValue("--cut-azimuth").trim(),
@@ -1026,9 +1024,7 @@ class TomogramView {
     this._syncSpaceBtns();
     this._syncProfModeBtns();
 
-    const kept = meta.sources.filter((s) => this.visible.has(s));
-    this.visible = new Set(kept.length ? kept : meta.sources);
-    this._renderSourceToggles();
+    this.visible = new Set(meta.sources);
     this._applyVisibility();
 
     this.hint.hidden = true;
@@ -1156,6 +1152,12 @@ class TomogramView {
     this.sweeps.forEach((sweep) => sweep.stop());
   }
 
+  _setSweepSpeed(speed) {
+    this.sweepSpeed = speed;
+    localStorage.setItem("cube-sweep-speed", String(speed));
+    this.sweeps.forEach((sweep) => sweep.syncSpeed());
+  }
+
   cacheBitmap(url) {
     const hit = this.bitmapCache.get(url);
     if (hit) {
@@ -1220,35 +1222,6 @@ class TomogramView {
     this._drawProfiles();
   }
 
-  _renderSourceToggles() {
-    this.sourcesEl.innerHTML = "";
-    this.meta.sources.forEach((source) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cube-source";
-      btn.dataset.source = source;
-      btn.innerHTML = `<i class="cube-dot" data-source="${source}"></i>${TomogramView.LABELS[source]}`;
-      btn.addEventListener("click", () => this._toggleSource(source));
-      this.sourcesEl.appendChild(btn);
-    });
-  }
-
-  _toggleSource(source) {
-    if (this.visible.has(source)) {
-      if (this.visible.size === 1) {
-        Toast.show("At least one source must stay visible.", "warn");
-        return;
-      }
-      this.visible.delete(source);
-    } else {
-      this.visible.add(source);
-    }
-
-    this._applyVisibility();
-    if (this.point) this._drawSlices(this.point.az, this.point.rg);
-    this._drawProfiles();
-  }
-
   _applyVisibility() {
     this.panels.forEach((panel) => {
       panel.root.hidden = !this.visible.has(panel.source);
@@ -1256,15 +1229,6 @@ class TomogramView {
     this.profPanels.forEach((panel) => {
       panel.root.hidden = !this.visible.has(panel.source);
     });
-    this.sourcesEl.querySelectorAll(".cube-source").forEach((btn) => {
-      btn.classList.toggle("is-active", this.visible.has(btn.dataset.source));
-    });
-    if (this.profMetricsEl) {
-      this.profMetricsEl.querySelectorAll("tr[data-source]").forEach((row) => {
-        row.hidden = !this.visible.has(row.dataset.source);
-      });
-    }
-    this.slicesEl.style.setProperty("--cube-rows", String(this.visible.size));
 
     this.sweeps.forEach((sweep) => sweep.applyVisibility());
   }
@@ -1493,8 +1457,6 @@ class TomogramView {
       if (panel.root.hidden) return;
       this._updatePanel(panel, az, rg);
     });
-
-    this._queueSsim(az, rg);
   }
 
   _updatePanel(panel, az, rg) {
@@ -1577,48 +1539,6 @@ class TomogramView {
     ctx.setLineDash([]);
   }
 
-  _queueSsim(az, rg) {
-    this.ssimQueued = { az, rg };
-    this._ssimPump();
-  }
-
-  async _ssimPump() {
-    if (this.ssimFetching || !this.ssimQueued) return;
-    this.ssimFetching = true;
-
-    while (this.ssimQueued) {
-      const { az, rg } = this.ssimQueued;
-      this.ssimQueued = null;
-      await this._fetchSsim(az, rg);
-    }
-
-    this.ssimFetching = false;
-  }
-
-  async _fetchSsim(az, rg) {
-    const space = this.space;
-
-    const data = await Api.get(`/api/cubes/ssim?id=${encodeURIComponent(this.selectedId)}&az=${az}&rg=${rg}&space=${space}`);
-
-    if (!data.ok) return;
-    this._applySsim(data);
-  }
-
-  _applySsim(data) {
-    this.panels.forEach((panel) => {
-      if (!panel.metric) return;
-
-      if (panel.source === "gt") {
-        panel.metric.textContent = "reference";
-        return;
-      }
-
-      const group = data[panel.axis] || {};
-      const value = group[panel.source];
-      panel.metric.textContent = value === undefined || value === null ? "SSIM –" : `SSIM ${value.toFixed(3)}`;
-    });
-  }
-
   _queueProfiles(az, rg) {
     this.profAt.textContent = `profiles at az = ${az} · rg = ${rg}`;
     this.profQueued = { az, rg };
@@ -1672,57 +1592,6 @@ class TomogramView {
       const series = this.profData.sources[panel.source];
       if (series) this._drawProfile(panel, series, shared);
     });
-
-    this._fillProfMetrics();
-  }
-
-  _fillProfMetrics() {
-    if (!this.profMetricsEl) return;
-
-    const gt = this.profData && this.profData.sources.gt;
-
-    ["pred", "reduced"].forEach((source) => {
-      const row = this.profMetricsEl.querySelector(`tr[data-source="${source}"]`);
-      if (!row) return;
-
-      const series = this.profData && this.profData.sources[source];
-      const scores = gt && series ? this._scoreCurve(series.values, gt.values) : null;
-
-      ["mae", "mse", "r2"].forEach((key) => {
-        const cell = row.querySelector(`td[data-k="${key}"]`);
-        if (cell) cell.textContent = scores ? this._fmtMetric(scores[key], key) : "–";
-      });
-    });
-  }
-
-  _scoreCurve(values, ref) {
-    const n = Math.min(values.length, ref.length);
-    if (!n) return null;
-
-    let sumAbs = 0, sumSq = 0, sumRef = 0;
-    for (let i = 0; i < n; i++) {
-      const d = values[i] - ref[i];
-      sumAbs += Math.abs(d);
-      sumSq  += d * d;
-      sumRef += ref[i];
-    }
-
-    const mean = sumRef / n;
-    let ssTot = 0;
-    for (let i = 0; i < n; i++) ssTot += (ref[i] - mean) ** 2;
-
-    return { mae: sumAbs / n, mse: sumSq / n, r2: 1 - sumSq / (ssTot + 1e-12) };
-  }
-
-  _fmtMetric(value, key) {
-    if (!Number.isFinite(value)) return "–";
-    if (key === "r2") return value.toFixed(3);
-    return this._fmt(value);
-  }
-
-  _clearProfMetrics() {
-    if (!this.profMetricsEl) return;
-    this.profMetricsEl.querySelectorAll("td[data-k]").forEach((cell) => { cell.textContent = "–"; });
   }
 
   _drawProfile(panel, series, shared) {

@@ -1,8 +1,8 @@
 # TomoVic control console
 
-A single-page web console for TomoVic. It documents the signal model and the processing
-pipeline, launches and supervises the `main/` entry points, and browses everything those
-runs produce: tomogram cubes, the DEM, figures, reports and logs.
+A single-page web console for TomoVic. It launches and supervises the `main/` entry
+points and browses everything those runs produce: tomogram cubes, the DEM, figures,
+reports and logs.
 
 ## Run
 
@@ -33,15 +33,13 @@ highlighting, animation, the globe and the terminal view need a network connecti
 
 Navigation is hash-based, `#/<route>`. Each tab is one view module under `static/js/`
 talking to one group of JSON endpoints. The nav drawer groups the tabs into four
-sections, and the section holding the active tab stays expanded: Reference (Model,
-Pipelines, Repo Map), Launch (Scripts, Saved, Configuration), Monitor (Console) and
+sections, and the section holding the active tab stays expanded: Reference (Repo Map),
+Launch (Scripts, Saved, Configuration), Monitor (Console) and
 Results (Results, Cube, Slices).
 
 | Tab | Route | Backed by | What it does |
 |---|---|---|---|
 | Home | `#/home` | `/api/system`, `/api/jobs`, `/api/notify/*` | Live host and GPU telemetry, per-user memory attribution, running-job tiles, server detach and shutdown, and the ntfy settings. |
-| Model | `#/model` | `/api/equations`, `/api/flows` | The curated equation catalog of the signal model and the processing stages, rendered with MathJax, plus the animated step-by-step processing walkthrough. |
-| Pipelines | `#/pipelines` | `/api/pipelines` | The processing pipeline as a staged flow, mapped to the entry point that runs it. |
 | Repo Map | `#/repomap` | `/api/repomap` | Curated module-level schematics, each with nodes, edges and the artifacts a stage reads and writes. |
 | Scripts | `#/scripts` | `/api/scripts` | The entry points as cards, laid out in workflow sections (Data, Analysis) with a search box and per-category counts. |
 | Launch | `#/launch/<key>` | `/api/scripts/<key>/config` | Full-screen launch control per script: config sections grouped by dataclass, typed controls, the override manifest, the command preview and the interpreter. Launch now, queue after the current job, or save for later. |
@@ -104,18 +102,16 @@ browsing to roots the user has opened, and `web_logger.py` handles console loggi
 `proc_stats.py`.
 
 **Curated content.** Hand-written project documentation served as JSON and kept honest by
-tests under `tests/webui/`: `equation_library.py`, `flow_library.py`,
-`pipeline_library.py`, `repomap_data.json` with `repomap_library.py` and its drift
+tests under `tests/webui/`: `repomap_data.json` with `repomap_library.py` and its drift
 checker `repomap_derive.py`, and `config_descriptions.json`.
 
 **Analysis surfaces.** `results_browser.py`, `dataset_browser.py`, and
 `cube_explorer.py`, which also carries the slice collector.
 
 **Frontend.** `static/index.html`, `static/css/styles.css`, `static/vendor/marked.min.js`
-and 32 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
-tab (`home`, `equations`, `flow_view` with `flow_sketches`, `pipelines`, `repomap`,
-`scripts`, `launch` with its widget modules (`python_literal`, `form_widgets`,
-`config_form`) and `launch_pickers`, `saved_runs`, `configs`, `console`, `results`,
-`tomogram`, `slice_collector`); the rest are shared helpers (`api`, `mathjax`,
+and 27 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
+tab (`home`, `repomap`, `scripts`, `launch` with its widget modules (`python_literal`,
+`form_widgets`, `config_form`) and `launch_pickers`, `saved_runs`, `configs`, `console`,
+`results`, `tomogram`, `slice_collector`); the rest are shared helpers (`api`,
 `shared_charts`, `results_sources`, `run_strip`, `canvas_base`, `diagram`, `gauges`,
 `globe`, `process_anim`, `server_anim`, `tomo_anim`).

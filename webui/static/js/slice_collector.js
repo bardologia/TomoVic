@@ -1,8 +1,8 @@
 "use strict";
 
 class SliceCollectorView {
-  static SOURCES = ["pred", "gt", "reduced", "full"];
-  static LABELS = { pred: "pred", gt: "gt", reduced: "capon reduced", full: "capon full" };
+  static SOURCES = ["full"];
+  static LABELS = { full: "capon full" };
 
   constructor(refs) {
     this.refs = refs;
@@ -12,7 +12,7 @@ class SliceCollectorView {
     this.runStrip = null;
     this.points = [];
     this.axes = new Set(["range"]);
-    this.sources = new Set(["pred"]);
+    this.sources = new Set(["full"]);
     this.space = "physical";
     this.shared = true;
     this.debounceTimer = null;
@@ -30,9 +30,6 @@ class SliceCollectorView {
 
     refs.axesWrap.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._toggleMulti(this.axes, btn, btn.dataset.axis));
-    });
-    refs.sourcesWrap.querySelectorAll(".cube-source").forEach((btn) => {
-      btn.addEventListener("click", () => this._toggleMulti(this.sources, btn, btn.dataset.source));
     });
     refs.spaceWrap.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -135,16 +132,6 @@ class SliceCollectorView {
     if (this.refs.azInput.value === "") this.refs.azInput.value = Math.floor((azMax + 1) / 2);
     if (this.refs.rgInput.value === "") this.refs.rgInput.value = Math.floor((rgMax + 1) / 2);
 
-    const avail = new Set();
-    infos.forEach((i) => i.sources.forEach((s) => avail.add(s)));
-    this.refs.sourcesWrap.querySelectorAll(".cube-source").forEach((btn) => {
-      const source = btn.dataset.source;
-      btn.hidden = !avail.has(source);
-      if (!avail.has(source) && this.sources.has(source) && this.sources.size > 1) {
-        this.sources.delete(source);
-        btn.classList.remove("is-active");
-      }
-    });
   }
 
   _toggleMulti(set, btn, key) {

@@ -58,7 +58,7 @@ class Router {
 
   _animateIn(page) {
     if (!page || window.REDUCED_MOTION || !window.gsap) return;
-    const blocks = page.querySelectorAll(".page__head, .page__head > *, .eq-tabs, .eq-grid, .flow, .master, .filter-row, .script-grid, .console, .launch__top, .launch__rail, .launch__main");
+    const blocks = page.querySelectorAll(".page__head, .page__head > *, .master, .filter-row, .script-grid, .console, .launch__top, .launch__rail, .launch__main");
     const targets = blocks.length ? blocks : [page];
     window.gsap.fromTo(
       targets,

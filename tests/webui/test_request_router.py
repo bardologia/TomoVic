@@ -23,8 +23,8 @@ from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 56
-SECTION_COUNT = 20
+ROUTE_COUNT   = 53
+SECTION_COUNT = 17
 
 RESOLUTIONS = [
     ("GET",  "/",                                StaticRouter),
@@ -36,7 +36,7 @@ RESOLUTIONS = [
     ("POST", "/api/cubes/save_slices",           CubeRouter),
     ("GET",  "/api/slices/slice",                SliceRouter),
     ("POST", "/api/slices/collect",              SliceRouter),
-    ("GET",  "/api/equations",                   ContentLibraryRouter),
+    ("GET",  "/api/repomap",                     ContentLibraryRouter),
     ("GET",  "/api/configs",                     ContentLibraryRouter),
     ("GET",  "/api/project",                     CatalogRouter),
     ("GET",  "/api/scripts/pre_process",         CatalogRouter),
@@ -138,9 +138,6 @@ def build_routers() -> list:
         DatasetRouter(None),
         CubeRouter(None),
         SliceRouter(None),
-        ContentLibraryRouter("/api/equations", None, "groups"),
-        ContentLibraryRouter("/api/flows",     None, "flows"),
-        ContentLibraryRouter("/api/pipelines", None, "pipelines"),
         ContentLibraryRouter("/api/repomap",   None, "folders"),
         ContentLibraryRouter("/api/configs",   None, "groups"),
         CatalogRouter(None, None, None, None, None),

@@ -138,18 +138,6 @@ class App {
 
     this.savedRunsView = new window.SavedRunsView(this.runConsole, document.getElementById("saved-grid"));
 
-    this.equationView = new window.EquationView(
-      document.getElementById("eq-tabs"),
-      document.getElementById("eq-grid")
-    );
-    this.equationView.load();
-
-    this.flowView = new window.FlowView(document.getElementById("flowx"));
-    this._initModelMode();
-
-    this.pipelineFlow = new window.PipelineFlow(document.getElementById("flow"));
-    this.pipelineFlow.load();
-
     this.repoMap = new window.RepoMapView(document.getElementById("repomap"));
 
     this.configBrowser = new window.ConfigBrowser(
@@ -281,7 +269,6 @@ class App {
       clearBtn    : document.getElementById("sc-clear"),
       points      : document.getElementById("sc-points"),
       axesWrap    : document.getElementById("sc-axes"),
-      sourcesWrap : document.getElementById("sc-sources"),
       spaceWrap   : document.getElementById("sc-space"),
       sharedWrap  : document.getElementById("sc-shared"),
       cmapSel     : document.getElementById("sc-cmap"),
@@ -289,20 +276,6 @@ class App {
       collectBtn  : document.getElementById("sc-collect"),
       msg         : document.getElementById("sc-msg"),
       rows        : document.getElementById("sc-rows"),
-    });
-  }
-
-  _initModelMode() {
-    const wrap  = document.getElementById("model-mode");
-    const views = [...document.querySelectorAll(".model-view")];
-    if (!wrap) return;
-    wrap.querySelectorAll(".model-mode__btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        wrap.querySelectorAll(".model-mode__btn").forEach((b) => b.classList.toggle("is-active", b === btn));
-        const mode = btn.dataset.mode;
-        views.forEach((v) => v.classList.toggle("is-hidden", v.dataset.view !== mode));
-        if (mode === "walkthrough") this.flowView.load();
-      });
     });
   }
 
@@ -323,7 +296,6 @@ class App {
       this.launchView.leave();
     }
     if (route === "saved") this.savedRunsView.enter();
-    if (route === "model" && document.querySelector("#model-mode .model-mode__btn.is-active")?.dataset.mode === "walkthrough") this.flowView.load();
     if (route === "repomap") this.repoMap.enter();
     if (route === "results") this.resultsView.enter();
     if (route === "cube") this.tomogramView.enter();
