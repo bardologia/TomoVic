@@ -33,8 +33,9 @@ class ResultsBrowser:
     MAX_TEXT_BYTES = 262144
 
     STAGE_MARKERS = (
-        ("preprocess", ("images/slc", "images/interferograms", "images/dem")),
-        ("comparison", ("report.md",)),
+        ("preprocess",       ("images/slc", "images/interferograms", "images/dem")),
+        ("param extraction", ("images/colormaps", "images/example_fits", "fit_report.md")),
+        ("comparison",       ("report.md",)),
     )
 
     def __init__(self, logger: WebLogger) -> None:

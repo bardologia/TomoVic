@@ -1,7 +1,8 @@
 {
   "sections": {
     "sar": "The first stage of the pipeline, which turns raw multi-baseline F-SAR stacks into focused tomograms. It drives PyRAT fusartomo beamforming and interferogram generation for one preprocessing run, resolving acquisition geometry and interferometric baselines into the vertical-wavenumber (kz) axis used downstream. The configs here control focusing and filter settings, CPU and thread budgets, run filesystem layout, the tomogram height axis, and the batch entry points that sweep filter window sizes and render stack-overview diagnostics.",
-    "comparison": "The stage that rebuilds side-by-side comparisons across completed preprocessing runs without re-running the generation step. It aggregates existing preprocessing outputs into a single report grouped by the varied factor. The configs here control the comparison of preprocessing trials differing by multilook window."
+    "comparison": "The stage that rebuilds side-by-side comparisons across completed preprocessing runs without re-running the generation step. It aggregates existing preprocessing outputs into a single report grouped by the varied factor. The configs here control the comparison of preprocessing trials differing by multilook window.",
+    "param_extraction": "The stage that fits parametric height profiles to focused tomograms, producing the per-pixel Gaussian-mixture parametrized tomogram. It runs constrained optimization over each preprocessed tomogram and recomputes fit metrics and diagnostic plots for existing trials. The configs here control optimizer iteration caps and fit hyperparameters, the single-run extraction driver, the batch entry point that sweeps datasets and hyperparameter grids, and the inference config that regenerates metrics and summaries."
   },
   "configs": {
     "sar/processing_config::TomogramConfig": {
@@ -105,6 +106,106 @@
         "workers": "Number of thread-pool workers used to measure trials in parallel, 0 auto-sizes to the CPU count",
         "make_plots": "Whether to render comparison plots for the collected preprocessing trials",
         "output_dir": "Destination for the comparison report; None writes to a _window_comparison subfolder under runs_dir"
+      }
+    },
+    "sar/gaussian_config::GaussianConfig": {
+      "summary": "Gaussian-mixture layout of a parametrized tomogram: component count and height-axis bounds",
+      "fields": {
+        "n_default_gaussians": "Number of Gaussian components (K) stored per pixel, derived from param_extraction_meta.json k_max of the parameter run",
+        "x_min": "Lower bound of the height/elevation axis in meters, taken from the dataset's tomogram_config.height_range",
+        "x_max": "Upper bound of the height/elevation axis in meters, taken from the dataset's tomogram_config.height_range",
+        "params_per_gaussian": "Number of stored parameters per Gaussian component (amplitude, mean, sigma = 3)"
+      }
+    },
+    "param_extraction::FitConfig": {
+      "summary": "Gaussian-fit hyperparameters and per-parameter free/frozen toggles for one profile-fitting run",
+      "fields": {
+        "threshold_factor": "profile preprocessing floor: samples below this fraction of the per-pixel profile maximum are zeroed before fitting",
+        "truncation_index": "profile preprocessing cut: height-axis samples at or above this index are zeroed before fitting",
+        "k_max": "maximum number of Gaussian components; every K from 1 to k_max is fitted and the penalised best is kept",
+        "lambda_k": "component-count regularization strength added as lambda_k * K to each K's MSE for best-K selection",
+        "prominence_frac": "peak prominence threshold for the CPU initialiser as a fraction of the per-pixel profile maximum",
+        "sigma_init_divisor": "divisor shrinking the height-span-derived base width (h_span/(8*k_max), floored at 2 bin spacings) into each Gaussian's initial sigma guess",
+        "activity_threshold": "per-pixel profile maximum below which the pixel is considered inactive and skipped by the fit",
+        "fit_sigma": "toggle freeing the Gaussian widths during the Adam fit; off masks their gradients so they stay at the initial guess",
+        "fit_amplitude": "toggle freeing the Gaussian amplitudes during the Adam fit; off masks their gradients so they stay at the initial guess",
+        "fit_mean": "toggle freeing the Gaussian mean elevations during the Adam fit; off masks their gradients so they stay at the initial guess"
+      }
+    },
+    "param_extraction::FitSettings": {
+      "summary": "Gaussian-fit hyperparameters for one profile-fitting run",
+      "fields": {
+        "fit_config": "FitConfig sub-config with k_max, lambda_k, sigma_init_divisor, thresholds, and the fit_sigma/fit_amplitude/fit_mean free-parameter toggles"
+      }
+    },
+    "param_extraction::ExtractionConfig": {
+      "summary": "Drives one Gaussian-mixture parameter-extraction run over a single preprocessed tomogram",
+      "fields": {
+        "processed_data_path": "root of the preprocessed run holding data/ and meta/ subfolders, source of the tomogram to fit",
+        "pyrat_directory": "path to the PyRAT installation carried on the config but not read by this extraction pipeline",
+        "output_prefix": "leading token of the generated output subdirectory name, joined with the hyperparameter suffix",
+        "output_suffix": "optional fixed naming tag overriding the auto-derived k/lambda/sigma/free-params suffix",
+        "height_range": "reconstruction height-axis extent in meters as (min, max); None reads it from meta/config_state.json",
+        "fit_settings": "FitSettings sub-config bundling the Gaussian-fit hyperparameters (k_max, lambda_k, sigma_init_divisor, free-parameter flags)",
+        "parameter_workers": "number of CPU worker processes in the PeakInitialiser pool used for per-pixel peak-based initial guesses",
+        "range_batch_size": "number of range bins loaded and fit together per batch while streaming the tomogram",
+        "gpu_pixel_batch_size": "fixed number of pixels per GPU batch the JAX Adam-fit kernel is compiled and iterated over, with padding to keep every batch this size",
+        "adam_steps": "number of Adam optimizer steps run per pixel batch during Gaussian curve fitting",
+        "adam_lr": "Adam learning rate for the per-pixel Gaussian curve-fitting optimizer",
+        "adam_b1": "Adam beta1 first-moment decay coefficient for the Gaussian curve-fitting optimizer",
+        "adam_b2": "Adam beta2 second-moment decay coefficient for the Gaussian curve-fitting optimizer"
+      }
+    },
+    "param_extraction::ExtractParamsEntryConfig": {
+      "summary": "Batch entry point sweeping Gaussian-parameter extraction across datasets and fit hyperparameter grids",
+      "fields": {
+        "dataset_base_path": "root directory scanned for dataset subdirectories, each requiring a data/ folder, to process",
+        "dataset_filter": "list of dataset directory names selecting which datasets under the base path run; empty processes all",
+        "pyrat_directory": "path to the PyRAT installation forwarded into each generated ExtractionConfig but not read by this pipeline",
+        "output_prefix": "leading token of each generated output subdirectory name, shared across the sweep",
+        "output_suffix": "optional fixed naming tag overriding the auto-derived suffix; rejected when the sweep expands to more than one permutation",
+        "height_range": "reconstruction height-axis extent in meters as (min, max) applied to every plan; None reads it per-dataset from metadata",
+        "fit_k_values": "list of maximum Gaussian-component counts (k_max) to sweep, one extraction plan per value",
+        "fit_lambda_values": "list of component-count regularization strengths (lambda_k) to sweep, one extraction plan per value",
+        "fit_modes": "fit modes to sweep, each an underscore-joined composition of free parameters from sigma, amp, mu (e.g. sigma, amp_mu, sigma_amp_mu); every non-empty composition is valid",
+        "fit_sigma_init_divisor": "divisor shrinking the height-span-derived base width (h_span/(8*k_max), floored at 2 bin spacings) into each Gaussian's initial sigma guess, shared across the sweep",
+        "fit_threshold_factor": "profile preprocessing floor shared across the sweep: samples below this fraction of the per-pixel profile maximum are zeroed before fitting",
+        "fit_truncation_index": "profile preprocessing cut shared across the sweep: height-axis samples at or above this index are zeroed before fitting",
+        "fit_prominence_frac": "peak prominence threshold for the CPU initialiser as a fraction of the per-pixel profile maximum, shared across the sweep",
+        "fit_activity_threshold": "per-pixel profile maximum below which the pixel is considered inactive and skipped by the fit, shared across the sweep",
+        "adam_steps": "number of Adam optimizer steps run per pixel batch during Gaussian curve fitting, shared across the sweep",
+        "adam_lr": "Adam learning rate for the per-pixel Gaussian curve-fitting optimizer, shared across the sweep",
+        "gpu_device_ids": "GPU indices pinned via EnvironmentPinner.gpus before extraction runs",
+        "range_batch_size": "number of range bins loaded and fit together per batch, shared across the sweep",
+        "gpu_pixel_batch_size": "fixed number of pixels per GPU batch the JAX Adam-fit kernel is compiled and iterated over, shared across the sweep",
+        "parameter_workers": "CPU worker count for the shared PeakInitialiser pool, defaulting to min(64, cpu_count)"
+      }
+    },
+    "param_extraction::ParamExtractionInferenceConfig": {
+      "summary": "Recomputes fit metrics, summaries, and diagnostic plots for existing parametrized-tomogram runs",
+      "fields": {
+        "params_dir": "root directory recursively scanned for param_extraction_meta.json markers identifying completed runs",
+        "run_tags": "run subdirectory paths (relative to params_dir) selecting which runs to process; empty auto-discovers all",
+        "make_plots": "whether FittingResultPlotter renders diagnostic plots in addition to the JSON metrics summary",
+        "kz_grid_max": "upper end of the kz grid [rad/m] the resolution analysis sweeps when predicting single-pair height error from the fitted profiles",
+        "kz_grid_points": "number of kz samples on the resolution-analysis grid",
+        "noise_coherence": "coherence floor in (0, 1] modelling the speckle/SNR decorrelation a real pair carries on top of the fitted-profile coherence (predicted height error uses gamma = noise_coherence * profile coherence); the 0.99 default matches high-coherence airborne stacks with strong multilooking and moves the predicted optimum toward shorter baselines as it rises"
+      }
+    },
+    "param_extraction::InjectExternalParamsEntryConfig": {
+      "summary": "Batch entry point that imports externally fitted Gaussian parameter cubes into preprocessed datasets as ordinary parameter runs",
+      "fields": {
+        "dataset_base_path": "root directory holding the preprocessed dataset runs that receive the external parameters",
+        "dataset_filter": "explicit dataset directory names to inject into; empty injects into every dataset under the base path",
+        "source_files": "absolute paths of the external RAT parameter cubes, each holding three channels per Gaussian over one azimuth/range window",
+        "source_windows": "explicit '<az_start>a<az_end>a<rg_start>a<rg_end>' extent per source file; empty reads each window from its filename",
+        "source_order": "order of the three channels inside each Gaussian triple of the source files, as a permutation of amp, mu and sigma joined with '_'",
+        "output_prefix": "leading token of the generated parameter-run subdirectory name, joined with the suffix",
+        "output_suffix": "trailing token of the generated parameter-run subdirectory name, distinguishing this import from the fitted runs beside it",
+        "origin_note": "free-text provenance recorded in the run metadata, naming who produced the external fit and how",
+        "k_slots": "number of Gaussian slots written per pixel; 0 keeps the slot count the sources carry, a larger value pads the remainder with empty slots",
+        "activity_threshold": "amplitude above which a Gaussian counts as active, driving the slot ordering and the height-convention check",
+        "overwrite": "toggle allowing an existing parameter run of the same name to be deleted and rewritten"
       }
     }
   }

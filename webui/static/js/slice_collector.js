@@ -1,8 +1,8 @@
 "use strict";
 
 class SliceCollectorView {
-  static SOURCES = ["full"];
-  static LABELS = { full: "capon full" };
+  static SOURCES = ["full", "param"];
+  static LABELS = { full: "capon full", param: "parametrized" };
 
   constructor(refs) {
     this.refs = refs;
@@ -31,6 +31,9 @@ class SliceCollectorView {
     refs.axesWrap.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._toggleMulti(this.axes, btn, btn.dataset.axis));
     });
+    refs.sourcesWrap.querySelectorAll(".cube-space").forEach((btn) => {
+      btn.addEventListener("click", () => this._toggleMulti(this.sources, btn, btn.dataset.source));
+    });
     refs.spaceWrap.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => {
         refs.spaceWrap.querySelectorAll(".cube-space").forEach((b) => b.classList.toggle("is-active", b === btn));
@@ -57,6 +60,7 @@ class SliceCollectorView {
 
     const data = await Api.get(`/api/cubes?base=${encodeURIComponent(ResultsSources.runs())}`);
     this.cubes = (data && data.cubes) || [];
+    this.infos.clear();
     this.selected = this.selected.filter((id) => this.cubes.some((c) => c.id === id));
     this._renderStrip();
 

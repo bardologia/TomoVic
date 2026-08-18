@@ -8,6 +8,7 @@ class DatasetPicker {
     runs:         { endpoint: "/api/fs/runs",     key: "runs",     noun: "runs",     hint: "nothing selected = every run is processed",     badge: (d) => (d.n_seeds ? (d.own_inference ? { text: "seed report", tone: "ok" } : { text: "no seed report", tone: "warn" }) : !d.has_checkpoint ? { text: "no checkpoint", tone: "warn" } : d.has_inference ? { text: "inferred", tone: "ok" } : null) },
     runs_compare: { endpoint: "/api/fs/runs",     key: "runs",     noun: "runs",     hint: "select 2 or more runs to compare",            params: "units=1", badge: (d) => (d.n_seeds ? { text: `${d.n_seeds} seed${d.n_seeds > 1 ? "s" : ""}`, tone: d.has_inference ? "ok" : "warn" } : d.has_inference ? { text: "inferred", tone: "ok" } : { text: "no inference", tone: "warn" }) },
     run_groups:   { endpoint: "/api/fs/run_groups", key: "groups", noun: "groups",   hint: "nothing selected = runs_dir itself is treated as one seed group", badge: (d) => ({ text: `${d.n_runs} runs`, tone: d.n_runs >= 2 ? "ok" : "warn" }) },
+    param_trials: { endpoint: "/api/fs/param_trials", key: "trials", noun: "trials", hint: "nothing selected = every parametrized-tomogram run is processed", badge: (d) => (d.dataset ? { text: d.dataset, tone: "ok" } : null) },
   };
 
   constructor(view, leaf, spec) {

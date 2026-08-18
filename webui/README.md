@@ -41,13 +41,13 @@ Results (Results, Cube, Slices).
 |---|---|---|---|
 | Home | `#/home` | `/api/system`, `/api/jobs`, `/api/notify/*` | Live host and GPU telemetry, per-user memory attribution, running-job tiles, server detach and shutdown, and the ntfy settings. |
 | Repo Map | `#/repomap` | `/api/repomap` | Curated module-level schematics, each with nodes, edges and the artifacts a stage reads and writes. |
-| Scripts | `#/scripts` | `/api/scripts` | The entry points as cards, laid out in workflow sections (Data, Analysis) with a search box and per-category counts. |
+| Scripts | `#/scripts` | `/api/scripts` | The entry points as cards, laid out in workflow sections (Data, Analysis) with a search box and per-category counts, including `extract_params` and `analyze_param_extraction`, which fit and audit the parametrized tomogram. |
 | Launch | `#/launch/<key>` | `/api/scripts/<key>/config` | Full-screen launch control per script: config sections grouped by dataclass, typed controls, the override manifest, the command preview and the interpreter. Launch now, queue after the current job, or save for later. |
 | Saved | `#/saved` | `/api/saved-runs` | Configurations stored from launch pages, one JSON file each under `logs/saved_runs/`. Each card can be launched, queued or deleted. |
 | Configuration | `#/configuration` | `/api/configs` | Every configuration dataclass, field, type and default, parsed live from `configuration/`. |
 | Console | `#/console` | `/api/jobs`, `/api/jobs/<id>/stream` | Real-time stdout of launched jobs over SSE with stop control, plus per-unit logs and a progress strip for fan-out jobs. |
 | Results | `#/results` | `/api/results/*`, `/api/fs/*` | Browse any run or dataset directory: rendered markdown reports, figure galleries with compare pinning, configs, and inline log and text files. |
-| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, arbitrary-line transects, a 3D scatterer point cloud, the DEM grid, the scene on a Cesium globe with flight tracks and beam segment, selectable colormaps and paper-style figure export. A run is any directory holding `data/dataset.json`. |
+| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, arbitrary-line transects, a 3D scatterer point cloud, the DEM grid, the scene on a Cesium globe with flight tracks and beam segment, selectable colormaps and paper-style figure export, with the parametrized tomogram from `params/<tag>` runs as a selectable source. A run is any directory holding `data/dataset.json`. |
 | Slices | `#/slices` | `/api/slices/*` | Multi-run slice collector: tick any number of cubes, set a cut position plus an optional queue of extra points, and preview the same slice from every run side by side on a shared colour scale. Collect renders the figures into one `slice_collections/<name>/` folder with a `collection.json` manifest. |
 
 ## How launching works

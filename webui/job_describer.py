@@ -36,9 +36,20 @@ class JobDescriber:
             ("pol",       "polarisation",       "text"),
             ("",          "beamforming_method", "text"),
         ],
+        "extract_params": [
+            ("datasets", "dataset_filter",    "list", "all datasets"),
+            ("K",        "fit_k_values",      "list"),
+            ("lambda",   "fit_lambda_values", "list"),
+            ("modes",    "fit_modes",         "list"),
+            ("suffix",   "output_suffix",     "opt"),
+        ],
         "analyze_preprocessing": [
             ("trials", "run_tags", "list", "all trials"),
             ("root",   "runs_dir", "opt_tail"),
+        ],
+        "analyze_param_extraction": [
+            ("trials", "run_tags",   "list", "all trials"),
+            ("root",   "params_dir", "opt_tail"),
         ],
         "compare_preprocessing_trials": [
             ("trials", "run_tags", "list", "all trials"),

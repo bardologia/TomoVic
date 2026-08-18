@@ -25,10 +25,20 @@ class ScriptCatalog:
             "category"  : "Data",
             "purpose"   : "Ingest raw F-SAR products, beamform the tomogram, and form interferograms.",
         },
+        "extract_params": {
+            "title"     : "Extract Parameters",
+            "category"  : "Data",
+            "purpose"   : "Fit per-pixel Gaussian mixtures to the focused tomogram, producing the parametrized tomogram stored as a parameter run inside each dataset. Sweeps every permutation of the selected datasets, K values, lambda values, and fit modes.",
+        },
         "analyze_preprocessing": {
             "title"     : "Analyze Preprocessing",
             "category"  : "Analysis",
             "purpose"   : "Render the stack-overview plots (SLC amplitudes, flattened interferograms, DEM) for one or more preprocessing trials, decoupled from the tomogram/interferogram generation step.",
+        },
+        "analyze_param_extraction": {
+            "title"     : "Analyze Param Extraction",
+            "category"  : "Analysis",
+            "purpose"   : "Recompute the Gaussian-fit metrics, summary, and diagnostic plots for one or more parametrized-tomogram runs, decoupled from the GPU fitting step.",
         },
         "compare_preprocessing_trials": {
             "title"     : "Compare Preprocessing",
@@ -39,6 +49,7 @@ class ScriptCatalog:
 
     TOPICS = {
         "analyze_preprocessing"        : "trials",
+        "analyze_param_extraction"     : "trials",
         "compare_preprocessing_trials" : "trials",
     }
 

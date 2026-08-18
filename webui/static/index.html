@@ -204,6 +204,10 @@
 
     <div class="cube-pick">
       <div class="run-strip" id="cube-strip" aria-label="Saved cubes"></div>
+      <div class="cube-mctl cube-param" id="cube-param-row" hidden>
+        <label for="cube-param-tag" title="Overlay the Gaussian-mixture reconstruction of this cube as a second source">parametrized tomogram</label>
+        <select id="cube-param-tag" class="cube-mselect"></select>
+      </div>
       <p class="cube-hint" id="cube-hint">Loading directories&hellip;</p>
       <div class="cube-progress" id="cube-progress" hidden>
         <div class="cube-progress__track"><i class="cube-progress__fill" id="cube-progress-fill"></i></div>
@@ -284,7 +288,8 @@
               <span class="cube-cutgroup__at" data-axis="range"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="range" data-source="full"><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="range" data-source="full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="range" data-source="param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
           <section class="cube-cutgroup" data-axis="azimuth">
@@ -293,7 +298,8 @@
               <span class="cube-cutgroup__at" data-axis="azimuth"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="azimuth" data-source="full"><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="azimuth" data-source="full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="azimuth" data-source="param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
         </div>
@@ -309,6 +315,13 @@
           <p class="cube-coords" id="cube-prof-at">Hover a slice to read the profiles at that position.</p>
           <div class="cube-profiles__grid">
             <figure class="cube-prof" data-source="full"><div class="cube-prof__media"><canvas></canvas></div></figure>
+          </div>
+          <div class="cube-slots" id="cube-slots" hidden>
+            <h4 class="cube-slots__title">Parametrized slots at this pixel</h4>
+            <table class="cube-slots__table">
+              <thead><tr><th>slot</th><th>amplitude</th><th>mean [m]</th><th>sigma [m]</th></tr></thead>
+              <tbody id="cube-slots-body"></tbody>
+            </table>
           </div>
         </aside>
       </div>
@@ -337,6 +350,10 @@
               </div>
             </div>
             <span class="cube-elev__at" id="cube-elevation-at">Play the sweep, or scroll a panel to move through elevation.</span>
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
@@ -372,6 +389,10 @@
               </div>
             </div>
             <span class="cube-elev__at" id="cube-azimuth-at">Play the sweep, or scroll a panel to move through azimuth.</span>
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
@@ -388,6 +409,10 @@
       <div class="cube-view" data-view="cloud" hidden>
         <div class="cube-pview">
           <div class="cube-pview__bar">
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" id="cube-cloud-color" role="group" aria-label="Colour by">
               <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
               <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
@@ -418,6 +443,10 @@
       <div class="cube-view" data-view="globe" hidden>
         <div class="cube-pview">
           <div class="cube-pview__bar">
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" id="cube-globe-color" role="group" aria-label="Colour by">
               <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
               <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
@@ -463,6 +492,10 @@
             <span class="cube-elev__at" id="cube-transect-at">Click a start point on the map, then an end point, to cut every tomogram along that line.</span>
             <button type="button" class="btn btn--mini" id="cube-transect-clear" hidden>Clear line</button>
             <button type="button" class="btn btn--mini" id="cube-transect-print" hidden title="Save the transect as paper-style figures under the run directory">Print</button>
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
@@ -506,6 +539,10 @@
               </div>
             </div>
             <span class="cube-elev__at" id="cube-range-at">Play the sweep, or scroll a panel to move through range.</span>
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
@@ -557,6 +594,10 @@
           <div class="cube-spaces" id="sc-axes" role="group" aria-label="Cut axes">
             <button type="button" class="cube-space is-active" data-axis="range">Range cut</button>
             <button type="button" class="cube-space" data-axis="azimuth">Azimuth cut</button>
+          </div>
+          <div class="cube-spaces" id="sc-sources" role="group" aria-label="Sources">
+            <button type="button" class="cube-space is-active" data-source="full">Capon full</button>
+            <button type="button" class="cube-space" data-source="param" title="Only runs whose loaded cube carries a parametrized tomogram render this row">Parametrized</button>
           </div>
           <div class="cube-spaces" id="sc-space" role="group" aria-label="Value space">
             <button type="button" class="cube-space is-active" data-space="physical">Physical</button>

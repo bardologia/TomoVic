@@ -1,10 +1,12 @@
 """Interactive server-side backend for the web UI cube explorer tabs.
 
 Opens the raw tomogram cubes written by the preprocessing pipeline together
-with their DEM and primary SLC amplitude, and renders slices, planes,
-transects and geocoded point clouds as PNG or packed binary payloads. Cubes
-are indexed by elevation bin, azimuth pixel and range pixel; elevation axes
-are in metres and geocoded positions in ECEF metres.
+with their DEM and primary SLC amplitude, optionally alongside the
+parametrized tomogram of a Gaussian parameter run reconstructed lazily on the
+same elevation axis, and renders slices, planes, transects and geocoded point
+clouds as PNG or packed binary payloads. Cubes are indexed by elevation bin,
+azimuth pixel and range pixel; elevation axes are in metres and geocoded
+positions in ECEF metres.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import numpy as np
 
 from catalog_roots              import CatalogRoots, RunScanner
 from lru_cache                  import LruCache
+from tools.data.gaussians       import GaussianMixture
 from tools.reporting.plotting   import PlotBase
 from tools.sar.geocoding        import SceneGeocoder
 from tools.sar.track_parameters import TrackParameters
@@ -40,7 +43,8 @@ class SliceFigureArchiver(PlotBase):
     """
 
     LABELS = {
-        "full" : "Capon full (raw)",
+        "full"  : "Capon full (raw)",
+        "param" : "Parametrized tomogram (Gaussian)",
     }
 
     def render(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, axis: str, az: int, rg: int, space: str, path: Path, cmap: str = "jet", label: str | None = None) -> Path:
@@ -161,6 +165,93 @@ class StitchedRaw:
         for offset, raw in self.blocks:
             plane[offset:offset + raw.shape[1]] = np.asarray(raw[index])
         return plane
+
+
+class ParametrizedTomogram:
+    """Lazy cube view over the parametrized tomogram of a parameter run.
+
+    The parametrized tomogram is the physical product of fitting per-pixel
+    Gaussian mixtures to the raw tomogram. This view presents it as a cube of
+    shape (elevation, azimuth, range) whose planes, columns and pixel gathers
+    are evaluated on demand from the parameter cube, so the reconstruction is
+    never materialised whole.
+
+    Attributes:
+        params: Parameter cube of shape (3 * n_gaussians, azimuth, range),
+            interleaved per slot as amplitude, mean in metres, width in metres.
+        x_axis: Elevation axis in metres of shape (elevation bins,).
+        n_gaussians: Number of Gaussian slots per pixel.
+        shape: Shape of the reconstructed cube, (elevation, azimuth, range).
+        dtype: Element type of the evaluated views.
+    """
+
+    CLIM_GRID = 128
+
+    def __init__(self, params: np.ndarray, x_axis: np.ndarray, n_gaussians: int) -> None:
+        """Stores the parameter cube and the elevation axis it is evaluated on."""
+        self.params      = params
+        self.x_axis      = np.asarray(x_axis, dtype=np.float64)
+        self.n_gaussians = n_gaussians
+        self.shape       = (int(self.x_axis.size), int(params.shape[1]), int(params.shape[2]))
+        self.dtype       = np.dtype(np.float32)
+
+    @property
+    def ndim(self) -> int:
+        """Number of axes of the reconstructed cube."""
+        return len(self.shape)
+
+    def __len__(self) -> int:
+        """Number of elevation planes."""
+        return self.shape[0]
+
+    def __getitem__(self, index):
+        """Evaluates one view of the parametrized tomogram.
+
+        Args:
+            index: Either an integer elevation bin, yielding the (azimuth,
+                range) plane at that bin's elevation, or a ``[:, az, rg]``
+                triple whose spatial parts may be integers, slices or index
+                arrays, yielding the elevation profiles of the addressed pixels.
+
+        Returns:
+            Float32 array with the elevation axis first, shaped by the spatial
+            parts of the index.
+
+        Raises:
+            IndexError: If an integer elevation bin is out of range.
+            ValueError: If the index follows neither supported pattern.
+        """
+        if isinstance(index, (int, np.integer)):
+            if not -self.shape[0] <= index < self.shape[0]:
+                raise IndexError(f"elevation bin {index} outside the {self.shape[0]} planes of the parametrized tomogram")
+            return GaussianMixture.evaluate_slice(self.params, float(self.x_axis[index]), self.n_gaussians)
+
+        if not (isinstance(index, tuple) and len(index) == 3 and index[0] == slice(None)):
+            raise ValueError(f"unsupported parametrized-tomogram index: {index!r}")
+
+        pixels = self.params[:, index[1], index[2]]
+        flat   = pixels.reshape(self.params.shape[0], -1).T
+
+        profiles = GaussianMixture.evaluate_batch(self.x_axis, flat[:, 0::3], flat[:, 1::3], flat[:, 2::3])
+        return profiles.T.reshape((self.shape[0],) + pixels.shape[1:])
+
+    def clim(self) -> tuple[float, float]:
+        """Returns the 1st and 99th percentile colour limits of the reconstruction.
+
+        Profiles are evaluated on a decimated pixel grid of at most CLIM_GRID
+        samples per spatial axis, so the limits are cheap yet deterministic.
+        """
+        step_az = max(1, self.shape[1] // self.CLIM_GRID)
+        step_rg = max(1, self.shape[2] // self.CLIM_GRID)
+
+        sample = self[:, slice(None, None, step_az), slice(None, None, step_rg)]
+        sample = sample[np.isfinite(sample)]
+
+        if sample.size == 0:
+            return 0.0, 1.0
+
+        vmin, vmax = np.percentile(sample, [1.0, 99.0])
+        return float(vmin), float(vmax)
 
 
 class StampReader:
@@ -285,13 +376,62 @@ class StampReader:
 
         return TrackParameters.load(path)
 
+    def param_tags(self) -> list[str]:
+        """Lists the parameter runs stored under the run's ``params`` directory.
+
+        Returns:
+            Sorted names of the ``params`` subdirectories holding a
+            ``parameters.npy``; empty when the run stores no parameter runs.
+        """
+        params_dir = self.run_dir / "params"
+        if not params_dir.is_dir():
+            return []
+
+        return sorted(child.name for child in params_dir.iterdir() if (child / "parameters.npy").is_file())
+
+    def param_meta(self, tag: str) -> dict:
+        """Returns the ``param_extraction_meta.json`` of one parameter run.
+
+        Args:
+            tag: Name of the parameter run under ``params``.
+
+        Raises:
+            FileNotFoundError: If that parameter run stores no metadata file.
+        """
+        path = self.run_dir / "params" / tag / "param_extraction_meta.json"
+        if not path.is_file():
+            raise FileNotFoundError(f"param_extraction_meta.json missing in {path.parent}; rerun the parameter extraction to regenerate it")
+
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def param_block(self, tag: str) -> np.ndarray:
+        """Loads the Gaussian parameter cube of one parameter run.
+
+        Args:
+            tag: Name of the parameter run under ``params``.
+
+        Returns:
+            Float32 parameter cube of shape (3 * k_max, azimuth, range),
+            interleaved per slot as amplitude, mean in metres, width in metres.
+
+        Raises:
+            FileNotFoundError: If that parameter run stores no ``parameters.npy``.
+        """
+        path = self.run_dir / "params" / tag / "parameters.npy"
+        if not path.is_file():
+            raise FileNotFoundError(f"parameters.npy missing in {path.parent}; rerun the parameter extraction to regenerate it")
+
+        return np.asarray(np.load(path), dtype=np.float32)
+
 
 class CubeExplorer:
     """Loads one preprocessing run at a time and serves views of it to the web UI.
 
     Holds a single loaded cube in memory behind a lock: the raw tomogram, the
-    primary SLC amplitude map in dB, the DEM and the geocoding context. Loading
-    runs in a background thread whose progress is polled through ``load_status``.
+    primary SLC amplitude map in dB, the DEM, the geocoding context and, when a
+    parameter run tag is given, the lazily reconstructed parametrized tomogram
+    of that run. Loading runs in a background thread whose progress is polled
+    through ``load_status``.
 
     Attributes:
         logger: Web logger for load and save reporting.
@@ -303,9 +443,9 @@ class CubeExplorer:
         status: Load state machine payload polled by the front end.
     """
 
-    SOURCES             = ("full",)
-    CLOUD_CURVE_SOURCES = ("full",)
-    GLOBE_SOURCES       = ("full",)
+    SOURCES             = ("full", "param")
+    CLOUD_CURVE_SOURCES = ("full", "param")
+    GLOBE_SOURCES       = ("full", "param")
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
@@ -334,30 +474,55 @@ class CubeExplorer:
 
         return {"ok": True, "root": scanned["root"], "cubes": scanned["entries"]}
 
-    def start_load(self, cube_id: str) -> dict:
-        """Starts loading a cube in a background thread.
+    def param_runs(self, cube_id: str) -> dict:
+        """Lists the parameter runs stored under one preprocessing run.
 
         Args:
             cube_id: Preprocessing run directory path.
 
         Returns:
-            Dict with ``ok`` True once the load was started or the cube is already
-            loaded, otherwise ``ok`` False with the reason.
+            Dict with ``ok`` and the sorted parameter-run ``tags``, or ``ok``
+            False when the id is unknown.
         """
         reader = self._open_source(cube_id)
         if reader is None:
             return {"ok": False, "error": f"unknown cube id: {cube_id}"}
 
+        return {"ok": True, "tags": reader.param_tags()}
+
+    def start_load(self, cube_id: str, param_tag: str | None = None) -> dict:
+        """Starts loading a cube in a background thread.
+
+        Args:
+            cube_id: Preprocessing run directory path.
+            param_tag: Optional parameter run whose parametrized tomogram is
+                loaded alongside the raw cube.
+
+        Returns:
+            Dict with ``ok`` True once the load was started or the cube is already
+            loaded with the same parameter run, otherwise ``ok`` False with the
+            reason.
+        """
+        reader = self._open_source(cube_id)
+        if reader is None:
+            return {"ok": False, "error": f"unknown cube id: {cube_id}"}
+
+        param_tag = param_tag or None
+        if param_tag is not None:
+            tags = reader.param_tags()
+            if param_tag not in tags:
+                return {"ok": False, "error": f"unknown parameter run tag '{param_tag}' for {cube_id}; available: {tags}"}
+
         with self.lock:
             if self.status["state"] == "loading":
                 return {"ok": False, "error": f"a load is already running for {self.status['id']}"}
-            if self.status["state"] == "ready" and self.status["id"] == cube_id and self.loaded is not None:
+            if self.status["state"] == "ready" and self.status["id"] == cube_id and self.loaded is not None and self.loaded["param_tag"] == param_tag:
                 return {"ok": True}
 
             self.loaded = None
             self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "error": ""}
 
-        threading.Thread(target=self._load_worker, args=(cube_id, reader), daemon=True).start()
+        threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
         return {"ok": True}
 
     def load_status(self) -> dict:
@@ -417,6 +582,34 @@ class CubeExplorer:
             sources[source] = {"heights": heights.tolist(), "values": values.astype(float).tolist()}
 
         return {"ok": True, "az": az, "rg": rg, "sources": sources}
+
+    def params_at(self, cube_id: str, az: int, rg: int) -> dict:
+        """Returns the Gaussian slots of the loaded parameter run at one pixel.
+
+        Args:
+            cube_id: Id of the loaded cube.
+            az: Azimuth pixel index, clipped into range.
+            rg: Range pixel index, clipped into range.
+
+        Returns:
+            Dict with ``ok``, the clipped ``az`` and ``rg``, the parameter run
+            ``tag`` and the ``slots`` ordered by ascending mean, each holding
+            ``amplitude``, ``mean`` in metres and ``sigma`` in metres; inactive
+            slots are included with their stored values.
+        """
+        entry = self._entry(cube_id, "param")
+        if entry is None:
+            return {"ok": False, "error": "no parameter run is loaded; load the cube with a param_tag first"}
+
+        block = entry["params"]
+        az    = int(np.clip(az, 0, block.shape[1] - 1))
+        rg    = int(np.clip(rg, 0, block.shape[2] - 1))
+
+        pixel = block[:, az, rg]
+        slots = [{"amplitude": float(pixel[3 * k]), "mean": float(pixel[3 * k + 1]), "sigma": float(pixel[3 * k + 2])} for k in range(entry["n_gaussians"])]
+        slots.sort(key=lambda slot: slot["mean"])
+
+        return {"ok": True, "az": az, "rg": rg, "tag": entry["tag"], "slots": slots}
 
     def slice_png(self, cube_id: str, source: str, axis: str, az: int, rg: int, space: str = "physical", cmap: str = "jet") -> bytes | None:
         """Renders one elevation slice of a source as a PNG.
@@ -900,19 +1093,20 @@ class CubeExplorer:
             return None
         return StampReader(run_dir)
 
-    def _load_worker(self, cube_id: str, reader: StampReader) -> None:
+    def _load_worker(self, cube_id: str, reader: StampReader, param_tag: str | None) -> None:
         """Loads a cube in the background and publishes the ready or error status.
 
         Args:
             cube_id: Id being loaded.
             reader: Reader opened for that id.
+            param_tag: Parameter run loaded alongside the raw cube, or None.
         """
         try:
-            entries, meta, primary, dem, geo = self._load_all(reader)
+            entries, meta, primary, dem, geo = self._load_all(reader, param_tag)
             clim = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
 
             with self.lock:
-                self.loaded = {"id": cube_id, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "geo": geo}
+                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "geo": geo}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
 
             self.logger.muted(f"cube ready: {cube_id} sources={meta['sources']}")
@@ -923,11 +1117,13 @@ class CubeExplorer:
 
             self.logger.error(f"cube load failed: {cube_id}: {exc}")
 
-    def _load_all(self, reader: StampReader) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
+    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
 
         Args:
             reader: Preprocessing run reader to pull from.
+            param_tag: Parameter run whose parametrized tomogram is loaded as
+                the ``param`` source, or None for the raw cube alone.
 
         Returns:
             Tuple of the per-source entries, the front-end metadata payload, the
@@ -963,6 +1159,9 @@ class CubeExplorer:
 
         entries = {"full": self._ingest(full_raw, x_axis, lambda: advance("full"))}
 
+        if param_tag is not None:
+            entries["param"] = self._param_entry(reader, param_tag, n_az, n_rg, x_axis)
+
         primary = self._primary_db(reader, n_az, n_rg)
         dem     = self._load_dem(reader, n_az, n_rg)
         geo     = self._load_geo(reader, dem, n_az, n_rg)
@@ -975,11 +1174,88 @@ class CubeExplorer:
             "x_min"     : float(x_axis[0]),
             "x_max"     : float(x_axis[-1]),
             "intensity" : {s: [entries[s]["vmin"], entries[s]["vmax"]] for s in entries},
+            "param"     : self._param_meta_payload(entries.get("param")),
             "dem"       : dem is not None,
             "spacing"   : self._load_spacing(reader),
             "globe"     : self._globe_meta(geo),
         }
         return entries, meta, primary, dem, geo
+
+    def _param_entry(self, reader: StampReader, tag: str, n_az: int, n_rg: int, x_axis: np.ndarray) -> dict:
+        """Builds the lazily reconstructed parametrized-tomogram entry of one run.
+
+        Args:
+            reader: Preprocessing run reader.
+            tag: Parameter run tag under the run's ``params`` directory.
+            n_az: Azimuth extent of the raw tomogram, in pixels.
+            n_rg: Range extent of the raw tomogram, in pixels.
+            x_axis: Elevation axis of the raw tomogram in metres.
+
+        Returns:
+            Entry with the lazy ``cube``, its ``x_axis``, deterministic colour
+            limits from a reconstruction subsample, the raw parameter ``params``
+            block, the ``tag``, the ``n_gaussians`` slot count and the recorded
+            ``k_max``.
+
+        Raises:
+            ValueError: If the parameter cube is misshaped, its footprint
+                disagrees with the tomogram or its slot count disagrees with the
+                recorded ``k_max``.
+        """
+        block = reader.param_block(tag)
+        meta  = reader.param_meta(tag)
+
+        if block.ndim != 3 or block.shape[0] % 3 != 0:
+            raise ValueError(f"parameters.npy of '{tag}' is not a (3*k, azimuth, range) cube: shape={block.shape}")
+        if block.shape[1:] != (n_az, n_rg):
+            raise ValueError(f"parameters.npy of '{tag}' footprint {block.shape[1:]} does not match the {n_az}x{n_rg} tomogram")
+
+        n_gaussians = block.shape[0] // 3
+        k_max       = int(meta["k_max"])
+        if n_gaussians != k_max:
+            raise ValueError(f"parameters.npy of '{tag}' holds {n_gaussians} slots but its metadata records k_max={k_max}")
+
+        cube       = ParametrizedTomogram(block, x_axis, n_gaussians)
+        vmin, vmax = cube.clim()
+
+        return {
+            "cube"        : cube,
+            "x_axis"      : x_axis,
+            "vmin"        : vmin,
+            "vmax"        : vmax,
+            "params"      : block,
+            "tag"         : tag,
+            "n_gaussians" : n_gaussians,
+            "k_max"       : k_max,
+        }
+
+    @staticmethod
+    def _param_meta_payload(entry: dict | None) -> dict | None:
+        """Serialises the loaded parameter run for the front end.
+
+        Args:
+            entry: Loaded ``param`` entry, or None when no parameter run is loaded.
+
+        Returns:
+            Dict with the ``tag``, ``n_gaussians``, ``k_max`` and the finite
+            value range of each parameter field across all slots, or None.
+        """
+        if entry is None:
+            return None
+
+        block  = entry["params"]
+        fields = {}
+        for offset, name in enumerate(("amplitude", "mean", "sigma")):
+            values       = block[offset::3]
+            finite       = values[np.isfinite(values)]
+            fields[name] = [float(finite.min()), float(finite.max())] if finite.size else [0.0, 0.0]
+
+        return {
+            "tag"         : entry["tag"],
+            "n_gaussians" : entry["n_gaussians"],
+            "k_max"       : entry["k_max"],
+            "fields"      : fields,
+        }
 
     def _load_spacing(self, reader: StampReader) -> dict | None:
         """Returns the reference track's azimuth and range pixel spacing in metres.
@@ -1282,7 +1558,7 @@ class SliceCollector:
         contexts: LRU cache of opened run contexts, keyed by run directory.
     """
 
-    SOURCES    = ("full",)
+    SOURCES    = ("full", "param")
     AXES       = ("range", "azimuth")
     MAX_RUNS   = 24
     MAX_POINTS = 24
@@ -1645,6 +1921,12 @@ class SliceCollector:
         x_axis             = self.cubes._elevation_axis(reader, n_elev)
 
         entries = {"full": self._entry(full_raw, x_axis)}
+
+        tags = reader.param_tags()
+        if len(tags) == 1:
+            entries["param"] = self.cubes._param_entry(reader, tags[0], n_az, n_rg, x_axis)
+        elif len(tags) > 1:
+            self.logger.warning(f"{run_dir.name} holds {len(tags)} parameter runs ({', '.join(tags)}); the collector serves none of them — the Cube tab loads a chosen tag explicitly")
 
         return {
             "run_dir" : run_dir,

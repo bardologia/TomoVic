@@ -1,8 +1,9 @@
 """API routes of the Cube Explorer and slice-collector tabs.
 
-Exposes preprocessing-run listing and loading, plane/slice/transect renderings,
-colour bars, point clouds for the 3D and globe views, the DEM grid and
-multi-run slice collection.
+Exposes preprocessing-run listing and loading, parameter-run listing and the
+per-pixel Gaussian readout of the parametrized tomogram, plane/slice/transect
+renderings, colour bars, point clouds for the 3D and globe views, the DEM grid
+and multi-run slice collection.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ class CubeRouter(SubRouter):
     def declare(self, table: RouteTable) -> None:
         """Registers the /api/cubes routes."""
         table.add("GET", "/api/cubes",              self.listing)
+        table.add("GET", "/api/cubes/param_runs",   self.param_runs)
+        table.add("GET", "/api/cubes/params_at",    self.params_at)
         table.add("GET", "/api/cubes/status",       self.status)
         table.add("GET", "/api/cubes/primary",      self.primary)
         table.add("GET", "/api/cubes/profiles",     self.profiles)
@@ -45,6 +48,19 @@ class CubeRouter(SubRouter):
     def listing(self, exchange: HttpExchange) -> None:
         """Answers with the preprocessing runs under the requested base."""
         exchange.send_json(self.cubes.list_cubes(exchange.text("base")))
+
+    def param_runs(self, exchange: HttpExchange) -> None:
+        """Answers with the parameter-run tags stored under the requested run."""
+        exchange.send_result(self.cubes.param_runs(exchange.text("id")), 404)
+
+    def params_at(self, exchange: HttpExchange) -> None:
+        """Answers with the Gaussian slots of the parametrized tomogram at one pixel."""
+        result = self.cubes.params_at(
+            cube_id = exchange.text("id"),
+            az      = exchange.integer("az"),
+            rg      = exchange.integer("rg"),
+        )
+        exchange.send_result(result, 404)
 
     def status(self, exchange: HttpExchange) -> None:
         """Answers with the progress of the running cube load."""
@@ -130,8 +146,8 @@ class CubeRouter(SubRouter):
         exchange.send_png(png)
 
     def load(self, exchange: HttpExchange) -> None:
-        """Starts loading the cube named in the request body."""
-        exchange.send_result(self.cubes.start_load(exchange.body.get("id", "")))
+        """Starts loading the cube named in the request body, with an optional parameter run."""
+        exchange.send_result(self.cubes.start_load(exchange.body.get("id", ""), exchange.body.get("param_tag")))
 
     def save_transect(self, exchange: HttpExchange) -> None:
         """Saves the transect described in the request body as a figure on disk."""

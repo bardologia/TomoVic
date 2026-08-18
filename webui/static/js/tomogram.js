@@ -113,7 +113,7 @@ class TomogramSweep {
   }
 
   _prefetch(idx) {
-    this.panels.filter((panel) => !panel.root.hidden).forEach((panel) => this.host.cacheBitmap(this._url(panel.source, idx)));
+    if (this.panels.some((panel) => !panel.root.hidden)) this.host.cacheBitmap(this._url(this.host.srcFor(), idx));
   }
 
   _onWheel(ev) {
@@ -156,7 +156,7 @@ class TomogramSweep {
   }
 
   async _fetch(panel, idx, token) {
-    const url = this._url(panel.source, idx);
+    const url = this._url(this.host.srcFor(), idx);
     const skeletonTimer = panel.bitmap ? null : setTimeout(() => panel.root.classList.add("is-loading"), 120);
 
     try {
@@ -345,7 +345,7 @@ class TomogramTransect {
   }
 
   async _fetch(panel, token) {
-    const url = `/api/cubes/transect?id=${encodeURIComponent(this.host.selectedId)}&source=${panel.source}` +
+    const url = `/api/cubes/transect?id=${encodeURIComponent(this.host.selectedId)}&source=${this.host.srcFor()}` +
       `&az0=${this.start.az}&rg0=${this.start.rg}&az1=${this.end.az}&rg1=${this.end.rg}&space=${this.host.space}&cmap=${this.host.cmap}`;
 
     const skeletonTimer = setTimeout(() => panel.root.classList.add("is-loading"), 120);
@@ -493,6 +493,7 @@ class TomogramCloud {
 
   configure(meta) {
     this.available = meta.sources.includes("full");
+    this.source = this.host.srcFor();
     this.points = null;
     this.demGrid = null;
     this.demWrap.hidden = !meta.dem;
@@ -729,7 +730,7 @@ class TomogramCloud {
 }
 
 class TomogramView {
-  static LABELS = { full: "capon full" };
+  static LABELS = { full: "capon full", param: "parametrized" };
   static HOLD_SAVE_MS = 4000;
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
@@ -763,6 +764,12 @@ class TomogramView {
     this.progress = refs.progress;
     this.progressFill = refs.progressFill;
     this.progressLabel = refs.progressLabel;
+    this.paramRow = refs.paramRow;
+    this.paramSel = refs.paramSel;
+    this.slotsEl = refs.slots;
+    this.slotsBody = refs.slotsBody;
+    this.srcGroups = refs.srcGroups || [];
+    this.cutStacks = refs.cutStacks || [];
 
     this.atLabels = {
       range   : this.slicesEl.querySelector('.cube-cutgroup__at[data-axis="range"]'),
@@ -791,6 +798,8 @@ class TomogramView {
     this.view = "explorer";
     this.colors = {};
     this.visible = new Set();
+    this.paramTags = [];
+    this.viewSource = "full";
     this.cmap = localStorage.getItem("cube-cmap") || "jet";
     this.sweepSpeed = Number(localStorage.getItem("cube-sweep-speed")) || 1;
     this.lensZoom = Number(localStorage.getItem("cube-lens-zoom") || 3);
@@ -848,6 +857,13 @@ class TomogramView {
       this.cmapSel.value = this.cmap;
       this.cmapSel.addEventListener("change", () => this._setCmap(this.cmapSel.value));
     }
+
+    if (this.paramSel) this.paramSel.addEventListener("change", () => this._onParamPick());
+    this.srcGroups.forEach((group) => {
+      group.querySelectorAll(".cube-space").forEach((btn) => {
+        btn.addEventListener("click", () => this._setViewSource(btn.dataset.ssource));
+      });
+    });
 
     if (this.jumpAz) this.jumpAz.addEventListener("change", () => this._setManualCut());
     if (this.jumpRg) this.jumpRg.addEventListener("change", () => this._setManualCut());
@@ -913,12 +929,12 @@ class TomogramView {
     this.runStrip.render(this.cubes);
   }
 
-  async select(cubeId) {
+  async select(cubeId, force = false) {
     if (this.polling) {
       Toast.show("A cube is still loading.", "warn");
       return;
     }
-    if (cubeId === this.selectedId && this.meta) return;
+    if (!force && cubeId === this.selectedId && this.meta) return;
 
     this._stopSweeps();
     this.selectedId = cubeId;
@@ -948,9 +964,16 @@ class TomogramView {
     this.slicesEl.hidden = true;
     this.slicesEl.classList.remove("is-in");
     this.hint.hidden = true;
+    if (this.slotsEl) this.slotsEl.hidden = true;
     this._renderStrip();
 
-    const res = await Api.post("/api/cubes/load", { id: cubeId });
+    if (!force) await this._syncParamTags();
+
+    const body = { id: cubeId };
+    const tag = this._paramTag();
+    if (tag) body.param_tag = tag;
+
+    const res = await Api.post("/api/cubes/load", body);
     if (!res.ok) {
       this.hint.textContent = res.error || "Cube load failed.";
       this.hint.hidden = false;
@@ -960,6 +983,50 @@ class TomogramView {
     this._setProgress(0, "loading");
     this.progress.hidden = false;
     await this._poll();
+  }
+
+  async _syncParamTags() {
+    const res = await Api.get(`/api/cubes/param_runs?id=${encodeURIComponent(this.selectedId)}`);
+    this.paramTags = (res && res.ok && res.tags) || [];
+    this._renderParamPicker();
+  }
+
+  _paramTag() {
+    const stored = localStorage.getItem(`cube-param:${this.selectedId}`) || "";
+    return this.paramTags.includes(stored) ? stored : "";
+  }
+
+  _renderParamPicker() {
+    if (!this.paramRow || !this.paramSel) return;
+
+    this.paramRow.hidden = !this.paramTags.length;
+    this.paramSel.innerHTML = "";
+    if (!this.paramTags.length) return;
+
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "none";
+    this.paramSel.appendChild(none);
+
+    this.paramTags.forEach((tag) => {
+      const option = document.createElement("option");
+      option.value = tag;
+      option.textContent = tag;
+      this.paramSel.appendChild(option);
+    });
+    this.paramSel.value = this._paramTag();
+  }
+
+  _onParamPick() {
+    if (!this.selectedId) return;
+    if (this.polling) {
+      Toast.show("A cube is still loading.", "warn");
+      this.paramSel.value = this._paramTag();
+      return;
+    }
+
+    localStorage.setItem(`cube-param:${this.selectedId}`, this.paramSel.value);
+    this.select(this.selectedId, true);
   }
 
   async _poll() {
@@ -1017,9 +1084,13 @@ class TomogramView {
     const css = getComputedStyle(this.stage);
     this.colors = {
       full    : css.getPropertyValue("--src-full").trim(),
+      param   : css.getPropertyValue("--src-param").trim(),
       range   : css.getPropertyValue("--cut-range").trim(),
       azimuth : css.getPropertyValue("--cut-azimuth").trim(),
     };
+
+    if (!this.paramActive) this.viewSource = "full";
+    this._syncSrcBtns();
 
     this._syncSpaceBtns();
     this._syncProfModeBtns();
@@ -1229,8 +1300,53 @@ class TomogramView {
     this.profPanels.forEach((panel) => {
       panel.root.hidden = !this.visible.has(panel.source);
     });
+    this.cutStacks.forEach((stack) => stack.classList.toggle("is-split", this.paramActive));
 
     this.sweeps.forEach((sweep) => sweep.applyVisibility());
+  }
+
+  get paramActive() {
+    return !!(this.meta && this.meta.sources.includes("param"));
+  }
+
+  srcFor() {
+    return this.paramActive && this.viewSource === "param" ? "param" : "full";
+  }
+
+  _setViewSource(source) {
+    if (!["full", "param"].includes(source) || source === this.viewSource) return;
+
+    this.viewSource = source;
+    this._syncSrcBtns();
+    if (!this.meta) return;
+
+    if (this.cloud) {
+      this.cloud.source = this.srcFor();
+      this.cloud.points = null;
+      this.cloud._syncThresholdLabel();
+    }
+    if (this.globe) {
+      this.globe.source = this.srcFor();
+      this.globe.points = null;
+      this.globe.muRange = null;
+      this.globe._syncThresholdLabel();
+    }
+
+    if (this.view === "transect" && this.transect) { this.transect.syncSpace(); return; }
+    if (this.view === "cloud" && this.cloud)       { this.cloud.render(); return; }
+    if (this.view === "globe" && this.globe)       { this.globe.render(); return; }
+
+    const sweep = this._sweepFor(this.view);
+    if (sweep) sweep.render();
+  }
+
+  _syncSrcBtns() {
+    this.srcGroups.forEach((group) => {
+      group.hidden = !this.paramActive;
+      group.querySelectorAll(".cube-space").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.ssource === this.viewSource);
+      });
+    });
   }
 
   _syncSpaceBtns() {
@@ -1563,38 +1679,62 @@ class TomogramView {
       this.profPanels.forEach((panel) => panel.root.classList.add("is-stale"));
     }, 180);
 
-    const data = await Api.get(`/api/cubes/profiles?id=${encodeURIComponent(this.selectedId)}&az=${az}&rg=${rg}`);
+    const id = encodeURIComponent(this.selectedId);
+    const jobs = [Api.get(`/api/cubes/profiles?id=${id}&az=${az}&rg=${rg}`)];
+    if (this.paramActive) jobs.push(Api.get(`/api/cubes/params_at?id=${id}&az=${az}&rg=${rg}`));
+
+    const [data, slots] = await Promise.all(jobs);
 
     clearTimeout(staleTimer);
     this.profPanels.forEach((panel) => panel.root.classList.remove("is-stale"));
+
+    this._renderSlots(slots);
 
     if (!data.ok) return;
     this.profData = data;
     this._drawProfiles();
   }
 
+  _renderSlots(slots) {
+    if (!this.slotsEl || !this.slotsBody) return;
+
+    if (!this.paramActive || !slots || !slots.ok || !slots.slots) {
+      this.slotsEl.hidden = true;
+      this.slotsBody.innerHTML = "";
+      return;
+    }
+
+    this.slotsBody.innerHTML = "";
+    slots.slots.forEach((slot, idx) => {
+      const row = document.createElement("tr");
+      [String(idx + 1), this._fmt(slot.amplitude), this._fmt(slot.mean), this._fmt(slot.sigma)].forEach((text) => {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        row.appendChild(cell);
+      });
+      this.slotsBody.appendChild(row);
+    });
+    this.slotsEl.hidden = false;
+  }
+
   _drawProfiles() {
     if (!this.profData) return;
 
-    let shared = null;
-    if (this.profMode === "unit") {
-      shared = 0;
-      this.profPanels.forEach((panel) => {
-        if (panel.root.hidden) return;
-        const series = this.profData.sources[panel.source];
-        if (series) shared = Math.max(shared, ...this._scaledValues(series));
-      });
-      if (!shared) shared = 1;
-    }
-
     this.profPanels.forEach((panel) => {
       if (panel.root.hidden) return;
-      const series = this.profData.sources[panel.source];
-      if (series) this._drawProfile(panel, series, shared);
+
+      const overlays = [panel.source];
+      if (panel.source === "full" && this.paramActive) overlays.push("param");
+
+      const seriesList = overlays
+        .map((source) => ({ source, series: this.profData.sources[source] }))
+        .filter((entry) => entry.series);
+
+      if (seriesList.length) this._drawProfile(panel, seriesList);
     });
   }
 
-  _drawProfile(panel, series, shared) {
+  _drawProfile(panel, seriesList) {
     const canvas = panel.canvas;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth || 240;
@@ -1609,18 +1749,18 @@ class TomogramView {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const heights = series.heights;
-    const values = this._scaledValues(series);
-    const n = values.length;
-    if (n < 2) return;
+    const traces = seriesList
+      .map(({ source, series }) => ({ source, heights: series.heights, values: this._scaledValues(series) }))
+      .filter((trace) => trace.values.length >= 2);
+    if (!traces.length) return;
 
     const padL = 8, padR = 8, padT = 16, padB = 8;
     const innerW = w - padL - padR;
     const innerH = h - padT - padB;
-    const hMin = heights[0];
-    const hMax = heights[n - 1];
+    const hMin = Math.min(...traces.map((trace) => trace.heights[0]));
+    const hMax = Math.max(...traces.map((trace) => trace.heights[trace.heights.length - 1]));
     const span = hMax - hMin || 1;
-    const vMax = shared || Math.max(...values) || 1;
+    const vMax = Math.max(...traces.map((trace) => Math.max(...trace.values))) || 1;
 
     const xAt = (value) => padL + (value / vMax) * innerW * 0.96;
     const yAt = (height) => padT + (1 - (height - hMin) / span) * innerH;
@@ -1635,39 +1775,64 @@ class TomogramView {
       ctx.stroke();
     }
 
-    ctx.beginPath();
-    ctx.moveTo(xAt(0), yAt(heights[0]));
-    for (let i = 0; i < n; i++) ctx.lineTo(xAt(values[i]), yAt(heights[i]));
-    ctx.lineTo(xAt(0), yAt(heights[n - 1]));
-    ctx.closePath();
-    ctx.globalAlpha = 0.12;
-    ctx.fillStyle = this.colors[panel.source] || "#555";
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    traces.forEach((trace, order) => {
+      const { heights, values } = trace;
+      const n = values.length;
+      const color = this.colors[trace.source] || "#555";
 
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      if (i === 0) ctx.moveTo(xAt(values[i]), yAt(heights[i]));
-      else ctx.lineTo(xAt(values[i]), yAt(heights[i]));
-    }
-    ctx.strokeStyle = this.colors[panel.source] || "#555";
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(xAt(0), yAt(heights[0]));
+      for (let i = 0; i < n; i++) ctx.lineTo(xAt(values[i]), yAt(heights[i]));
+      ctx.lineTo(xAt(0), yAt(heights[n - 1]));
+      ctx.closePath();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
 
-    let peak = 0;
-    for (let i = 1; i < n; i++) if (values[i] > values[peak]) peak = i;
-    ctx.beginPath();
-    ctx.arc(xAt(values[peak]), yAt(heights[peak]), 2.6, 0, Math.PI * 2);
-    ctx.fillStyle = this.colors[panel.source] || "#555";
-    ctx.fill();
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        if (i === 0) ctx.moveTo(xAt(values[i]), yAt(heights[i]));
+        else ctx.lineTo(xAt(values[i]), yAt(heights[i]));
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      let peak = 0;
+      for (let i = 1; i < n; i++) if (values[i] > values[peak]) peak = i;
+      ctx.beginPath();
+      ctx.arc(xAt(values[peak]), yAt(heights[peak]), 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      ctx.fillStyle = color;
+      ctx.font = "9.5px 'JetBrains Mono', monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`peak ${this._fmt(values[peak])} @ ${this._fmt(heights[peak])}`, w - 4, padT - 5 + order * 11);
+    });
 
     ctx.fillStyle = "rgba(20, 25, 30, 0.55)";
     ctx.font = "9.5px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";
     ctx.fillText(this._fmt(hMax), padL + 2, padT - 5);
     ctx.fillText(this._fmt(hMin), padL + 2, h - padB - 3);
-    ctx.textAlign = "right";
-    ctx.fillText(`peak ${this._fmt(values[peak])} @ ${this._fmt(heights[peak])}`, w - 4, padT - 5);
+
+    if (traces.length > 1) {
+      const entries = traces.map((trace) => ({
+        color : this.colors[trace.source] || "#555",
+        label : TomogramView.LABELS[trace.source] || trace.source,
+      }));
+      let x = w - padR - 4 - entries.reduce((sum, entry) => sum + 20 + ctx.measureText(entry.label).width, -20);
+
+      ctx.textAlign = "left";
+      entries.forEach((entry) => {
+        ctx.fillStyle = entry.color;
+        ctx.fillRect(x, h - padB - 11, 8, 8);
+        ctx.fillText(entry.label, x + 12, h - padB - 4);
+        x += 20 + ctx.measureText(entry.label).width;
+      });
+    }
   }
 
   _scaledValues(series) {

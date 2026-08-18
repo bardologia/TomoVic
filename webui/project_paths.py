@@ -88,7 +88,9 @@ class ProjectPaths:
         "pre_process"                  : "processing",
         "generate_tomogram"            : "processing",
         "generate_interferograms"      : "processing",
+        "extract_params"               : "processing",
         "analyze_preprocessing"        : "analysis",
+        "analyze_param_extraction"     : "analysis",
         "compare_preprocessing_trials" : "analysis",
     }
 

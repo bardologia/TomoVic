@@ -62,9 +62,11 @@ class DatasetRouter(SubRouter):
 
     def declare(self, table: RouteTable) -> None:
         """Registers the /api/fs routes."""
-        table.add("GET", "/api/fs/datasets",   self.dataset_roots)
-        table.add("GET", "/api/fs/runs",       self.runs)
-        table.add("GET", "/api/fs/run_groups", self.run_groups)
+        table.add("GET", "/api/fs/datasets",     self.dataset_roots)
+        table.add("GET", "/api/fs/runs",         self.runs)
+        table.add("GET", "/api/fs/run_groups",   self.run_groups)
+        table.add("GET", "/api/fs/param_trials", self.param_trials)
+        table.add("GET", "/api/fs/params",       self.params)
 
     def dataset_roots(self, exchange: HttpExchange) -> None:
         """Answers with the datasets found under the requested base directory."""
@@ -77,3 +79,11 @@ class DatasetRouter(SubRouter):
     def run_groups(self, exchange: HttpExchange) -> None:
         """Answers with the run directories grouped by their parent trial."""
         exchange.send_result(self.datasets.run_groups(exchange.texts("base")))
+
+    def param_trials(self, exchange: HttpExchange) -> None:
+        """Answers with the parametrized-tomogram runs under the requested base."""
+        exchange.send_result(self.datasets.param_trials(exchange.text("base")))
+
+    def params(self, exchange: HttpExchange) -> None:
+        """Answers with the parameter runs belonging to one dataset."""
+        exchange.send_result(self.datasets.params(exchange.text("dataset")))

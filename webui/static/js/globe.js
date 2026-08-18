@@ -51,6 +51,7 @@ class TomogramGlobe {
 
   configure(meta) {
     this.available = !!meta.globe && meta.sources.includes("full");
+    this.source = this.host.srcFor();
 
     const hasTracks = !!(meta.globe && meta.globe.tracks);
     this.tracksEl.disabled = !hasTracks;

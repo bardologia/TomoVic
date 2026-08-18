@@ -28,6 +28,22 @@ class LaunchLayout:
 
     NUM_WORKERS = {"kind": "number", "int": True, "min": 0, "max": 64, "presets": [0, 2, 4, 8, 16, 32]}
 
+    PICK_DATASETS = {"kind": "dataset", "mode": "datasets", "multi": True, "baseFrom": "dataset_base_path", "validOnly": True}
+
+    MULTI_K      = {"kind": "multi", "numeric": True, "integer": True, "placeholder": "add K, Enter", "empty": "select at least one K"}
+    MULTI_LAMBDA = {"kind": "multi", "numeric": True, "placeholder": "add lambda, Enter", "empty": "select at least one lambda"}
+    MULTI_GPUS   = {"kind": "multi", "numeric": True, "integer": True, "placeholder": "add GPU id, Enter", "empty": "select at least one GPU"}
+
+    MULTI_FIT_MODES = {"kind": "multi", "empty": "select at least one fit mode", "choices": [
+        {"value": "sigma",        "label": "sigma only"},
+        {"value": "amp",          "label": "amplitude only"},
+        {"value": "mu",           "label": "mean only"},
+        {"value": "sigma_amp",    "label": "sigma + amplitude"},
+        {"value": "sigma_mu",     "label": "sigma + mean"},
+        {"value": "amp_mu",       "label": "amplitude + mean"},
+        {"value": "sigma_amp_mu", "label": "sigma + amplitude + mean"},
+    ]}
+
     TEMPLATES = {}
 
     LAYOUTS = {
@@ -44,6 +60,40 @@ class LaunchLayout:
                 ]},
             ],
         },
+        "extract_params": {
+            "sections": [
+                {"key": "config", "title": "Configuration", "panels": [
+                    {"kind": "fields", "groups": [
+                        {"title": "Datasets", "fields": [
+                            "dataset_base_path",
+                            {"path": "dataset_filter", "widget": PICK_DATASETS},
+                            "pyrat_directory",
+                        ]},
+                        {"title": "Output", "fields": ["output_prefix", "output_suffix", "height_range"]},
+                        {"title": "Fit sweep", "fields": [
+                            {"path": "fit_k_values", "widget": MULTI_K},
+                            {"path": "fit_lambda_values", "widget": MULTI_LAMBDA},
+                            {"path": "fit_modes", "widget": MULTI_FIT_MODES},
+                            "fit_sigma_init_divisor",
+                        ]},
+                        {"title": "Fit constants", "fields": [
+                            "fit_threshold_factor",
+                            "fit_truncation_index",
+                            "fit_prominence_frac",
+                            "fit_activity_threshold",
+                            "adam_steps",
+                            "adam_lr",
+                        ]},
+                        {"title": "Execution", "fields": [
+                            {"path": "gpu_device_ids", "widget": MULTI_GPUS},
+                            "range_batch_size",
+                            "gpu_pixel_batch_size",
+                            {"path": "parameter_workers", "widget": NUM_WORKERS},
+                        ]},
+                    ]},
+                ]},
+            ],
+        },
         "analyze_preprocessing": {
             "sections": [
                 {"key": "config", "title": "Configuration", "panels": [
@@ -52,6 +102,19 @@ class LaunchLayout:
                             "runs_dir",
                             {"path": "run_tags", "widget": {"kind": "dataset", "mode": "runs", "multi": True, "baseFrom": "runs_dir"}},
                         ]},
+                    ]},
+                ]},
+            ],
+        },
+        "analyze_param_extraction": {
+            "sections": [
+                {"key": "config", "title": "Configuration", "panels": [
+                    {"kind": "fields", "groups": [
+                        {"title": "Runs", "fields": [
+                            "params_dir",
+                            {"path": "run_tags", "widget": {"kind": "dataset", "mode": "param_trials", "multi": True, "baseFrom": "params_dir"}},
+                        ]},
+                        {"title": "Report", "fields": ["make_plots", "kz_grid_max", "kz_grid_points", "noise_coherence"]},
                     ]},
                 ]},
             ],
