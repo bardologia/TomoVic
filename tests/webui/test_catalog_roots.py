@@ -3,7 +3,7 @@
 Covers rejection of blank, relative, missing and non-directory paths, symlink
 and home-marker resolution, deduplicated recording of opened roots, containment
 and deepest-enclosing-root queries, and the scanners that list inference stamps
-and checkpoint runs while dropping entries missing their required files.
+while dropping entries missing their required files.
 """
 
 from __future__ import annotations
@@ -130,75 +130,50 @@ def test_the_same_root_is_recorded_once(roots, tmp_path):
     assert len(roots.snapshot()) == 1
 
 
-def _fake_stamp(root: Path, group: str, run: str, stamp: str, extras: tuple = ()) -> Path:
-    """Writes a minimal inference stamp directory.
-
-    Args:
-        root: Runs root receiving ``<group>/<run>/inference/<stamp>``.
-        group: Group directory name.
-        run: Run directory name.
-        stamp: Stamp directory name.
-        extras: Extra stamp-relative files to create alongside the prediction cube.
-
-    Returns:
-        Path of the created stamp directory.
-    """
-    stamp_dir = root / group / run / "inference" / stamp
-    cubes     = stamp_dir / "cubes"
-    cubes.mkdir(parents=True)
-
-    (cubes / "pred_curves.npy").write_bytes(b"x")
-    for rel in extras:
-        target = stamp_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"x")
-
-    return stamp_dir
-
-
-def _fake_checkpoint_run(root: Path, group: str, run: str, config_name: str = "model_config.json") -> Path:
-    """Writes a run directory holding a checkpoint and optionally a persisted model config.
+def _fake_run(root: Path, group: str, run: str, extras: tuple = ()) -> Path:
+    """Writes a minimal preprocessing run directory holding data/dataset.json.
 
     Args:
         root: Runs root receiving ``<group>/<run>``.
         group: Group directory name.
         run: Run directory name.
-        config_name: Config file written under ``meta``; empty string writes none.
+        extras: Extra run-relative files to create alongside the dataset manifest.
 
     Returns:
         Path of the created run directory.
     """
     run_dir = root / group / run
-    run_dir.mkdir(parents=True)
-    (run_dir / "best_model.pt").write_bytes(b"x")
+    (run_dir / "data").mkdir(parents=True)
+    (run_dir / "data" / "dataset.json").write_text("{}")
 
-    if config_name:
-        (run_dir / "meta").mkdir()
-        (run_dir / "meta" / config_name).write_text("{}")
+    for rel in extras:
+        path = run_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
 
     return run_dir
 
 
 def test_stamp_scan_groups_and_sorts_newest_first(tmp_path):
     """Checks discovered stamps are labelled by group and ordered newest first."""
-    old  = _fake_stamp(tmp_path, "backbone", "run_a", "2026-01-01_00-00-00")
-    new  = _fake_stamp(tmp_path, "backbone", "run_a", "2026-02-01_00-00-00")
-    solo = _fake_stamp(tmp_path, ".", "run_b", "2026-01-15_00-00-00")
+    old  = _fake_run(tmp_path, "fl01", "run_2026-01-01_00-00-00")
+    new  = _fake_run(tmp_path, "fl01", "run_2026-02-01_00-00-00")
+    solo = _fake_run(tmp_path, ".", "run_2026-01-15_00-00-00")
 
     out = RunScanner(CatalogRoots()).stamps(str(tmp_path))
 
     assert out["ok"] is True
     assert [entry["id"] for entry in out["entries"]] == sorted([str(old), str(new), str(solo)], reverse=True)
-    assert {entry["group"] for entry in out["entries"]} == {"backbone", "."}
-    assert all(entry["stamp"] for entry in out["entries"])
+    assert {entry["group"] for entry in out["entries"]} == {"fl01", "."}
+    assert all(entry["stamp"] == "" for entry in out["entries"])
 
 
 def test_stamp_scan_drops_entries_missing_required_files(tmp_path):
     """Checks a stamp lacking a required file is excluded from the listing."""
-    complete = _fake_stamp(tmp_path, "g", "full", "s1", extras=("metrics.json", "cubes/pixel_mse.npy"))
-    _fake_stamp(tmp_path, "g", "bare", "s2")
+    complete = _fake_run(tmp_path, "g", "full", extras=("data/dem_full.npy", "meta/config_state.json"))
+    _fake_run(tmp_path, "g", "bare")
 
-    out = RunScanner(CatalogRoots()).stamps(str(tmp_path), required=("metrics.json", "cubes/pixel_mse.npy"))
+    out = RunScanner(CatalogRoots()).stamps(str(tmp_path), required=("data/dem_full.npy", "meta/config_state.json"))
 
     assert [entry["id"] for entry in out["entries"]] == [str(complete)]
 
@@ -211,26 +186,3 @@ def test_stamp_scan_reports_root_errors(tmp_path):
     assert out["entries"] == []
 
 
-def test_checkpoint_scan_requires_the_persisted_config(tmp_path):
-    """Checks a checkpoint run without its meta config is excluded from the listing."""
-    good = _fake_checkpoint_run(tmp_path, "backbone", "run_ok")
-    _fake_checkpoint_run(tmp_path, "backbone", "run_bare", config_name="")
-
-    out = RunScanner(CatalogRoots()).checkpoint_runs(str(tmp_path), "best_model.pt", ("model_config.json",))
-
-    assert out["ok"] is True
-    assert [entry["id"] for entry in out["entries"]] == [str(good)]
-    assert out["entries"][0]["group"] == "backbone"
-    assert out["entries"][0]["stamp"] == ""
-
-
-def test_checkpoint_scan_accepts_any_of_the_config_names(tmp_path):
-    """Checks runs matching any accepted config name are listed and others are dropped."""
-    backbone = _fake_checkpoint_run(tmp_path, "backbone", "run_ok")
-    dual     = _fake_checkpoint_run(tmp_path, "dual", "run_dual", config_name="dual_model_config.json")
-    _fake_checkpoint_run(tmp_path, "profile_ae", "run_ae", config_name="profile_autoencoder_config.json")
-
-    out = RunScanner(CatalogRoots()).checkpoint_runs(str(tmp_path), "best_model.pt", ("model_config.json", "dual_model_config.json"))
-
-    assert out["ok"] is True
-    assert [entry["id"] for entry in out["entries"]] == sorted([str(backbone), str(dual)], reverse=True)

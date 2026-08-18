@@ -2,16 +2,11 @@
 
 class RailRunModeBlock {
 
-  constructor(view, followSelect) {
-    this.view         = view;
-    this.followSelect = followSelect;
-    this.detachEl     = null;
-    this.targetEl     = null;
-    this.toggle       = null;
-    this.hint         = null;
-    this.localBtn     = null;
-    this.tbyBtn       = null;
-    this.fieldsEl     = null;
+  constructor(view) {
+    this.view     = view;
+    this.detachEl = null;
+    this.toggle   = null;
+    this.hint     = null;
   }
 
   _detachBlock() {
@@ -44,206 +39,26 @@ class RailRunModeBlock {
     return block;
   }
 
-  _targetBlock() {
-    const block = document.createElement("div");
-    block.className = "rail-block";
-    block.innerHTML = `<span class="rail-block__label">Target</span>`;
-
-    const row = document.createElement("div");
-    row.className = "rail-target";
-
-    this.localBtn = document.createElement("button");
-    this.localBtn.type = "button";
-    this.localBtn.className = "chip";
-    this.localBtn.textContent = "This machine";
-    this.localBtn.addEventListener("click", () => this._pick("local"));
-
-    this.tbyBtn = document.createElement("button");
-    this.tbyBtn.type = "button";
-    this.tbyBtn.className = "chip";
-    this.tbyBtn.textContent = "Terrabyte";
-    this.tbyBtn.addEventListener("click", () => this._pick("terrabyte"));
-
-    row.append(this.localBtn, this.tbyBtn);
-    block.appendChild(row);
-    block.appendChild(this._fieldsBlock());
-    return block;
-  }
-
-  _fieldsBlock() {
-    const fields = document.createElement("div");
-    fields.className = "rail-tby";
-    fields.hidden = true;
-    fields.innerHTML =
-      `<label class="rail-tby__field"><span>GPUs / job</span><input id="tby-gpus" type="number" min="0" max="4"></label>` +
-      `<label class="rail-tby__field"><span>Walltime</span><input id="tby-time" type="text"></label>` +
-      `<label class="rail-tby__field"><span>Partition</span><select id="tby-partition"></select></label>` +
-      `<label class="rail-tby__field"><span>Account</span><input id="tby-account" type="text" placeholder="none (hpda-c)"></label>` +
-      `<label class="rail-tby__field rail-tby__field--check"><input id="tby-sweep" type="checkbox"><span>Fan out trials (subrun &times; seed units packed into node-sized bundle jobs that queue them over an in-job GPU pool; benchmark and cross-validation also chain a prepare job before and a compare job after)</span></label>` +
-      `<label class="rail-tby__field"><span>Bundle jobs</span><input id="tby-bundles" type="number" min="1" title="bundles x GPUs per job is capped at 16 GPUs per sweep"></label>` +
-      `<label class="rail-tby__field"><span>Unit limit</span><input id="tby-limit" type="number" min="0" placeholder="all"></label>` +
-      `<p class="rail-detach__hint">Jobs are submitted over SSH from the pushed state of main. Paths are translated to the cluster; overrides pointing at machine-local data are rejected. The local GPU picker is ignored: SLURM assigns GPUs per job via --gres.</p>`;
-
-    fields.addEventListener("change", (event) => {
-      const map = { "tby-gpus": "gpus", "tby-time": "time", "tby-partition": "partition", "tby-account": "account", "tby-bundles": "bundles", "tby-limit": "limit" };
-      const slot = map[event.target.id];
-      if (slot) this.view.slurm[slot] = event.target.value;
-      if (event.target.id === "tby-sweep") this.view.sweepManual = event.target.checked;
-      this.view._refresh();
-    });
-
-    this.fieldsEl = fields;
-    return fields;
-  }
-
-  async _pick(name) {
-    if (name === "terrabyte" && !this.view.tbyInfo && !(await this.view._loadTbyInfo())) return;
-
-    this.view.target = name;
-    this.view._refresh();
-  }
-
-  paintFields() {
-    if (!this.fieldsEl || !this.view.tbyInfo) return;
-
-    const options = this.view.tbyInfo.partitions.map((p) => `<option value="${p}"${p === this.view.slurm.partition ? " selected" : ""}>${p}</option>`).join("");
-    this.fieldsEl.querySelector("#tby-partition").innerHTML = options;
-    this.fieldsEl.querySelector("#tby-gpus").value          = this.view.slurm.gpus;
-    this.fieldsEl.querySelector("#tby-time").value          = this.view.slurm.time;
-    this.fieldsEl.querySelector("#tby-account").value       = this.view.slurm.account;
-    this.fieldsEl.querySelector("#tby-bundles").value       = this.view.slurm.bundles;
-    this.fieldsEl.querySelector("#tby-limit").value         = this.view.slurm.limit;
-  }
-
   paint() {
     const detach = this.view.detach;
-    const tby    = this.view.target === "terrabyte";
 
     this.toggle.classList.toggle("is-on", detach);
     this.toggle.setAttribute("aria-checked", String(detach));
-    this.toggle.disabled = tby;
     this.hint.textContent = detach
       ? "The run survives a lost connection or a console restart. Output goes to logs/<script>_<stamp>.out in the repo."
       : "Output streams to this console. The run dies if the console server goes down.";
 
-    if (this.followSelect) {
-      this.followSelect.disabled = tby || detach;
-      this.followSelect.title = detach ? "unavailable for detached runs" : "";
-      if (detach) this.followSelect.value = "";
-    }
-
-    this.localBtn.classList.toggle("is-active", !tby);
-    this.tbyBtn.classList.toggle("is-active", tby);
-    this.fieldsEl.hidden = !tby;
-    this.fieldsEl.querySelector("#tby-sweep").checked = this.view._effectiveSweep();
-
-    if (this.view.scheduleBtn && !this.view.launching) this.view.scheduleBtn.disabled = tby;
-
-    const page = document.querySelector('[data-page="launch"]');
-    if (page) page.classList.toggle("is-tby-target", tby);
+    if (this.view.scheduleBtn && !this.view.launching) this.view.scheduleBtn.disabled = false;
   }
 
   build() {
     this.detachEl = this._detachBlock();
-    this.targetEl = this._targetBlock();
-    this.paintFields();
-    return { detach: this.detachEl, target: this.targetEl };
+    return { detach: this.detachEl };
   }
 }
 
 
 class LaunchView extends ConfigForm {
-
-  static FOLLOW_INFER = {
-    train_backbone:             "infer_backbone",
-    train_profile_autoencoder:  "infer_profile_autoencoder",
-    train_image_autoencoder:    "infer_image_autoencoder",
-    train_unrolled:             "infer_unrolled",
-    train_dual:                 "infer_dual",
-  };
-
-  static MODEL_KEY_TYPE = {
-    train_backbone:             "backbone",
-    train_profile_autoencoder:  "profile_autoencoder",
-    train_image_autoencoder:    "image_autoencoder",
-    train_jepa:                 "jepa",
-  };
-
-  static JEPA_MEANINGS = {
-    profile_only: {
-      title  : "JEPA · backbone + profile autoencoder",
-      label  : "Backbone + profile autoencoder",
-      summary: "Predicts the profile embedding from the raw image stack, then decodes it back to normalized profiles through the profile autoencoder decoder. Select a profile autoencoder run; leave the image autoencoder unset.",
-      flow   : [
-        { kind: "input",  glyph: "stack",   label: "Image stack",          sub: "primary · secondaries · interferograms" },
-        { kind: "model",  glyph: "net",     label: "Backbone",             sub: "predictor" },
-        { kind: "latent", glyph: "vector",  label: "Normalized embeddings" },
-        { kind: "model",  glyph: "decoder", label: "Profile AE decoder",   sub: "frozen / fine-tuned" },
-        { kind: "output", glyph: "curve",   label: "Normalized profiles" },
-      ],
-    },
-    image_only: {
-      title  : "JEPA · image autoencoder + backbone",
-      label  : "Image autoencoder + backbone",
-      summary: "Encodes the image stack with the image autoencoder front-end, then the backbone maps that latent straight to the Gaussian-mixture profile parameters. Select an image autoencoder run; leave the profile autoencoder unset.",
-      flow   : [
-        { kind: "input",  glyph: "stack",   label: "Image stack",        sub: "primary · secondaries · interferograms" },
-        { kind: "model",  glyph: "encoder", label: "Image AE encoder",   sub: "frozen / fine-tuned" },
-        { kind: "latent", glyph: "vector",  label: "Image embedding",    sub: "2D latent" },
-        { kind: "model",  glyph: "net",     label: "Backbone",           sub: "predictor" },
-        { kind: "output", glyph: "params",  label: "Params array",       sub: "amp, μ, σ, amp, μ, σ, …" },
-      ],
-    },
-    image_profile: {
-      title  : "JEPA · image autoencoder + backbone + profile autoencoder",
-      label  : "Image autoencoder + backbone + profile autoencoder",
-      summary: "Encodes the image stack with the image autoencoder front-end, the backbone predicts the profile embedding from that latent, and the profile autoencoder decoder reconstructs the normalized profiles. Select both an image and a profile autoencoder run.",
-      flow   : [
-        { kind: "input",  glyph: "stack",   label: "Image stack",          sub: "primary · secondaries · interferograms" },
-        { kind: "model",  glyph: "encoder", label: "Image AE encoder",     sub: "frozen / fine-tuned" },
-        { kind: "latent", glyph: "vector",  label: "Image embedding",      sub: "2D latent" },
-        { kind: "model",  glyph: "net",     label: "Backbone",             sub: "predictor" },
-        { kind: "latent", glyph: "vector",  label: "Normalized embeddings" },
-        { kind: "model",  glyph: "decoder", label: "Profile AE decoder",   sub: "frozen / fine-tuned" },
-        { kind: "output", glyph: "curve",   label: "Normalized profiles" },
-      ],
-    },
-  };
-
-  static MODEL_MEANINGS = {
-    backbone: {
-      title  : "Backbone",
-      summary: "Supervised regression that maps the SAR image stack straight to the Gaussian-mixture profile parameters.",
-      flow   : [
-        { kind: "input",  glyph: "stack",  label: "Image stack",  sub: "primary · secondaries · interferograms" },
-        { kind: "model",  glyph: "net",    label: "Backbone",     sub: "supervised network" },
-        { kind: "output", glyph: "params", label: "Params array", sub: "amp, μ, σ, amp, μ, σ, …" },
-      ],
-    },
-    profile_autoencoder: {
-      title  : "Profile autoencoder",
-      summary: "Learns the latent profile (output) space: encodes the fitted normalized profiles into embeddings and reconstructs them.",
-      flow   : [
-        { kind: "input",  glyph: "curve",   label: "Normalized profiles", sub: "fitted targets" },
-        { kind: "model",  glyph: "encoder", label: "Encoder" },
-        { kind: "latent", glyph: "vector",  label: "Normalized embeddings" },
-        { kind: "model",  glyph: "decoder", label: "Decoder" },
-        { kind: "output", glyph: "curve",   label: "Reconstructed profiles" },
-      ],
-    },
-    image_autoencoder: {
-      title  : "Image autoencoder",
-      summary: "Learns the latent input space: encodes the SAR image stack into a 2D embedding and reconstructs it. The encoder later serves as a JEPA front-end.",
-      flow   : [
-        { kind: "input",  glyph: "stack",   label: "Image stack",            sub: "primary · secondaries · interferograms" },
-        { kind: "model",  glyph: "encoder", label: "Encoder" },
-        { kind: "latent", glyph: "vector",  label: "Image embedding",        sub: "2D latent" },
-        { kind: "model",  glyph: "decoder", label: "Decoder" },
-        { kind: "output", glyph: "stack",   label: "Reconstructed stack" },
-      ],
-    },
-    jepa: LaunchView.JEPA_MEANINGS.profile_only,
-  };
 
   static MODEL_COLORS = { input: "#1d4fd8", model: "#16191b", latent: "#a16207", output: "#0f766e", calc: "#7c3aed" };
 
@@ -262,39 +77,7 @@ class LaunchView extends ConfigForm {
         ],
       ],
     },
-    extract_params: {
-      title  : "Extract Parameters",
-      summary: "Fits a per-pixel Gaussian mixture to the Capon tomogram to build the supervised profile-parameter targets.",
-      flow   : [
-        { kind: "input",  glyph: "cube",   label: "Capon tomogram",      sub: "reflectivity profiles" },
-        { kind: "model",  glyph: "fit",    label: "Gaussian-mixture fit", tag: "operation", sub: "per pixel" },
-        { kind: "output", glyph: "params", label: "Params array",        sub: "amp, μ, σ, amp, μ, σ, …" },
-      ],
-    },
-    inject_external_params: {
-      title  : "Inject External Parameters",
-      summary: "Imports Gaussian parameter cubes fitted outside this codebase and writes them into a dataset as a normal parameter run, so a model can train against a collaborator's fit.",
-      flow   : [
-        { kind: "input",  glyph: "params", label: "External RAT cubes",  sub: "one per azimuth/range window" },
-        { kind: "model",  glyph: "fit",    label: "Reorder and stitch",  tag: "operation", sub: "onto the dataset crop" },
-        { kind: "output", glyph: "params", label: "Params array",        sub: "amp, μ, σ, amp, μ, σ, …" },
-      ],
-    },
-    infer: {
-      title  : "Inference",
-      summary: "Runs a trained model over the image stack with a sliding window, stitches the predicted cube, and renders reports.",
-      flow   : [
-        { kind: "input",  glyph: "run",    label: "Trained run",      sub: "checkpoint + image stack" },
-        { kind: "model",  glyph: "net",    label: "Predict",          sub: "sliding window" },
-        { kind: "calc",   glyph: "cube",   label: "Stitched cube",    sub: "predicted profiles" },
-        { kind: "output", glyph: "report", label: "Reports & figures", sub: "metrics · plots · animations" },
-      ],
-    },
   };
-
-  static SLURM_DEFAULT_KEYS = ["gpus", "cpus", "mem", "time", "partition", "account", "bundles"];
-
-  static SWEEP_DEFAULT_ENTRIES = ["benchmark", "cross_validate"];
 
   constructor(runConsole, project) {
     super();
@@ -303,8 +86,6 @@ class LaunchView extends ConfigForm {
     this.key = null;
     this.detail = null;
     this.config = null;
-    this.modelEndpoint = null;
-    this.builder = null;
     this.detach = true;
     this.cmdEl = null;
     this.manifestEl = null;
@@ -313,14 +94,10 @@ class LaunchView extends ConfigForm {
     this.saveBtn = null;
     this.active = false;
     this.loadSeq = 0;
-    this.target = "local";
-    this.sweepManual = null;
     this.copyBase = null;
     this.copyRun = "";
     this.copyLoadSeq = 0;
     this.copyTimer = null;
-    this.slurm = { limit: "" };
-    this.tbyInfo = null;
     this.runMode = null;
     this._wireTabs();
     this._wireKeys();
@@ -339,18 +116,12 @@ class LaunchView extends ConfigForm {
     this.byPath        = new Map();
     this.activeSection = null;
     this.query         = "";
-    this.modelFamilies = null;
-    this.modelHeads    = null;
-    this.modelEndpoint = null;
     this.layoutEl      = null;
     this.navHost       = null;
     this.pinsEl        = null;
     this.nomatchEl     = null;
     this.countEl       = null;
-    this.builder       = null;
     this.detach        = true;
-    this.target        = "local";
-    this.sweepManual   = null;
   }
 
   async show(param) {
@@ -392,68 +163,7 @@ class LaunchView extends ConfigForm {
     }
     this.config = cfg;
 
-    if (this._usesModelPanels(cfg)) {
-      const endpoint = this._modelFamiliesEndpoint();
-      const models   = await Api.get(endpoint);
-      if (seq !== this.loadSeq) return;
-      this.modelEndpoint = endpoint;
-      this.modelFamilies = (models && models.families) || [];
-      this.modelHeads    = (models && models.heads) || [];
-    }
-
     this._renderConfig(cfg);
-    this._refresh();
-  }
-
-  _usesModelPanels(cfg) {
-    return cfg.layout.sections.some((section) => section.panels.some((panel) => panel.kind === "special" && panel.panel !== "experiment_builder"));
-  }
-
-  _activeTrainingType() {
-    if (LaunchView.MODEL_KEY_TYPE[this.key]) return LaunchView.MODEL_KEY_TYPE[this.key];
-
-    const typeTab = this.config ? this.config.layout.type_tab : null;
-    if (typeTab) {
-      const leaf = this.byPath.get(typeTab.field);
-      if (leaf) return this._effective(leaf);
-    }
-
-    return "backbone";
-  }
-
-  _modelFamiliesEndpoint() {
-    const type = this._activeTrainingType();
-    if (type === "image_autoencoder")   return "/api/image-autoencoders";
-    if (type === "profile_autoencoder") return "/api/profile-autoencoders";
-    return "/api/backbones";
-  }
-
-  async _reloadModelsForType() {
-    if (!this.config || !this._usesModelPanels(this.config)) return;
-
-    const endpoint = this._modelFamiliesEndpoint();
-    if (endpoint === this.modelEndpoint) return;
-
-    const seq    = this.loadSeq;
-    const models = await Api.get(endpoint);
-    if (seq !== this.loadSeq) return;
-
-    this.modelEndpoint = endpoint;
-    this.modelFamilies = (models && models.families) || [];
-    this.modelHeads    = (models && models.heads) || [];
-
-    const dirty         = this.dirty;
-    const activeSection = this.activeSection;
-    const detach        = this.detach;
-    const target        = this.target;
-    const sweepManual   = this.sweepManual;
-    this._resetState();
-    this.dirty         = dirty;
-    this.activeSection = activeSection;
-    this.detach        = detach;
-    this.target        = target;
-    this.sweepManual   = sweepManual;
-    this._renderConfig(this.config);
     this._refresh();
   }
 
@@ -532,19 +242,13 @@ class LaunchView extends ConfigForm {
       tab.addEventListener("click", () => {
         this._setValue(leaf, value);
         paint();
-        this._paintTypeCard(value);
-        this._reloadModelsForType();
       });
       host.appendChild(tab);
     });
 
     paint();
 
-    return () => {
-      paint();
-      this._paintTypeCard(this._effective(leaf));
-      this._reloadModelsForType();
-    };
+    return () => paint();
   }
 
   _buildModelCard(meaning) {
@@ -554,44 +258,6 @@ class LaunchView extends ConfigForm {
     this.modelCardEl = card;
     this._paintModelCard(meaning);
     return card;
-  }
-
-  _buildJepaModesCard() {
-    const card = document.createElement("section");
-    card.className = "modelcard";
-    card.id = "launch-model-card";
-    this.modelCardEl = card;
-    this._paintJepaModesCard();
-    return card;
-  }
-
-  _paintTypeCard(value) {
-    if (value === "jepa") this._paintJepaModesCard();
-    else                  this._paintModelCard(LaunchView.MODEL_MEANINGS[value]);
-  }
-
-  _paintJepaModesCard() {
-    const card = this.modelCardEl;
-    if (!card) return;
-    card.hidden = false;
-
-    const modes = [
-      LaunchView.JEPA_MEANINGS.profile_only,
-      LaunchView.JEPA_MEANINGS.image_only,
-      LaunchView.JEPA_MEANINGS.image_profile,
-    ];
-
-    const rows = modes.map((mode) =>
-      `<div class="modelmode">` +
-      `<div class="modelmode__head"><span class="modelmode__label">${mode.label}</span>` +
-      `<span class="modelmode__sub">${mode.summary}</span></div>` +
-      `<div class="modelflow">${this._modelDiagram(mode.flow)}</div></div>`
-    ).join("");
-
-    card.innerHTML =
-      `<div class="modelcard__head"><span class="modelcard__kicker">What JEPA can do</span>` +
-      `<p class="modelcard__summary">JEPA trains in three modes, selected by which autoencoder runs you provide. All three possibilities are shown below.</p></div>` +
-      `<div class="modelmodes">${rows}</div>`;
   }
 
   _paintModelCard(meaning) {
@@ -665,44 +331,6 @@ class LaunchView extends ConfigForm {
         `<rect x="${x}"      y="${y}"      width="${w}" height="${h}" rx="4"/>${rows}</g>`;
     }
 
-    if (glyph === "net") {
-      const s = 84, x = cx - s / 2, y = cy - s / 2, lx = cx - 18, rx = cx + 18, rows = [cy - 22, cy, cy + 22];
-      let lines = "", dots = "";
-      rows.forEach((ly) => rows.forEach((ry) => { lines += `<line x1="${lx}" y1="${ly}" x2="${rx}" y2="${ry}" stroke="#fff" stroke-width="0.8" opacity="0.32"/>`; }));
-      rows.forEach((ry) => { dots += `<circle cx="${lx}" cy="${ry}" r="4" fill="#fff"/><circle cx="${rx}" cy="${ry}" r="4" fill="#fff"/>`; });
-      return `<g><rect x="${x}" y="${y}" width="${s}" height="${s}" rx="11" fill="${color}"/>${lines}${dots}</g>`;
-    }
-
-    if (glyph === "encoder" || glyph === "decoder") {
-      const hw = 36, lh = glyph === "encoder" ? 44 : 18, rh = glyph === "encoder" ? 18 : 44;
-      const pts = `${cx - hw},${cy - lh} ${cx + hw},${cy - rh} ${cx + hw},${cy + rh} ${cx - hw},${cy + lh}`;
-      let dots = "";
-      [-14, 0, 14].forEach((dx) => { dots += `<circle cx="${cx + dx}" cy="${cy}" r="3.4" fill="#fff" opacity="0.85"/>`; });
-      return `<g><polygon points="${pts}" fill="${color}"/>${dots}</g>`;
-    }
-
-    if (glyph === "vector") {
-      const w = 32, h = 88, x = cx - w / 2, y = cy - h / 2, cells = 5, ch = h / cells;
-      let segs = "";
-      for (let k = 1; k < cells; k++) segs += `<line x1="${x}" y1="${y + ch * k}" x2="${x + w}" y2="${y + ch * k}" stroke="${color}" stroke-width="1" opacity="0.5"/>`;
-      return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${tint}" stroke="${color}" stroke-width="1.6"/>${segs}</g>`;
-    }
-
-    if (glyph === "params") {
-      const cw = 15, h = 34, y = cy - h / 2, xs = [0, 18, 36, 61, 79, 97].map((o) => cx - 56 + o), op = [1, 0.7, 0.45, 1, 0.7, 0.45];
-      let cells = "";
-      xs.forEach((x, k) => { cells += `<rect x="${x}" y="${y}" width="${cw}" height="${h}" rx="3" fill="${color}" opacity="${op[k]}"/>`; });
-      cells += `<text x="${cx + 64}" y="${cy + 6}" font-family="JetBrains Mono, monospace" font-size="18" fill="${color}">…</text>`;
-      return `<g>${cells}</g>`;
-    }
-
-    if (glyph === "curve") {
-      const ax = cx - 38, ay0 = cy - 32, ay1 = cy + 28, axr = cx + 38;
-      const axis  = `<path d="M${ax} ${ay0} L${ax} ${ay1} L${axr} ${ay1}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.4"/>`;
-      const curve = `<path d="M${ax + 4} ${ay1 - 2} C ${cx - 16} ${ay1 - 2}, ${cx - 11} ${cy - 30}, ${cx} ${cy - 30} C ${cx + 11} ${cy - 30}, ${cx + 16} ${ay1 - 2}, ${axr - 4} ${ay1 - 2} Z" fill="${tint}" stroke="${color}" stroke-width="2"/>`;
-      return `<g>${axis}${curve}</g>`;
-    }
-
     if (glyph === "cube") {
       const u = 26;
       const top   = `<polygon points="${cx},${cy - 28} ${cx + u},${cy - 13} ${cx},${cy + 2} ${cx - u},${cy - 13}" fill="${color}" opacity="0.20"/>`;
@@ -716,32 +344,6 @@ class LaunchView extends ConfigForm {
       let arcs = "";
       [16, 28, 40].forEach((r, k) => { arcs += `<path d="M${cx - 24} ${cy - r} A ${r} ${r} 0 0 1 ${cx - 24} ${cy + r}" fill="none" stroke="#fff" stroke-width="1.6" opacity="${0.5 - k * 0.12}"/>`; });
       return `<g><rect x="${cx - s / 2}" y="${cy - s / 2}" width="${s}" height="${s}" rx="11" fill="${color}"/>${arcs}<circle cx="${cx - 24}" cy="${cy}" r="3.2" fill="#fff"/></g>`;
-    }
-
-    if (glyph === "fit") {
-      const s = 84;
-      const curve = `<path d="M${cx - 28} ${cy + 22} C ${cx - 12} ${cy + 22}, ${cx - 8} ${cy - 20}, ${cx} ${cy - 20} C ${cx + 8} ${cy - 20}, ${cx + 12} ${cy + 22}, ${cx + 28} ${cy + 22}" fill="none" stroke="#fff" stroke-width="1.8" opacity="0.9"/>`;
-      let dots = "";
-      [[-16, 8], [-4, -12], [9, -7], [19, 12]].forEach(([dx, dy]) => { dots += `<circle cx="${cx + dx}" cy="${cy + dy}" r="2.2" fill="#fff" opacity="0.85"/>`; });
-      return `<g><rect x="${cx - s / 2}" y="${cy - s / 2}" width="${s}" height="${s}" rx="11" fill="${color}"/>${curve}${dots}</g>`;
-    }
-
-    if (glyph === "run") {
-      const s = 78, x = cx - s / 2, y = cy - s / 2, lx = cx - 16, rx = cx + 16, rows = [cy - 18, cy, cy + 18];
-      let lines = "", dots = "";
-      rows.forEach((ly) => rows.forEach((ry) => { lines += `<line x1="${lx}" y1="${ly}" x2="${rx}" y2="${ry}" stroke="${color}" stroke-width="0.8" opacity="0.3"/>`; }));
-      rows.forEach((ry) => { dots += `<circle cx="${lx}" cy="${ry}" r="3.4" fill="${color}"/><circle cx="${rx}" cy="${ry}" r="3.4" fill="${color}"/>`; });
-      const badge = `<circle cx="${cx + 28}" cy="${cy - 28}" r="9" fill="${color}"/><path d="M${cx + 23.5} ${cy - 28} l3 3 l5 -6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
-      return `<g><rect x="${x}" y="${y}" width="${s}" height="${s}" rx="10" fill="${tint}" stroke="${color}" stroke-width="1.6"/>${lines}${dots}${badge}</g>`;
-    }
-
-    if (glyph === "report") {
-      const w = 52, h = 66, x = cx - w / 2, y = cy - h / 2;
-      let lines = "";
-      [-18, -10, -2].forEach((dy) => { lines += `<line x1="${cx - 16}" y1="${cy + dy}" x2="${cx + 16}" y2="${cy + dy}" stroke="${color}" stroke-width="1.3" opacity="0.55"/>`; });
-      let bars = "";
-      [[-16, 14], [-4, 22], [8, 11]].forEach(([dx, bh]) => { bars += `<rect x="${cx + dx}" y="${cy + 26 - bh}" width="7" height="${bh}" rx="1.5" fill="${color}" opacity="0.85"/>`; });
-      return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${tint}" stroke="${color}" stroke-width="1.6"/>${lines}${bars}</g>`;
     }
 
     const r = 30;
@@ -779,27 +381,6 @@ class LaunchView extends ConfigForm {
       opt.value = it.path;
       opt.textContent = `${it.label}  ·  ${it.path}`;
       if (it.path === this.detail.preferred) opt.selected = true;
-      select.appendChild(opt);
-    });
-
-    block.appendChild(select);
-    return block;
-  }
-
-  _followBlock() {
-    if (!this.detail || !LaunchView.FOLLOW_INFER[this.detail.key]) return null;
-
-    const block = document.createElement("div");
-    block.className = "rail-block";
-    block.innerHTML = `<span class="rail-block__label">After run</span>`;
-
-    const select = document.createElement("select");
-    select.className = "run-select";
-    select.id = "launch-follow";
-    [["", "nothing"], [LaunchView.FOLLOW_INFER[this.detail.key], "Inference"]].forEach(([value, label]) => {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
       select.appendChild(opt);
     });
 
@@ -964,10 +545,6 @@ class LaunchView extends ConfigForm {
     return block;
   }
 
-  _paintTbyFields() {
-    if (this.runMode) this.runMode.paintFields();
-  }
-
   _renderRail() {
     const host = document.getElementById("launch-rail");
     host.innerHTML = "";
@@ -980,45 +557,18 @@ class LaunchView extends ConfigForm {
     this.runMode     = null;
 
     const interp = this._interpreterBlock();
-    const follow = this._followBlock();
 
-    this.runMode = new RailRunModeBlock(this, follow ? follow.querySelector("select") : null);
+    this.runMode = new RailRunModeBlock(this);
     const runMode = this.runMode.build();
 
     host.appendChild(interp);
-    if (follow) host.appendChild(follow);
     host.appendChild(runMode.detach);
-    host.appendChild(runMode.target);
     host.appendChild(this._copyBlock());
     host.appendChild(this._commandBlock());
     host.appendChild(this._manifestBlock());
     host.appendChild(this._actionsBlock());
 
     this._refresh();
-  }
-
-  async _loadTbyInfo() {
-    const info = await Api.get("/api/terrabyte/launch-info");
-
-    if (info.error || !Array.isArray(info.partitions) || !info.defaults || !LaunchView.SLURM_DEFAULT_KEYS.every((key) => key in info.defaults)) {
-      Toast.show(`Terrabyte launch info unavailable (${info.error || "malformed response"}); target unchanged`, "error");
-      return false;
-    }
-
-    this.tbyInfo = info;
-    this.slurm   = {
-      gpus      : String(info.defaults.gpus),
-      cpus      : String(info.defaults.cpus),
-      mem       : String(info.defaults.mem),
-      time      : String(info.defaults.time),
-      partition : String(info.defaults.partition),
-      account   : String(info.defaults.account),
-      bundles   : String(info.defaults.bundles),
-      limit     : this.slurm.limit,
-    };
-
-    this._paintTbyFields();
-    return true;
   }
 
   _renderConfigError(message) {
@@ -1052,11 +602,9 @@ class LaunchView extends ConfigForm {
     const typeTab  = cfg.layout.type_tab || null;
     const typeLeaf = typeTab ? this.byPath.get(typeTab.field) : null;
 
-    const modelType = LaunchView.MODEL_KEY_TYPE[this.key] || (typeLeaf ? this._effective(typeLeaf) : null);
-    const meaning   = (modelType && LaunchView.MODEL_MEANINGS[modelType]) || LaunchView.PROCESS_MEANINGS[this.key] || null;
+    const meaning = LaunchView.PROCESS_MEANINGS[this.key] || null;
 
-    if (modelType === "jepa") host.appendChild(this._buildJepaModesCard());
-    else if (meaning)         host.appendChild(this._buildModelCard(meaning));
+    if (meaning) host.appendChild(this._buildModelCard(meaning));
 
     host.appendChild(this._buildToolbar(cfg));
 
@@ -1090,10 +638,9 @@ class LaunchView extends ConfigForm {
 
     if (this.launchBtn) {
       this.launchBtn.classList.toggle("is-armed", n > 0);
-      const verb = this.target === "terrabyte" ? (this._effectiveSweep() ? "Submit sweep to terrabyte" : "Submit to terrabyte") : "Launch run";
       this.launchBtn.innerHTML = n
-        ? `&#9654;&nbsp; ${verb} <small>${n} override${n > 1 ? "s" : ""}</small>`
-        : `&#9654;&nbsp; ${verb} <small>all defaults</small>`;
+        ? `&#9654;&nbsp; Launch run <small>${n} override${n > 1 ? "s" : ""}</small>`
+        : `&#9654;&nbsp; Launch run <small>all defaults</small>`;
     }
 
     if (this.scheduleBtn) {
@@ -1111,7 +658,6 @@ class LaunchView extends ConfigForm {
     }
 
     if (this.manifestEl) this._renderManifest();
-    if (this.builder) this.builder.refreshFromView();
     this._refreshBadges();
     this._refreshGates();
   }
@@ -1144,79 +690,19 @@ class LaunchView extends ConfigForm {
     });
   }
 
-  _effectiveSweep() {
-    if (this.sweepManual !== null) return this.sweepManual;
-    if (this.detail && LaunchView.SWEEP_DEFAULT_ENTRIES.includes(this.detail.key)) return true;
-    return "trials_mode" in this.dirty || "trials_enabled" in this.dirty;
-  }
-
-  async _launchTerrabyte(queue) {
-    if (queue) {
-      Toast.show("Terrabyte jobs cannot be queued locally — SLURM does the queueing. Submit now, or switch the target to this machine.", "warn");
-      return;
-    }
-
-    const payload = {
-      script_key: this.detail.key,
-      overrides: { ...this.dirty },
-      resources: {
-        gpus      : Number(this.slurm.gpus),
-        cpus      : Number(this.slurm.cpus),
-        mem       : Number(this.slurm.mem),
-        time      : this.slurm.time,
-        partition : this.slurm.partition,
-        account   : this.slurm.account || null,
-        bundles   : Number(this.slurm.bundles) || 1,
-      },
-      sweep: this._effectiveSweep(),
-      limit: Number(this.slurm.limit) || 0,
-    };
-
-    const res  = await Api.post("/api/terrabyte/launch", payload);
-    const jobs = res.jobs || [];
-
-    if (!res.ok && !jobs.length) {
-      Toast.show(res.error || "Terrabyte submission failed", "error");
-      return;
-    }
-
-    if (!res.ok) {
-      Toast.show(`Sweep failed partway: ${jobs.length} job${jobs.length > 1 ? "s are" : " is"} already live on terrabyte · ${res.error || "submission failed"}`, "warn");
-    } else if (res.deferred) {
-      Toast.show(`Uploading ${res.transfers.length} path${res.transfers.length > 1 ? "s" : ""} to SCRATCH — the job submits automatically once the transfer lands`, "ok");
-    } else {
-      Toast.show(jobs.length === 1 ? `Submitted job ${jobs[0]} to terrabyte` : `Submitted ${jobs.length} jobs to terrabyte`, "ok");
-    }
-
-    if (res.console_job_id) {
-      if (window.router) window.router.go("console");
-      await this.runConsole.refresh();
-      this.runConsole.open(res.console_job_id);
-      return;
-    }
-
-    if (window.router) window.router.go("terrabyte");
-  }
-
   async _launch(queue) {
     if (!this.detail || this.launching) return;
     const interp = document.getElementById("launch-interpreter").value;
-    const followEl = document.getElementById("launch-follow");
-    const follow = this.detach ? "" : (followEl ? followEl.value : "");
 
     this.launching = true;
     if (this.launchBtn) this.launchBtn.disabled = true;
     if (this.scheduleBtn) this.scheduleBtn.disabled = true;
     try {
-      if (this.target === "terrabyte") {
-        await this._launchTerrabyte(queue);
-      } else {
-        await this.runConsole.launch(this.detail.key, interp, this.detail.title, { ...this.dirty }, follow, this.detach, queue);
-      }
+      await this.runConsole.launch(this.detail.key, interp, this.detail.title, { ...this.dirty }, "", this.detach, queue);
     } finally {
       this.launching = false;
       if (this.launchBtn) this.launchBtn.disabled = false;
-      if (this.scheduleBtn) this.scheduleBtn.disabled = this.target === "terrabyte";
+      if (this.scheduleBtn) this.scheduleBtn.disabled = false;
     }
   }
 
@@ -1226,13 +712,11 @@ class LaunchView extends ConfigForm {
     if (name === null) return;
 
     const interp = document.getElementById("launch-interpreter").value;
-    const followEl = document.getElementById("launch-follow");
-    const follow = this.detach ? "" : (followEl ? followEl.value : "");
 
     this.saving = true;
     if (this.saveBtn) this.saveBtn.disabled = true;
     try {
-      const res = await Api.post("/api/saved-runs", { script_key: this.detail.key, title: this.detail.title, name: name.trim(), interpreter: interp, overrides: { ...this.dirty }, follow_up: follow || null, detach: this.detach });
+      const res = await Api.post("/api/saved-runs", { script_key: this.detail.key, title: this.detail.title, name: name.trim(), interpreter: interp, overrides: { ...this.dirty }, follow_up: null, detach: this.detach });
       if (!res.ok) {
         Toast.show(res.error || "Save failed", "error");
         return;

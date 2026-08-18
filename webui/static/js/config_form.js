@@ -18,15 +18,11 @@ class ConfigForm {
     this.query         = "";
     this._section      = null;
     this.config        = null;
-    this.builder       = null;
-    this.modelFamilies = null;
     this.layoutEl      = null;
     this.navHost       = null;
     this.pinsEl        = null;
     this.nomatchEl     = null;
     this.countEl       = null;
-    this.legacyMode    = false;
-    this.legacyBtn     = null;
     this.refreshTimer  = null;
     this.shellCache    = new Map();
   }
@@ -57,38 +53,8 @@ class ConfigForm {
     bar.appendChild(search);
     bar.appendChild(count);
 
-    if (cfg.layout && cfg.layout.legacy) {
-      const legacy = document.createElement("button");
-      legacy.className = "btn btn--mini btn--legacy";
-      legacy.textContent = "Legacy mode";
-      legacy.title = "Swap every config to the legacy scaled-MSE setup (legacy term only, sorted_gt matching, curriculum and augmentation off) and show only its fields; pick a two-Gaussian parameters dataset";
-      legacy.addEventListener("click", () => this._toggleLegacy());
-      this.legacyBtn = legacy;
-      bar.appendChild(legacy);
-    }
-
     bar.appendChild(reset);
     return bar;
-  }
-
-  _toggleLegacy() {
-    const spec = this.config.layout.legacy;
-    this.legacyMode = !this.legacyMode;
-
-    if (this.legacyMode) {
-      Object.entries(spec.preset).forEach(([path, value]) => {
-        const leaf = this.byPath.get(path);
-        if (!leaf) return;
-        if (value !== leaf.value) this.dirty[path] = value;
-        else delete this.dirty[path];
-      });
-    } else {
-      Object.keys(spec.preset).forEach((path) => delete this.dirty[path]);
-    }
-
-    this.legacyBtn.classList.toggle("is-on", this.legacyMode);
-    Object.values(this.controls).forEach((c) => c.reset());
-    this._refresh();
   }
 
   applyRunConfig(values) {
@@ -97,8 +63,6 @@ class ConfigForm {
     const locked  = [];
 
     this.dirty = {};
-    this.legacyMode = false;
-    if (this.legacyBtn) this.legacyBtn.classList.remove("is-on");
 
     Object.entries(values).forEach(([path, value]) => {
       const leaf = this.byPath.get(path);
@@ -233,33 +197,6 @@ class ConfigForm {
   }
 
   _buildSpecialPanel(panel) {
-    if (panel.panel === "model_card") {
-      const leaf     = this.byPath.get(panel.fields[0]);
-      const headLeaf = panel.fields.length > 1 ? this.byPath.get(panel.fields[1]) : null;
-      if (!leaf || !this.modelFamilies || !this.modelFamilies.length) return this._buildPathsPanel("Model", panel.fields);
-      return new window.ModelCardPanel(this, leaf, headLeaf, panel.headGate || null).build();
-    }
-
-    if (panel.panel === "arch_overrides") {
-      const leaf      = this.byPath.get(panel.fields[0]);
-      const modelLeaf = panel.modelFrom ? this.byPath.get(panel.modelFrom) : null;
-      if (!leaf || !modelLeaf || !this.modelFamilies || !this.modelFamilies.length) return this._buildPathsPanel(panel.title || "Architecture overrides", panel.fields);
-      return new window.ArchOverridesPanel(this, leaf, modelLeaf, panel).build();
-    }
-
-    if (panel.panel === "model_toggle") {
-      const leaf = this.byPath.get(panel.fields[0]);
-      if (!leaf || !this.modelFamilies || !this.modelFamilies.length) return this._buildPathsPanel("Models in run", panel.fields);
-      return new window.ModelTogglePanel(this, leaf).build();
-    }
-
-    if (panel.panel === "experiment_builder") {
-      const candidate = new window.ExperimentBuilder(this, this.byPath);
-      if (!candidate.terms.length) return this._buildPathsPanel("Experiment fan-out", panel.fields);
-      this.builder = candidate;
-      return candidate.build();
-    }
-
     return this._buildPathsPanel(panel.panel, panel.fields);
   }
 
@@ -444,10 +381,7 @@ class ConfigForm {
     const spec    = leaf.editable ? this._widgetSpec(leaf) : null;
     const kind    = spec ? spec.kind : null;
     const choices = Array.isArray(leaf.choices) && leaf.choices.length ? leaf.choices : (kind === "choice" ? spec.options : null);
-    if (kind === "gpu" && window.GpuPicker) {
-      control = new window.GpuPicker(this, leaf).build();
-      row.classList.add("cfg-edit__row--board");
-    } else if (kind === "multi" && window.MultiValueField) {
+    if (kind === "multi" && window.MultiValueField) {
       control = new window.MultiValueField(this, leaf, spec).build();
       row.classList.add("cfg-edit__row--board");
     } else if (kind === "dataset" && window.DatasetPicker) {
@@ -696,8 +630,6 @@ class ConfigForm {
 
   _resetAll() {
     this.dirty = {};
-    this.legacyMode = false;
-    if (this.legacyBtn) this.legacyBtn.classList.remove("is-on");
     Object.values(this.controls).forEach((c) => c.reset());
     this._refresh();
   }
@@ -738,32 +670,7 @@ class ConfigForm {
     this._applyVisibility();
   }
 
-  _refreshGpuRegime() {
-    const control = this.controls["gpu"];
-    const seeds   = this.byPath.get("seeds");
-    if (!control || !control.setInactive || !seeds) return;
-
-    let parsed = [];
-    try {
-      const value = PythonLiteral.parse(this._effective(seeds));
-      if (Array.isArray(value)) parsed = value;
-    } catch (e) {
-      parsed = [];
-    }
-
-    const fanout = parsed.length > 1;
-    control.setInactive(fanout, `unused with ${parsed.length} seeds · each seed trains on its own GPU from the gpus pool`);
-
-    this.states.forEach(({ leaf, row }) => {
-      if (leaf.path !== "gpu") return;
-      row.classList.toggle("cfg-edit__row--inactive", fanout);
-      row.title = fanout ? "--gpu · unused: multi-seed runs fan out across the gpus pool" : `--${leaf.path}`;
-    });
-  }
-
   _refreshGates() {
-    this._refreshGpuRegime();
-
     this.states.forEach(({ row }) => {
       delete row.dataset.gated;
     });
@@ -788,21 +695,16 @@ class ConfigForm {
 
   _applyVisibility() {
     const searching = Boolean(this.query);
-    const legacy    = this.legacyMode && this.config && this.config.layout && this.config.layout.legacy ? this.config.layout.legacy : null;
-    const legacySec = legacy ? new Set(legacy.sections) : null;
-    const legacyFld = legacy ? new Set(legacy.expose) : null;
-    const stacked   = searching || Boolean(legacy);
-    if (this.layoutEl) this.layoutEl.classList.toggle("is-searching", stacked);
+    if (this.layoutEl) this.layoutEl.classList.toggle("is-searching", searching);
 
-    this.states.forEach(({ leaf, row, sectionKey, pinned }) => {
-      const matchesQuery  = !searching || leaf.path.toLowerCase().includes(this.query);
-      const matchesLegacy = !legacy || pinned || sectionKey === "essentials" || legacySec.has(sectionKey) || legacyFld.has(leaf.path);
-      row.hidden = !matchesQuery || !matchesLegacy || row.dataset.gated === "1";
+    this.states.forEach(({ leaf, row }) => {
+      const matchesQuery = !searching || leaf.path.toLowerCase().includes(this.query);
+      row.hidden = !matchesQuery || row.dataset.gated === "1";
     });
 
     this.pairs.forEach((pair) => {
-      if (pair.container) pair.container.hidden = Boolean(legacy);
-      const wantOpen = !legacy && (pair.open || (searching && pair.states.some(({ row }) => !row.hidden)));
+      if (pair.container) pair.container.hidden = false;
+      const wantOpen = pair.open || (searching && pair.states.some(({ row }) => !row.hidden));
       pair.body.hidden = !wantOpen;
       pair.toggle.setAttribute("aria-expanded", String(wantOpen));
       pair.toggle.classList.toggle("is-open", wantOpen);
@@ -814,12 +716,12 @@ class ConfigForm {
     this.sections.forEach((section) => {
       const whenHidden = this._sectionHidden(section);
       const hasRows    = this.states.some(({ row, sectionKey }) => sectionKey === section.key && !row.hidden);
-      if (section.navBtn) section.navBtn.hidden = whenHidden || (Boolean(legacy) && !hasRows);
+      if (section.navBtn) section.navBtn.hidden = whenHidden;
 
       const single = this.config && this.config.layout && this.config.layout.mode === "single";
-      const show   = !whenHidden && (stacked ? hasRows : (single || section.key === this.activeSection));
+      const show   = !whenHidden && (searching ? hasRows : (single || section.key === this.activeSection));
       section.el.hidden = !show;
-      anyVisible = anyVisible || (show && (!stacked || hasRows));
+      anyVisible = anyVisible || (show && (!searching || hasRows));
     });
 
     if (this.nomatchEl) this.nomatchEl.hidden = !searching || anyVisible;

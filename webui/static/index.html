@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>DLR-TomoSAR Control Console</title>
+<title>TomoVic Control Console</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,8 +21,8 @@
 
 <div class="nav-edge" id="nav-edge" aria-hidden="true"></div>
 <header class="nav" id="nav">
-  <a class="nav__brand" href="#/home" data-route="home" aria-label="DLR-TomoSAR home">
-    <img class="nav__logo" src="/static/img/dlr-logo.svg" alt="DLR" />
+  <a class="nav__brand" href="#/home" data-route="home" aria-label="TomoVic home">
+    <img class="nav__logo" src="/static/img/dlr-logo.svg" alt="TomoVic" />
   </a>
   <nav class="nav__links" aria-label="Sections">
     <div class="nav__group" data-group="reference">
@@ -30,8 +30,6 @@
       <div class="nav__sub">
         <a href="#/model" data-route="model">Model</a>
         <a href="#/pipelines" data-route="pipelines">Pipelines</a>
-        <a href="#/architectures" data-route="architectures">Architectures</a>
-        <a href="#/physics" data-route="physics">Physics Loss</a>
         <a href="#/repomap" data-route="repomap">Repo Map</a>
       </div>
     </div>
@@ -41,34 +39,20 @@
         <a href="#/scripts" data-route="scripts">Scripts</a>
         <a href="#/saved" data-route="saved">Saved</a>
         <a href="#/configuration" data-route="configuration">Configuration</a>
-        <a href="#/feedtuner" data-route="feedtuner">Feed Tuner</a>
       </div>
     </div>
     <div class="nav__group" data-group="monitor">
       <button type="button" class="nav__grouphead"><i class="nav__chev" aria-hidden="true"></i>Monitor</button>
       <div class="nav__sub">
         <a href="#/console" data-route="console">Console</a>
-        <a href="#/tensorboard" data-route="tensorboard">TensorBoard</a>
-        <a href="#/terrabyte" data-route="terrabyte">Terrabyte</a>
       </div>
     </div>
     <div class="nav__group" data-group="results">
       <button type="button" class="nav__grouphead"><i class="nav__chev" aria-hidden="true"></i>Results</button>
       <div class="nav__sub">
         <a href="#/results" data-route="results">Results</a>
-        <a href="#/leaderboard" data-route="leaderboard">Leaderboard</a>
         <a href="#/cube" data-route="cube">Cube</a>
         <a href="#/slices" data-route="slices">Slices</a>
-      </div>
-    </div>
-    <div class="nav__group" data-group="inspect">
-      <button type="button" class="nav__grouphead"><i class="nav__chev" aria-hidden="true"></i>Inspect</button>
-      <div class="nav__sub">
-        <a href="#/microscope" data-route="microscope">Microscope</a>
-        <a href="#/survey" data-route="survey">Survey</a>
-        <a href="#/triage" data-route="triage">Triage</a>
-        <a href="#/autopsy" data-route="autopsy">Autopsy</a>
-        <a href="#/fitlab" data-route="fitlab">Fit Lab</a>
       </div>
     </div>
   </nav>
@@ -90,7 +74,7 @@
         <i class="deck__tick deck__tick--br" aria-hidden="true"></i>
         <header class="deck__mast">
           <div class="status__id">
-            <p class="hero__kicker">server observatory &middot; neural SAR tomography</p>
+            <p class="hero__kicker">server observatory &middot; SAR tomography</p>
             <h1 class="status__host" id="status-host">&hellip;</h1>
             <p class="status__sum" id="status-sum">connecting to backend&hellip;</p>
           </div>
@@ -128,37 +112,11 @@
     <div class="page__head">
       <h2 class="page__title">Pipelines</h2>
       <p class="page__lead">
-        Six orchestrated stages take raw radar acquisitions to a trained, evaluated model.
+        Orchestrated stages take raw radar acquisitions to analysis-ready tomogram datasets.
         Each pipeline maps to an entry point you can launch.
       </p>
     </div>
     <div class="flow" id="flow"></div>
-  </section>
-
-  <!-- ARCHITECTURES -->
-  <section class="page page--pad" data-page="architectures">
-    <div class="page__head">
-      <h2 class="page__title">Architectures</h2>
-      <p class="page__lead">
-        Four model zoos: the supervised backbones, the profile autoencoders, the image
-        autoencoder, and the JEPA variants that couple them. Pick a zoo, then a model to see its design.
-      </p>
-      <div class="model-zoo" id="model-zoo">
-        <button class="model-zoo__btn is-active" data-zoo="backbone" data-endpoint="/api/backbones">Backbone</button>
-        <button class="model-zoo__btn" data-zoo="autoencoder" data-endpoint="/api/profile-autoencoders">Profile AE</button>
-        <button class="model-zoo__btn" data-zoo="image_autoencoder" data-endpoint="/api/image-autoencoders">Image AE</button>
-        <button class="model-zoo__btn" data-zoo="jepa" data-endpoint="/api/jepa-variants">JEPA</button>
-      </div>
-    </div>
-    <div class="master master--stack">
-      <aside class="master__list" id="model-list" aria-label="Model list"></aside>
-      <div class="master__detail" id="model-detail"></div>
-    </div>
-  </section>
-
-  <!-- PHYSICS LOSS -->
-  <section class="page page--pad page--physics" data-page="physics">
-    <div class="phys" id="phys"></div>
   </section>
 
   <!-- SCRIPTS -->
@@ -187,19 +145,6 @@
     <div class="saved-grid" id="saved-grid"></div>
   </section>
 
-  <!-- ABLATION -->
-  <section class="page page--pad" data-page="ablation">
-    <div class="page__head">
-      <h2 class="page__title">Ablation study</h2>
-      <p class="page__lead">
-        Configure a full ablation of the backbone or dual model: pick the entry, the features
-        to ablate and their order, then launch a cumulative loop that trains the full model
-        and degrades one feature at a time down to the baseline.
-      </p>
-    </div>
-    <div id="ablation-root"></div>
-  </section>
-
   <!-- LAUNCH -->
   <section class="page page--launch" data-page="launch">
     <header class="launch__top">
@@ -210,7 +155,7 @@
         <p class="launch__purpose" id="launch-purpose"></p>
       </div>
       <dl class="launch__facts" id="launch-facts"></dl>
-      <div class="launch__variants" id="launch-variants" role="tablist" aria-label="What to train"></div>
+      <div class="launch__variants" id="launch-variants" role="tablist" aria-label="Variants"></div>
     </header>
     <div class="launch__body">
       <aside class="launch__rail" id="launch-rail" aria-label="Launch controls"></aside>
@@ -286,7 +231,7 @@
     <div class="page__head">
       <h2 class="page__title">Tomogram explorer</h2>
       <p class="page__lead">
-        Load a saved inference cube, then hover the primary SLC image to cut every tomogram
+        Load a saved tomogram cube, then hover the primary SLC image to cut every tomogram
         live along range and azimuth. Click to lock a point and read vertical profiles out
         of the slices.
       </p>
@@ -307,8 +252,6 @@
         <button type="button" class="cube-mode" data-view="elevation">Elevation sweep</button>
         <button type="button" class="cube-mode" data-view="azimuth">Azimuth sweep</button>
         <button type="button" class="cube-mode" data-view="range">Range sweep</button>
-        <button type="button" class="cube-mode" data-view="params">Parameters</button>
-        <button type="button" class="cube-mode" data-view="metrics">Metric maps</button>
         <button type="button" class="cube-mode" data-view="transect">Transect</button>
         <button type="button" class="cube-mode" data-view="cloud">Point cloud</button>
         <button type="button" class="cube-mode" data-view="globe">Globe</button>
@@ -369,8 +312,6 @@
             </h3>
             <div class="cube-cutgroup__stack">
               <figure class="cube-slice" data-axis="range" data-source="pred"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="range" data-source="predb"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="range" data-source="diff"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="range" data-source="gt"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="range" data-source="reduced"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="range" data-source="full"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
@@ -383,8 +324,6 @@
             </h3>
             <div class="cube-cutgroup__stack">
               <figure class="cube-slice" data-axis="azimuth" data-source="pred"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="predb"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="diff"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="azimuth" data-source="gt"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="azimuth" data-source="reduced"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
               <figure class="cube-slice" data-axis="azimuth" data-source="full"><div class="cube-slice__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span><i class="cube-ref" hidden></i></div><figcaption class="cube-slice__metric"></figcaption></figure>
@@ -403,7 +342,6 @@
           <p class="cube-coords" id="cube-prof-at">Hover a slice to read the profiles at that position.</p>
           <div class="cube-profiles__grid">
             <figure class="cube-prof" data-source="pred"><header class="cube-slice__head"><i class="cube-dot" data-source="pred"></i><span class="cube-slice__src">pred</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
-            <figure class="cube-prof" data-source="predb"><header class="cube-slice__head"><i class="cube-dot" data-source="predb"></i><span class="cube-slice__src">pred B</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
             <figure class="cube-prof" data-source="gt"><header class="cube-slice__head"><i class="cube-dot" data-source="gt"></i><span class="cube-slice__src">gt</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
             <figure class="cube-prof" data-source="reduced"><header class="cube-slice__head"><i class="cube-dot" data-source="reduced"></i><span class="cube-slice__src">capon reduced</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
             <figure class="cube-prof" data-source="full"><header class="cube-slice__head"><i class="cube-dot" data-source="full"></i><span class="cube-slice__src">capon full</span></header><div class="cube-prof__media"><canvas></canvas></div></figure>
@@ -414,7 +352,6 @@
             </thead>
             <tbody>
               <tr data-source="pred"><th scope="row"><i class="cube-dot" data-source="pred"></i>pred</th><td data-k="mae">&ndash;</td><td data-k="mse">&ndash;</td><td data-k="r2">&ndash;</td></tr>
-              <tr data-source="predb"><th scope="row"><i class="cube-dot" data-source="predb"></i>pred B</th><td data-k="mae">&ndash;</td><td data-k="mse">&ndash;</td><td data-k="r2">&ndash;</td></tr>
               <tr data-source="reduced"><th scope="row"><i class="cube-dot" data-source="reduced"></i>capon reduced</th><td data-k="mae">&ndash;</td><td data-k="mse">&ndash;</td><td data-k="r2">&ndash;</td></tr>
             </tbody>
           </table>
@@ -444,8 +381,6 @@
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-elevation-fill"></i></div>
           <div class="cube-elev__grid" id="cube-elevation-grid">
             <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="predb"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span></div></figure>
-            <figure class="cube-eplane" data-source="diff"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span></div></figure>
             <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
             <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
             <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
@@ -475,8 +410,6 @@
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-azimuth-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-azimuth-grid">
             <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="predb"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span></div></figure>
-            <figure class="cube-eplane" data-source="diff"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span></div></figure>
             <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
             <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
             <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
@@ -484,40 +417,6 @@
         </div>
       </div>
 
-      <div class="cube-view" data-view="params" hidden>
-        <div class="cube-pview">
-          <div class="cube-pview__bar">
-            <div class="cube-spaces" id="cube-param-source" role="group" aria-label="Parameter source"></div>
-            <div class="cube-spaces" id="cube-param-field" role="group" aria-label="Parameter field">
-              <button type="button" class="cube-space is-active" data-field="amp">Amplitude</button>
-              <button type="button" class="cube-space" data-field="mu">Mu</button>
-              <button type="button" class="cube-space" data-field="sigma">Sigma</button>
-              <button type="button" class="cube-space" data-field="count">Active count</button>
-            </div>
-            <div class="cube-spaces" id="cube-param-slot" role="group" aria-label="Gaussian slot"></div>
-            <span class="cube-elev__at" id="cube-param-at">Pick a source, field and slot to map the Gaussian parameters.</span>
-          </div>
-          <div class="cube-pview__deck">
-            <figure class="cube-pmap">
-              <div class="cube-pmap__media">
-                <canvas id="cube-param-canvas"></canvas>
-                <i class="cube-cross" id="cube-param-cross" hidden></i>
-              </div>
-              <figcaption class="cube-pmap__legend">
-                <span class="cube-pmap__bound" id="cube-param-min"></span>
-                <img class="cube-pmap__cbar" id="cube-param-cbar" alt="colour scale" />
-                <span class="cube-pmap__bound" id="cube-param-max"></span>
-              </figcaption>
-            </figure>
-            <aside class="cube-pside">
-              <h3 class="cube-panel-title">Pixel parameters</h3>
-              <p class="cube-coords" id="cube-param-coords">Click the map to read every Gaussian slot at that pixel.</p>
-              <div class="cube-pside__table" id="cube-param-table"></div>
-              <button type="button" class="btn btn--mini" id="cube-param-open" hidden>Open cuts at this pixel</button>
-            </aside>
-          </div>
-        </div>
-      </div>
 
       <div class="cube-view" data-view="cloud" hidden>
         <div class="cube-pview">
@@ -622,8 +521,6 @@
             </figure>
             <div class="cube-elev__grid cube-elev__grid--transect" id="cube-transect-grid">
               <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-              <figure class="cube-eplane" data-source="predb"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span></div></figure>
-              <figure class="cube-eplane" data-source="diff"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span></div></figure>
               <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
               <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
               <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
@@ -632,60 +529,6 @@
         </div>
       </div>
 
-      <div class="cube-view" data-view="metrics" hidden>
-        <div class="cube-pview">
-          <div class="cube-pview__bar">
-            <div class="cube-spaces" id="cube-metric-layer" role="group" aria-label="Metric layer"></div>
-            <div class="cube-mctl" role="group" aria-label="Colour range">
-              <label for="cube-metric-vmin">range</label>
-              <input type="number" id="cube-metric-vmin" class="cube-jump__input cube-jump__input--wide" step="any" />
-              <span>&hellip;</span>
-              <input type="number" id="cube-metric-vmax" class="cube-jump__input cube-jump__input--wide" step="any" />
-              <button type="button" class="btn btn--mini" id="cube-metric-reset">Reset</button>
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Keep window">
-              <label for="cube-metric-mode">keep</label>
-              <select id="cube-metric-mode" class="cube-mselect">
-                <option value="all">all values</option>
-                <option value="below">below</option>
-                <option value="above">above</option>
-              </select>
-              <input type="range" id="cube-metric-thr" min="0" max="1000" value="500" disabled />
-              <span class="cube-mctl__val" id="cube-metric-thr-val"></span>
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Overlay opacity">
-              <label for="cube-metric-alpha">opacity</label>
-              <input type="range" id="cube-metric-alpha" min="0" max="100" value="75" />
-            </div>
-          </div>
-          <div class="cube-pview__deck">
-            <figure class="cube-pmap">
-              <div class="cube-pmap__media">
-                <img id="cube-metric-img" alt="metric overlay" />
-                <i class="cube-cross" id="cube-metric-cross" hidden></i>
-              </div>
-              <figcaption class="cube-pmap__legend">
-                <span class="cube-pmap__bound" id="cube-metric-min"></span>
-                <img class="cube-pmap__cbar" id="cube-metric-cbar" alt="colour scale" />
-                <span class="cube-pmap__bound" id="cube-metric-max"></span>
-              </figcaption>
-            </figure>
-            <aside class="cube-pside">
-              <h3 class="cube-panel-title">Pixel readout</h3>
-              <p class="cube-coords" id="cube-metric-coords">Hover the map to read the value under the cursor; click to lock a pixel and read every layer.</p>
-              <div class="cube-pside__table" id="cube-metric-readout"></div>
-              <button type="button" class="btn btn--mini" id="cube-metric-open" hidden>Open cuts at this pixel</button>
-              <div class="cube-mctl" id="cube-selective-wrap">
-                <label for="cube-selective-cov">coverage</label>
-                <input type="range" id="cube-selective-cov" min="5" max="100" value="100" />
-                <span class="cube-mctl__val" id="cube-selective-val">100%</span>
-              </div>
-              <p class="cube-hint">Selective prediction: keep the selected layer's most confident share of pixels (lowest values for error-like layers, highest for R&sup2;-like layers) and compare the kept-pixel metric means against the full region.</p>
-              <div class="cube-pside__table" id="cube-selective-table"></div>
-            </aside>
-          </div>
-        </div>
-      </div>
 
       <div class="cube-view" data-view="range" hidden>
         <div class="cube-elev">
@@ -709,8 +552,6 @@
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-range-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-range-grid">
             <figure class="cube-eplane" data-source="pred"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="pred"></i>pred</span></div></figure>
-            <figure class="cube-eplane" data-source="predb"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="predb"></i>pred B</span></div></figure>
-            <figure class="cube-eplane" data-source="diff"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="diff"></i>A &minus; B</span></div></figure>
             <figure class="cube-eplane" data-source="gt"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="gt"></i>gt</span></div></figure>
             <figure class="cube-eplane" data-source="reduced"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="reduced"></i>capon reduced</span></div></figure>
             <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas><span class="cube-slice__tag"><i class="cube-dot" data-source="full"></i>capon full</span></div></figure>
@@ -791,455 +632,7 @@
     </div>
   </section>
 
-  <!-- A/B AUTOPSY -->
-  <section class="page page--pad" data-page="autopsy">
-    <div class="page__head">
-      <h2 class="page__title">A/B autopsy</h2>
-      <p class="page__lead">
-        A guided comparison of two saved inferences over the same region: the largest
-        relative metric gaps with the winner per row, and the locations where the runs
-        disagree most, each with both predicted profiles against the ground truth.
-      </p>
-    </div>
-    <div id="autopsy-root"></div>
-  </section>
 
-  <!-- ERROR TRIAGE -->
-  <section class="page page--pad" data-page="triage">
-    <div class="page__head">
-      <h2 class="page__title">Error triage</h2>
-      <p class="page__lead">
-        The worst regions of a saved inference, ranked by error and tagged with their dominant
-        failure mode, label quality, and seed disagreement. Open any case in the cube explorer,
-        then record a verdict: label problem, model problem, or interesting. Annotations persist
-        under <code>logs/triage/</code> and build the qualitative case library.
-      </p>
-    </div>
-    <div id="triage-root"></div>
-  </section>
-
-  <!-- MODEL MICROSCOPE -->
-  <section class="page page--pad" data-page="microscope">
-    <div class="page__head">
-      <h2 class="page__title">Model microscope</h2>
-      <p class="page__lead">
-        Load a trained backbone or dual checkpoint, pick a pixel on the scene, and inspect the model
-        from the inside: the predicted profile against ground truth and the raw tomogram,
-        gradient attribution of every output family to every input channel, spatial maps of
-        where in the window those gradients concentrate, feature maps along a clickable view
-        of the architecture, and live what-if perturbations of the input.
-      </p>
-    </div>
-    <div id="probe-root"></div>
-  </section>
-
-  <!-- MODEL SURVEY -->
-  <section class="page page--pad" data-page="survey">
-    <div class="page__head">
-      <h2 class="page__title">Model survey</h2>
-      <p class="page__lead">
-        The microscope's diagnostics, run over every pixel of the test region instead of one.
-        Pick a trained run and the model is re-run tile by tile: prediction fit and matched
-        scatterer errors, channel attribution and ablation, flip symmetry, noise robustness,
-        occlusion evidence distance, and layer vitals, all averaged over the whole region
-        with a progress bar while it works.
-      </p>
-    </div>
-    <div id="survey-root"></div>
-  </section>
-
-  <!-- FIT LAB -->
-  <section class="page page--pad" data-page="fitlab">
-    <div class="page__head">
-      <h2 class="page__title">Param extraction lab</h2>
-      <p class="page__lead">
-        Load a preprocessing dataset, pick pixels on the tomogram, and run the Gaussian
-        parameter-extraction fit on just those pixels under different configurations &mdash;
-        compare K, &lambda;, free parameters and preprocessing constants before committing
-        to a full extraction run.
-      </p>
-    </div>
-
-    <div class="cube-pick">
-      <div class="fl-src" role="group" aria-label="Datasets directory">
-        <label for="fl-base">Datasets dir</label>
-        <input id="fl-base" type="text" spellcheck="false" autocomplete="off" placeholder="/path/to/datasets" />
-        <button type="button" class="btn btn--mini" id="fl-scan">Scan</button>
-      </div>
-      <div class="cube-grouplist" id="fl-strip" aria-label="Datasets"></div>
-      <p class="cube-hint" id="fl-hint">Point the scanner at a directory of preprocessing datasets.</p>
-      <div class="cube-progress" id="fl-progress" hidden>
-        <div class="cube-progress__track"><i class="cube-progress__fill" id="fl-progress-fill"></i></div>
-        <p class="cube-progress__label" id="fl-progress-label">loading&hellip;</p>
-      </div>
-    </div>
-
-    <div class="fl-stage" id="fl-stage" hidden>
-      <div class="fl-deck">
-        <aside class="fl-map">
-          <div class="fl-map__head">
-            <h3 class="cube-panel-title">Pixel selection</h3>
-            <div class="cube-spaces" id="fl-map-src" role="group" aria-label="Map source">
-              <button type="button" class="cube-space is-active" data-src="slc">SLC amplitude</button>
-              <button type="button" class="cube-space" data-src="peak">Tomogram peak</button>
-            </div>
-          </div>
-          <div class="fl-map__frame">
-            <span class="cube-axis cube-axis--y">range &rarr;</span>
-            <div class="fl-map__wrap" id="fl-map-wrap">
-              <img id="fl-map-img" alt="Dataset map" />
-              <div class="fl-marks" id="fl-marks"></div>
-            </div>
-            <span class="cube-axis cube-axis--x">azimuth &rarr;</span>
-          </div>
-          <p class="cube-coords" id="fl-coords">Click the map to add pixels &middot; click a marker to remove it.</p>
-          <div class="fl-pixrow" role="group" aria-label="Add a pixel by index">
-            <span class="cube-jump__cell">
-              <label for="fl-az">az</label>
-              <input type="number" id="fl-az" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
-              <span class="cube-jump__range" id="fl-az-range"></span>
-            </span>
-            <span class="cube-jump__cell">
-              <label for="fl-rg">rg</label>
-              <input type="number" id="fl-rg" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
-              <span class="cube-jump__range" id="fl-rg-range"></span>
-            </span>
-            <button type="button" class="btn btn--mini" id="fl-add">Add</button>
-            <button type="button" class="btn btn--mini" id="fl-clear">Clear</button>
-          </div>
-          <div class="fl-pixels" id="fl-pixels"></div>
-        </aside>
-
-        <aside class="fl-config">
-          <h3 class="cube-panel-title">Fit configuration</h3>
-          <div class="fl-modes" id="fl-mode" role="group" aria-label="Free parameters">
-            <button type="button" data-comp="sigma" class="is-active" aria-pressed="true">&sigma; width</button>
-            <button type="button" data-comp="amp" aria-pressed="false">A amplitude</button>
-            <button type="button" data-comp="mu" aria-pressed="false">&mu; mean</button>
-          </div>
-          <div class="fl-fields">
-            <label>K max<input id="fl-kmax" type="number" min="1" max="8" step="1" value="5" /></label>
-            <label>lambda per K<input id="fl-lambda" type="number" step="any" value="0.01" /></label>
-            <label>threshold factor<input id="fl-threshold" type="number" min="0" max="0.999" step="any" value="0.25" /></label>
-            <label>truncation index<input id="fl-truncation" type="number" min="1" step="1" value="170" /></label>
-            <label>prominence frac<input id="fl-prominence" type="number" step="any" value="0.05" /></label>
-            <label>sigma init divisor<input id="fl-sigdiv" type="number" step="any" value="4" /></label>
-            <label>activity threshold<input id="fl-activity" type="number" step="any" value="0.001" /></label>
-            <label>Adam steps<input id="fl-steps" type="number" min="1" step="1" value="3000" /></label>
-            <label>Adam lr<input id="fl-lr" type="number" step="any" value="0.2" /></label>
-          </div>
-          <div class="fl-actions">
-            <button type="button" class="btn btn--primary" id="fl-run">Run fit</button>
-            <span class="fl-runmsg" id="fl-run-msg"></span>
-          </div>
-          <div class="cube-progress" id="fl-fit-progress" hidden>
-            <div class="cube-progress__track"><i class="cube-progress__fill" id="fl-fit-progress-fill"></i></div>
-            <p class="cube-progress__label" id="fl-fit-progress-label">fitting&hellip;</p>
-          </div>
-          <div class="fl-runs" id="fl-runs"></div>
-        </aside>
-      </div>
-
-      <div class="fl-results" id="fl-results" hidden>
-        <div class="fl-results__bar">
-          <h3 class="cube-panel-title">Fitted profiles</h3>
-          <div class="cube-spaces" id="fl-comps" role="group" aria-label="Curve detail">
-            <button type="button" class="cube-space is-active" data-comps="on">Components</button>
-            <button type="button" class="cube-space" data-comps="off">Totals only</button>
-          </div>
-        </div>
-        <div class="fl-cards" id="fl-cards"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- LEADERBOARD -->
-  <section class="page page--pad" data-page="leaderboard">
-    <div class="page__head">
-      <h2 class="page__title">Leaderboard</h2>
-      <p class="page__lead">
-        Every saved inference result in the runs directory as one sortable table &mdash; run-name
-        axes parsed into filters, headline metrics side by side. Select two rows to read a full
-        metric-by-metric comparison plus the resolved-config differences between the runs.
-      </p>
-    </div>
-    <div class="lb" id="leaderboard-root"></div>
-  </section>
-
-  <!-- FEED TUNER -->
-  <section class="page page--pad page--feedtuner" data-page="feedtuner">
-    <div class="page__head">
-      <h2 class="page__title">Feed Tuner</h2>
-      <p class="page__lead">
-        Sweep DataLoader settings against the real data path and find the configuration that keeps
-        the GPU saturated. Each candidate is measured three ways &mdash; pure loader throughput, the
-        GPU compute ceiling, and end-to-end with the data-wait fraction &mdash; so starvation is
-        quantified, not guessed.
-      </p>
-    </div>
-    <div class="ft">
-      <aside class="ft__deck" id="ft-deck">
-        <h3 class="ft-deck__title">Target</h3>
-        <div class="ft-modes" id="ft-modes" role="tablist" aria-label="Tuning mode">
-          <button class="ft-mode is-active" data-mode="profile_autoencoder" role="tab">Profile AE</button>
-          <button class="ft-mode" data-mode="image_autoencoder" role="tab">Image AE</button>
-          <button class="ft-mode" data-mode="backbone" role="tab">Backbone</button>
-        </div>
-
-        <div class="ft-paths" id="ft-paths" hidden>
-          <div class="ft-field">
-            <span class="ft-field__label">Dataset</span>
-            <select class="ft-input ft-select" id="ft-dataset-select" aria-label="Dataset"></select>
-            <input class="ft-input ft-custom" id="ft-dataset-custom" type="text" spellcheck="false" placeholder="absolute path" hidden />
-            <span class="ft-note" id="ft-dataset-note"></span>
-          </div>
-          <div class="ft-field">
-            <span class="ft-field__label">Parameters</span>
-            <select class="ft-input ft-select" id="ft-params-select" aria-label="Parameters"></select>
-            <input class="ft-input ft-custom" id="ft-params-custom" type="text" spellcheck="false" placeholder="absolute path" hidden />
-            <span class="ft-note" id="ft-params-note"></span>
-          </div>
-        </div>
-
-        <div class="ft-field">
-          <span class="ft-field__label">GPU</span>
-          <div class="ft-gpu-board" id="ft-gpu" aria-label="GPU device"></div>
-        </div>
-
-        <h3 class="ft-deck__title">Sweep grid</h3>
-        <label class="ft-field">
-          <span class="ft-field__label">Batch sizes</span>
-          <input class="ft-input" id="ft-batch" type="text" spellcheck="false" />
-        </label>
-        <label class="ft-field">
-          <span class="ft-field__label">Worker counts</span>
-          <input class="ft-input" id="ft-workers" type="text" spellcheck="false" />
-        </label>
-        <label class="ft-field">
-          <span class="ft-field__label">Prefetch factors</span>
-          <input class="ft-input" id="ft-prefetch" type="text" spellcheck="false" />
-        </label>
-
-        <div class="ft-grid2">
-          <label class="ft-field">
-            <span class="ft-field__label">Timed batches</span>
-            <input class="ft-input" id="ft-timed" type="number" min="4" step="1" value="60" />
-          </label>
-          <label class="ft-field">
-            <span class="ft-field__label">Warmup</span>
-            <input class="ft-input" id="ft-warmup" type="number" min="0" step="1" value="8" />
-          </label>
-        </div>
-
-        <label class="ft-toggle">
-          <input type="checkbox" id="ft-amp" />
-          <span class="ft-toggle__track"><span class="ft-toggle__thumb"></span></span>
-          <span class="ft-toggle__label">Mixed precision (AMP)</span>
-        </label>
-
-        <div class="ft-actions">
-          <button class="ft-run" id="ft-run">
-            <span class="ft-run__pulse" aria-hidden="true"></span>
-            <span class="ft-run__label">Run sweep</span>
-          </button>
-          <button class="ft-stop" id="ft-stop" hidden>Stop</button>
-        </div>
-        <p class="ft-deck__hint" id="ft-hint">Pick a dataset and parameters detected on this machine, then run the sweep.</p>
-      </aside>
-
-      <div class="ft__stage">
-        <div class="ft-card ft-readout" id="ft-readout">
-          <div class="ft-readout__idle" id="ft-readout-idle">Configure a target and run a sweep to populate live telemetry.</div>
-          <div class="ft-chips" id="ft-chips" hidden></div>
-          <div class="ft-progress" id="ft-progress" hidden>
-            <div class="ft-progress__track"><i class="ft-progress__fill" id="ft-progress-fill"></i></div>
-            <span class="ft-progress__label" id="ft-progress-label"></span>
-          </div>
-        </div>
-
-        <div class="ft-dials" id="ft-dials" hidden>
-          <div class="ft-dials__grid">
-            <figure class="ft-dial"><div class="ft-dial__media"><canvas id="ft-dial-util"></canvas></div><figcaption>GPU utilization</figcaption></figure>
-            <figure class="ft-dial"><div class="ft-dial__media"><canvas id="ft-dial-eff"></canvas></div><figcaption>GPU efficiency</figcaption></figure>
-            <figure class="ft-dial"><div class="ft-dial__media"><canvas id="ft-dial-wait"></canvas></div><figcaption>Data wait</figcaption></figure>
-          </div>
-          <span class="ft-dials__at" id="ft-dials-at">waiting for the first measurement&hellip;</span>
-        </div>
-
-        <div class="ft-reco" id="ft-reco" hidden></div>
-
-        <div class="ft-charts">
-          <figure class="ft-chart">
-            <figcaption class="ft-chart__cap">Throughput vs batch size <span>samples / s</span></figcaption>
-            <div class="ft-chart__legend" id="ft-legend-throughput"></div>
-            <div class="ft-chart__media"><canvas id="ft-chart-throughput"></canvas></div>
-          </figure>
-          <figure class="ft-chart">
-            <figcaption class="ft-chart__cap">GPU utilization &amp; data wait <span>percent</span></figcaption>
-            <div class="ft-chart__legend" id="ft-legend-util"></div>
-            <div class="ft-chart__media"><canvas id="ft-chart-util"></canvas></div>
-          </figure>
-        </div>
-
-        <div class="ft-table-wrap">
-          <table class="ft-table" id="ft-table">
-            <thead>
-              <tr>
-                <th>phase</th><th>batch</th><th>workers</th><th>pf</th><th>pin</th>
-                <th>loader/s</th><th>ceiling/s</th><th>end&ndash;to&ndash;end/s</th>
-                <th>feed</th><th>data&nbsp;wait</th><th>GPU&nbsp;util</th>
-              </tr>
-            </thead>
-            <tbody id="ft-table-body"></tbody>
-          </table>
-        </div>
-
-        <pre class="ft-log" id="ft-log" aria-label="Run log"></pre>
-      </div>
-    </div>
-  </section>
-
-  <!-- TENSORBOARD -->
-  <section class="page page--pad page--tb" data-page="tensorboard">
-    <div class="page__head page__head--row">
-      <div>
-        <h2 class="page__title">TensorBoard</h2>
-        <p class="page__lead">
-          Live training curves served straight from the run directories. An instance
-          launches automatically whenever a training job starts.
-        </p>
-      </div>
-      <div class="tb-actions">
-        <button class="btn btn--mini" id="tb-browse">Browse runs</button>
-        <button class="btn btn--mini" id="tb-open" disabled>Open in tab</button>
-        <button class="btn btn--mini btn--danger" id="tb-stop" disabled>Stop</button>
-      </div>
-    </div>
-    <div class="tb-picker" id="tb-picker" hidden>
-      <div class="tb-picker__head">
-        <span class="tb-picker__title">Run directories</span>
-        <span class="tb-picker__root" id="tb-picker-root"></span>
-      </div>
-      <div class="tb-picker__list" id="tb-picker-list"></div>
-    </div>
-    <div class="tb-strip" id="tb-strip" aria-label="TensorBoard instances"></div>
-    <div class="tb-stage">
-      <iframe class="tb-frame" id="tb-frame" title="TensorBoard" src="about:blank"></iframe>
-      <div class="tb-empty" id="tb-empty">
-        <p class="tb-empty__title" id="tb-empty-title">No TensorBoard running</p>
-        <p class="tb-empty__hint" id="tb-empty-hint">
-          Launch a training job and an instance starts automatically over its log directory,
-          or start one manually over the default training logs.
-        </p>
-        <button class="btn btn--primary" id="tb-start">Start TensorBoard</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- TERRABYTE -->
-  <section class="page page--pad" data-page="terrabyte">
-    <div class="deck deck--tby">
-      <i class="deck__tick deck__tick--tl" aria-hidden="true"></i>
-      <i class="deck__tick deck__tick--tr" aria-hidden="true"></i>
-      <i class="deck__tick deck__tick--bl" aria-hidden="true"></i>
-      <i class="deck__tick deck__tick--br" aria-hidden="true"></i>
-      <header class="deck__mast">
-        <div class="status__id">
-          <p class="hero__kicker">cluster observatory &middot; LRZ terrabyte &middot; SLURM over shared SSH</p>
-          <h1 class="status__host">terrabyte</h1>
-          <p class="status__sum tby-sum"><i class="tby-live" id="tby-live" aria-hidden="true"></i><span class="tby-stamp" id="tby-stamp">connecting&hellip;</span></p>
-        </div>
-        <button class="btn btn--mini tby-refresh" id="tby-refresh">Refresh</button>
-      </header>
-      <div class="status__board tby-board">
-        <section class="sboard tby-sb tby-sb--error" id="tby-error" hidden></section>
-
-        <section class="sboard tby-sb tby-sb--dials" aria-label="Cluster load">
-          <header class="sboard__cap"><span>cluster load</span><span class="sboard__n">hpda2</span></header>
-          <div class="tby-dialrow">
-            <div class="tby-dialcell">
-              <canvas class="gdial gdial--big" id="tby-dial-gpu"></canvas>
-              <span class="tby-dialcap" id="tby-gpu-cap">cluster GPUs allocated</span>
-            </div>
-            <div class="tby-dialcell">
-              <canvas class="gdial gdial--big" id="tby-dial-cpu"></canvas>
-              <span class="tby-dialcap" id="tby-cpu-cap">compute CPUs busy</span>
-            </div>
-            <div class="tby-dialcell tby-dialcell--tank">
-              <canvas class="gtank" id="tby-tank-home"></canvas>
-              <span class="tby-dialcap" id="tby-home-cap">HOME quota</span>
-              <button class="btn btn--mini btn--danger" id="tby-clean-home" title="Remove per-commit worktrees not used by any queued or running job, plus sbatch scripts and logs of finished jobs, from cluster HOME. Run outputs on SCRATCH are untouched">Clean home</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--stats" aria-label="My jobs">
-          <header class="sboard__cap"><span>mine</span></header>
-          <div class="tby-statcol">
-            <div class="tby-stat"><b id="tby-stat-running">--</b><span>my running</span></div>
-            <div class="tby-stat"><b id="tby-stat-pending">--</b><span>my pending</span></div>
-            <div class="tby-stat"><b id="tby-stat-freegpus">--</b><span>free GPUs</span></div>
-            <div class="tby-stat"><b id="tby-stat-scratch">--</b><span>scratch fs used</span></div>
-          </div>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--nodes" aria-label="GPU nodes">
-          <header class="sboard__cap"><span>gpu nodes</span><span class="sboard__n">4&times; A100 each &middot; lit dots = allocated &middot; ring = your jobs</span></header>
-          <div class="tby-nodegrid" id="tby-nodes"></div>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--partitions" aria-label="Partitions">
-          <header class="sboard__cap"><span>partitions</span></header>
-          <div class="ft-table-wrap">
-            <table class="ft-table" id="tby-partitions">
-              <thead><tr><th>Partition</th><th>Idle</th><th>Mixed</th><th>Full</th><th>Nodes</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--queue" aria-label="My queue">
-          <header class="sboard__cap"><span>my queue</span><span><button class="btn btn--mini btn--danger" id="tby-cancel-all" hidden title="scancel every job you have queued or running on terrabyte">Cancel all</button></span></header>
-          <div class="ft-table-wrap">
-            <table class="ft-table" id="tby-queue">
-              <thead><tr><th>Job</th><th>Name</th><th>Partition</th><th>State</th><th>Elapsed</th><th>Limit</th><th>Reason</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="tby-empty" id="tby-queue-empty">Nothing queued or running.</p>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--history" aria-label="Recent jobs">
-          <header class="sboard__cap"><span>recent jobs &middot; 48 h</span></header>
-          <div class="ft-table-wrap">
-            <table class="ft-table" id="tby-history">
-              <thead><tr><th>Job</th><th>Name</th><th>Partition</th><th>State</th><th>Elapsed</th><th>Exit</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="tby-empty" id="tby-history-empty">No jobs in the last two days.</p>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--runs" aria-label="Runs on cluster scratch">
-          <header class="sboard__cap"><span>runs on cluster scratch <span class="tby-root" id="tby-runs-root"></span></span><span><label class="tby-auto" title="Poll the cluster and pull every finished run as it completes"><input type="checkbox" id="tby-auto-pull"> auto-pull finished</label> <button class="btn btn--mini" id="tby-pull-missing" hidden>Pull remaining</button> <button class="btn btn--mini" id="tby-verify-pulls" hidden title="Compare every pulled run's file sizes against the cluster; incomplete pulls are marked as not pulled so they can be pulled again">Verify pulls</button> <button class="btn btn--mini btn--danger" id="tby-delete-pulled" hidden title="Delete every run from cluster SCRATCH that is already pulled to this machine">Free space</button> <button class="btn btn--mini btn--danger" id="tby-delete-all" hidden title="Delete EVERY run from cluster SCRATCH, including runs never pulled to this machine">Delete all</button> <button class="btn btn--mini" id="tby-runs-refresh">Refresh list</button></span></header>
-          <div class="ft-table-wrap">
-            <table class="ft-table" id="tby-runs">
-              <thead><tr><th>Run</th><th>Size</th><th>Finished</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="tby-empty" id="tby-runs-empty">No completed runs found on SCRATCH.</p>
-        </section>
-
-        <section class="sboard tby-sb tby-sb--log" id="tby-log-card" hidden>
-          <header class="sboard__cap"><span>job log &middot; <span id="tby-log-id"></span></span><span class="tby-logbtns"><button class="btn btn--mini" id="tby-log-refresh">Refresh</button><button class="btn btn--mini" id="tby-log-close">Close</button></span></header>
-          <pre class="tby-log" id="tby-log-out"></pre>
-          <div class="tby-logcap">stderr</div>
-          <pre class="tby-log tby-log--err" id="tby-log-err"></pre>
-        </section>
-      </div>
-    </div>
-  </section>
 
   <!-- REPO MAP -->
   <section class="page page--pad page--repomap" data-page="repomap">
@@ -1257,7 +650,7 @@
 </main>
 
 <footer class="footer">
-  <span>DLR-TomoSAR control console</span>
+  <span>TomoVic control console</span>
   <span class="footer__dim" id="footer-root"></span>
 </footer>
 
@@ -1324,39 +717,24 @@
 <script src="/static/js/diagram.js"></script>
 <script src="/static/js/router.js"></script>
 <script src="/static/js/equations.js"></script>
-<script src="/static/js/physics_loss.js"></script>
 <script src="/static/js/flow_sketches.js"></script>
 <script src="/static/js/flow_view.js"></script>
 <script src="/static/js/pipelines.js"></script>
 <script src="/static/js/repomap.js"></script>
-<script src="/static/js/models.js"></script>
 <script src="/static/js/configs.js"></script>
 <script src="/static/js/scripts.js"></script>
 <script src="/static/js/saved_runs.js"></script>
 <script src="/static/js/python_literal.js"></script>
 <script src="/static/js/form_widgets.js"></script>
-<script src="/static/js/model_panels.js"></script>
-<script src="/static/js/gpu_pickers.js"></script>
-<script src="/static/js/experiment_builder.js"></script>
 <script src="/static/js/config_form.js"></script>
 <script src="/static/js/launch_pickers.js"></script>
 <script src="/static/js/launch.js"></script>
-<script src="/static/js/ablation.js"></script>
 <script src="/static/js/console.js"></script>
 <script src="/static/js/results.js"></script>
-<script src="/static/js/leaderboard.js"></script>
 <script src="/static/js/run_strip.js"></script>
 <script src="/static/js/tomogram.js"></script>
 <script src="/static/js/globe.js"></script>
 <script src="/static/js/slice_collector.js"></script>
-<script src="/static/js/fit_lab.js"></script>
-<script src="/static/js/microscope.js"></script>
-<script src="/static/js/survey.js"></script>
-<script src="/static/js/triage.js"></script>
-<script src="/static/js/autopsy.js"></script>
-<script src="/static/js/tensorboard.js"></script>
-<script src="/static/js/terrabyte.js"></script>
-<script src="/static/js/feed_tuner.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

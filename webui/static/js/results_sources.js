@@ -3,7 +3,7 @@
 class ResultsSources {
   static KEY              = "results-sources";
   static DEFAULT_DATASETS = "/ste/rnd/User/vice_vi/Dataset";
-  static DEFAULT_RUNS     = "/ste/rnd/User/vice_vi/DLR-TomoSAR/runs";
+  static DEFAULT_RUNS     = "/ste/rnd/User/vice_vi/Dataset";
 
   static stored() {
     try {

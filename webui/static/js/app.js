@@ -94,7 +94,6 @@ class App {
 
       this.project = project;
       if (this.launchView) this.launchView.project = project;
-      if (this.ablationView) this.ablationView.project = project;
       this._setStatus(true);
       this._initStatus();
     }, 3000);
@@ -137,8 +136,6 @@ class App {
 
     this.launchView = new window.LaunchView(this.runConsole, this.project || {});
 
-    this.ablationView = new window.AblationView(this.runConsole, this.project || {});
-
     this.savedRunsView = new window.SavedRunsView(this.runConsole, document.getElementById("saved-grid"));
 
     this.equationView = new window.EquationView(
@@ -150,19 +147,10 @@ class App {
     this.flowView = new window.FlowView(document.getElementById("flowx"));
     this._initModelMode();
 
-    this.physicsLossView = new window.PhysicsLossView(document.getElementById("phys"));
-
     this.pipelineFlow = new window.PipelineFlow(document.getElementById("flow"));
     this.pipelineFlow.load();
 
     this.repoMap = new window.RepoMapView(document.getElementById("repomap"));
-
-    this.modelGallery = new window.ModelGallery(
-      document.getElementById("model-list"),
-      document.getElementById("model-detail")
-    );
-    this.modelGallery.load();
-    this._initModelZoo();
 
     this.configBrowser = new window.ConfigBrowser(
       document.getElementById("config-list"),
@@ -171,64 +159,10 @@ class App {
     );
     this.configBrowser.load();
 
-    this.tensorboardView = new window.TensorboardView();
-    this.terrabyteView = new window.TerrabyteView();
-
-    this.feedTuner = new window.FeedTuner();
-    window.feedTuner = this.feedTuner;
-
     this.resultsView = new window.ResultsView(
       document.getElementById("results-list"),
       document.getElementById("results-detail")
     );
-
-    this.leaderboardView = new window.LeaderboardView(document.getElementById("leaderboard-root"));
-
-    this.microscopeView = new window.MicroscopeView(document.getElementById("probe-root"));
-    this.surveyView     = new window.SurveyView(document.getElementById("survey-root"));
-    this.triageView     = new window.TriageView(document.getElementById("triage-root"));
-    this.autopsyView    = new window.AutopsyView(document.getElementById("autopsy-root"));
-
-    this.fitLabView = new window.FitLabView({
-      baseInput        : document.getElementById("fl-base"),
-      scanBtn          : document.getElementById("fl-scan"),
-      strip            : document.getElementById("fl-strip"),
-      hint             : document.getElementById("fl-hint"),
-      progress         : document.getElementById("fl-progress"),
-      progressFill     : document.getElementById("fl-progress-fill"),
-      progressLabel    : document.getElementById("fl-progress-label"),
-      stage            : document.getElementById("fl-stage"),
-      mapSrcWrap       : document.getElementById("fl-map-src"),
-      mapImg           : document.getElementById("fl-map-img"),
-      marks            : document.getElementById("fl-marks"),
-      coords           : document.getElementById("fl-coords"),
-      azInput          : document.getElementById("fl-az"),
-      rgInput          : document.getElementById("fl-rg"),
-      azRange          : document.getElementById("fl-az-range"),
-      rgRange          : document.getElementById("fl-rg-range"),
-      addBtn           : document.getElementById("fl-add"),
-      clearBtn         : document.getElementById("fl-clear"),
-      pixels           : document.getElementById("fl-pixels"),
-      modeWrap         : document.getElementById("fl-mode"),
-      kmaxInput        : document.getElementById("fl-kmax"),
-      lambdaInput      : document.getElementById("fl-lambda"),
-      thresholdInput   : document.getElementById("fl-threshold"),
-      truncationInput  : document.getElementById("fl-truncation"),
-      prominenceInput  : document.getElementById("fl-prominence"),
-      sigdivInput      : document.getElementById("fl-sigdiv"),
-      activityInput    : document.getElementById("fl-activity"),
-      stepsInput       : document.getElementById("fl-steps"),
-      lrInput          : document.getElementById("fl-lr"),
-      runBtn           : document.getElementById("fl-run"),
-      runMsg           : document.getElementById("fl-run-msg"),
-      fitProgress      : document.getElementById("fl-fit-progress"),
-      fitProgressFill  : document.getElementById("fl-fit-progress-fill"),
-      fitProgressLabel : document.getElementById("fl-fit-progress-label"),
-      runs             : document.getElementById("fl-runs"),
-      results          : document.getElementById("fl-results"),
-      compsWrap        : document.getElementById("fl-comps"),
-      cards            : document.getElementById("fl-cards"),
-    });
 
     this.tomogramView = new window.TomogramView({
       strip         : document.getElementById("cube-strip"),
@@ -252,41 +186,6 @@ class App {
       profModeBtns  : [...document.querySelectorAll("#cube-prof-mode .cube-space")],
       modeBtns      : [...document.querySelectorAll(".cube-mode[data-view]")],
       views         : [...document.querySelectorAll(".cube-view[data-view]")],
-      params        : {
-        source : document.getElementById("cube-param-source"),
-        field  : document.getElementById("cube-param-field"),
-        slot   : document.getElementById("cube-param-slot"),
-        at     : document.getElementById("cube-param-at"),
-        canvas : document.getElementById("cube-param-canvas"),
-        cross  : document.getElementById("cube-param-cross"),
-        cbar   : document.getElementById("cube-param-cbar"),
-        min    : document.getElementById("cube-param-min"),
-        max    : document.getElementById("cube-param-max"),
-        coords : document.getElementById("cube-param-coords"),
-        table  : document.getElementById("cube-param-table"),
-        open   : document.getElementById("cube-param-open"),
-      },
-      metrics       : {
-        layer  : document.getElementById("cube-metric-layer"),
-        vmin   : document.getElementById("cube-metric-vmin"),
-        vmax   : document.getElementById("cube-metric-vmax"),
-        reset  : document.getElementById("cube-metric-reset"),
-        mode   : document.getElementById("cube-metric-mode"),
-        thr    : document.getElementById("cube-metric-thr"),
-        thrVal : document.getElementById("cube-metric-thr-val"),
-        alpha  : document.getElementById("cube-metric-alpha"),
-        img    : document.getElementById("cube-metric-img"),
-        cross  : document.getElementById("cube-metric-cross"),
-        cbar   : document.getElementById("cube-metric-cbar"),
-        min    : document.getElementById("cube-metric-min"),
-        max    : document.getElementById("cube-metric-max"),
-        coords : document.getElementById("cube-metric-coords"),
-        readout: document.getElementById("cube-metric-readout"),
-        open   : document.getElementById("cube-metric-open"),
-        selCov : document.getElementById("cube-selective-cov"),
-        selVal : document.getElementById("cube-selective-val"),
-        selTab : document.getElementById("cube-selective-table"),
-      },
       transect      : {
         at      : document.getElementById("cube-transect-at"),
         clear   : document.getElementById("cube-transect-clear"),
@@ -393,18 +292,6 @@ class App {
     });
   }
 
-  _initModelZoo() {
-    const wrap = document.getElementById("model-zoo");
-    if (!wrap) return;
-    wrap.querySelectorAll(".model-zoo__btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (btn.classList.contains("is-active")) return;
-        wrap.querySelectorAll(".model-zoo__btn").forEach((b) => b.classList.toggle("is-active", b === btn));
-        this.modelGallery.reload(btn.dataset.endpoint, btn.dataset.zoo);
-      });
-    });
-  }
-
   _initModelMode() {
     const wrap  = document.getElementById("model-mode");
     const views = [...document.querySelectorAll(".model-view")];
@@ -435,26 +322,13 @@ class App {
     } else {
       this.launchView.leave();
     }
-    if (route === "ablation") this.ablationView.enter();
     if (route === "saved") this.savedRunsView.enter();
-    if (route === "physics") this.physicsLossView.load();
     if (route === "model" && document.querySelector("#model-mode .model-mode__btn.is-active")?.dataset.mode === "walkthrough") this.flowView.load();
     if (route === "repomap") this.repoMap.enter();
-    if (route === "tensorboard") this.tensorboardView.enter();
-    else this.tensorboardView.leave();
-    if (route === "terrabyte") this.terrabyteView.enter();
-    else this.terrabyteView.leave();
     if (route === "results") this.resultsView.enter();
-    if (route === "leaderboard") this.leaderboardView.enter();
-    if (route === "feedtuner") this.feedTuner.enter();
     if (route === "cube") this.tomogramView.enter();
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
-    if (route === "fitlab") this.fitLabView.enter();
-    if (route === "microscope") this.microscopeView.enter();
-    if (route === "survey") this.surveyView.enter();
-    if (route === "triage") this.triageView.enter();
-    if (route === "autopsy") this.autopsyView.enter();
     if (route === "console") this.runConsole.onShow();
     setTimeout(() => this.reveal.scan(), 60);
   }

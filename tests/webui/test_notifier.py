@@ -297,7 +297,7 @@ def test_test_message_is_delivered(notifier, capture_server):
 
     assert notifier.test()["ok"]
     assert len(CaptureHandler.requests) == 1
-    assert CaptureHandler.requests[0]["title"] == "DLR-TomoSAR test notification"
+    assert CaptureHandler.requests[0]["title"] == "TomoVic test notification"
 
 
 def _progress(total: int = 30, done: int = 15, failed: int = 0, eta_s: float | None = 9000.0, failed_units: list | None = None) -> dict:

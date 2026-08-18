@@ -8,7 +8,6 @@ class DatasetPicker {
     runs:         { endpoint: "/api/fs/runs",     key: "runs",     noun: "runs",     hint: "nothing selected = every run is processed",     badge: (d) => (d.n_seeds ? (d.own_inference ? { text: "seed report", tone: "ok" } : { text: "no seed report", tone: "warn" }) : !d.has_checkpoint ? { text: "no checkpoint", tone: "warn" } : d.has_inference ? { text: "inferred", tone: "ok" } : null) },
     runs_compare: { endpoint: "/api/fs/runs",     key: "runs",     noun: "runs",     hint: "select 2 or more runs to compare",            params: "units=1", badge: (d) => (d.n_seeds ? { text: `${d.n_seeds} seed${d.n_seeds > 1 ? "s" : ""}`, tone: d.has_inference ? "ok" : "warn" } : d.has_inference ? { text: "inferred", tone: "ok" } : { text: "no inference", tone: "warn" }) },
     run_groups:   { endpoint: "/api/fs/run_groups", key: "groups", noun: "groups",   hint: "nothing selected = runs_dir itself is treated as one seed group", badge: (d) => ({ text: `${d.n_runs} runs`, tone: d.n_runs >= 2 ? "ok" : "warn" }) },
-    param_trials: { endpoint: "/api/fs/param_trials", key: "trials", noun: "trials", hint: "select 2 or more trials to compare across datasets", badge: (d) => (d.dataset ? { text: d.dataset, tone: "ok" } : null) },
   };
 
   constructor(view, leaf, spec) {
@@ -115,11 +114,6 @@ class DatasetPicker {
   async _loadSingle() {
     const seq = (this.singleLoadSeq = (this.singleLoadSeq || 0) + 1);
 
-    if (this.spec.mode === "params") {
-      const dataset = this.view._effective(this.view._leafByPath(this.spec.datasetFrom));
-      await this._fetchParams(dataset, seq);
-      return;
-    }
     if (this.spec.mode === "runs") {
       await this._fetchRuns(this._base(), seq);
       return;
@@ -163,25 +157,6 @@ class DatasetPicker {
     const items = (res.datasets || []).filter((d) => (this.spec.validOnly ? d.is_dataset : true));
     this.note.textContent = items.length ? `${items.length} in ${res.base}` : `no datasets in ${res.base}`;
     this._renderSingleOptions(items.map((d) => ({ value: d.path, label: d.name + (d.has_params ? "" : "  (no params)") })));
-  }
-
-  async _fetchParams(dataset, seq) {
-    if (!dataset) {
-      this.note.textContent = "select a dataset first";
-      this._renderSingleOptions([]);
-      return;
-    }
-    this.note.textContent = "listing...";
-    const res = await Api.get(`/api/fs/params?dataset=${encodeURIComponent(dataset)}`);
-    if (this._singleStale(seq)) return;
-    if (!res.ok) {
-      this.note.textContent = res.error || "could not list params";
-      this._renderSingleOptions([]);
-      return;
-    }
-    const items = res.files || [];
-    this.note.textContent = items.length ? `${items.length} under ${res.params_root}` : "no extracted params yet";
-    this._renderSingleOptions(items.map((f) => ({ value: f.path, label: f.name })));
   }
 
   _renderSingleOptions(items) {
@@ -456,7 +431,6 @@ class DatasetPicker {
     this.custom.value = "";
     this.custom.classList.remove("is-dirty");
     this._renderSingleOptions(this.options);
-    if (this.spec.mode === "params") this._loadSingle();
   }
 
   _option(value, label) {

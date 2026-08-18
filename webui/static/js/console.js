@@ -123,124 +123,6 @@ class TileLogPanel {
   }
 }
 
-class TileGpuPanel {
-
-  constructor(tile) {
-    this.tile     = tile;
-    this.poolGpus = [];
-    this.cards    = null;
-
-    this.el = document.createElement("div");
-    this.el.className = "console-tile__gpus";
-    this.el.hidden = true;
-
-    this.board = document.createElement("div");
-
-    this.note = document.createElement("span");
-    this.note.className = "console-tile__gpunote";
-
-    this.apply = document.createElement("button");
-    this.apply.className = "btn btn--mini btn--primary";
-    this.apply.textContent = "Apply";
-    this.apply.addEventListener("click", () => this.applyGpus());
-
-    const actions = document.createElement("div");
-    actions.className = "console-tile__gpuactions";
-    actions.append(this.note, this.apply);
-
-    this.el.append(this.board, actions);
-  }
-
-  static sameSet(a, b) {
-    const left  = [...(a || [])].map(Number).sort((x, y) => x - y);
-    const right = [...(b || [])].map(Number).sort((x, y) => x - y);
-    return left.length === right.length && left.every((g, i) => g === right[i]);
-  }
-
-  setPool(gpus) {
-    const previous = this.poolGpus;
-    this.poolGpus  = gpus;
-
-    if (this.el.hidden || !this.cards) return;
-
-    const edited = !TileGpuPanel.sameSet(this.cards.value(), previous);
-    const moved  = !TileGpuPanel.sameSet(gpus, previous);
-    if (moved && !edited) this.cards.set(this.poolGpus);
-    this.paintNote();
-  }
-
-  toggle() {
-    if (!this.el.hidden) {
-      this.el.hidden = true;
-      return;
-    }
-
-    this.el.hidden = false;
-
-    if (!this.cards) {
-      this.cards = new window.GpuCardSelect(this.board, {
-        multi: true,
-        allowEmpty: true,
-        initial: this.poolGpus,
-        onChange: () => this.paintNote(),
-      });
-      this.cards.load().then(() => this.paintNote());
-      return;
-    }
-
-    this.cards.set(this.poolGpus);
-    this.paintNote();
-  }
-
-  paintNote() {
-    const chosen = this.cards ? this.cards.value() : [];
-    const added = chosen.filter((g) => !this.poolGpus.includes(g));
-    const dropped = this.poolGpus.filter((g) => !chosen.includes(g));
-    const parking = !chosen.length;
-
-    this.apply.disabled = !added.length && !dropped.length;
-    this.apply.textContent = parking ? "Park" : "Apply";
-    this.apply.classList.toggle("btn--danger", parking);
-    this.apply.classList.toggle("btn--primary", !parking);
-
-    if (parking) {
-      this.note.textContent = this.poolGpus.length
-        ? `park: runs in flight on ${this.poolGpus.join(",")} finish, nothing new starts until you add a GPU back`
-        : "parked — nothing new starts until you add a GPU back";
-      return;
-    }
-    if (!added.length && !dropped.length) {
-      this.note.textContent = `pool: ${this.poolGpus.join(", ") || "parked"}`;
-      return;
-    }
-
-    const bits = [];
-    if (added.length) bits.push(`+${added.join(",")} start queued runs within seconds`);
-    if (dropped.length) bits.push(`-${dropped.join(",")} retire once the run in flight ends`);
-    this.note.textContent = bits.join(" · ");
-  }
-
-  async applyGpus() {
-    const chosen = this.cards ? this.cards.value() : [];
-    const parking = !chosen.length;
-
-    if (parking && !window.confirm(`Park ${this.tile.job.script}?\n\nThe runs in flight will finish, then the experiment holds without starting anything new. It stays parked until you add a GPU back.`)) return;
-
-    const res = await Api.post(`/api/jobs/${this.tile.job.job_id}/gpus`, { gpus: chosen, park: parking });
-
-    if (!res.ok) {
-      Toast.show(res.error || "Could not resize the GPU pool", "error");
-      return;
-    }
-
-    this.poolGpus = res.gpus || [];
-    this.el.hidden = true;
-    Toast.show(res.parked ? "Experiment parked — no new runs will start" : `GPU pool set to ${this.poolGpus.join(", ")}`, res.parked ? "warn" : "ok");
-    this.tile._pollGpus();
-  }
-}
-
-
 class TileUnitPicker {
   static FILTER_MIN = 8;
 
@@ -464,7 +346,7 @@ class TileUnitPicker {
 
 
 class ConsoleTile {
-  static GPU_POLL_MS = 4000;
+  static POLL_MS = 4000;
 
   constructor(job, manager, host) {
     this.job = job;
@@ -494,20 +376,6 @@ class ConsoleTile {
     this.badgeEl.className = `badge badge--${job.status}`;
     this.badgeEl.textContent = job.status;
 
-    this.gpuBtn = document.createElement("button");
-    this.gpuBtn.className = "btn btn--mini";
-    this.gpuBtn.textContent = "GPUs";
-    this.gpuBtn.hidden = true;
-    this.gpuBtn.title = "Resize the GPU pool of this running fan-out";
-    this.gpuBtn.addEventListener("click", () => this.gpus.toggle());
-
-    this.tbBtn = document.createElement("button");
-    this.tbBtn.className = "btn btn--mini";
-    this.tbBtn.textContent = "TB";
-    this.tbBtn.hidden = !job.terrabyte;
-    this.tbBtn.title = "Mirror the run's tensorboard event files from cluster SCRATCH and open a local TensorBoard over them";
-    this.tbBtn.addEventListener("click", () => this._openTensorboard());
-
     this.logBtn = document.createElement("button");
     this.logBtn.className = "btn btn--mini";
     this.logBtn.textContent = ".out";
@@ -524,10 +392,9 @@ class ConsoleTile {
     this.closeBtn.textContent = "Close";
     this.closeBtn.addEventListener("click", () => this.manager.close(this.job.job_id));
 
-    bar.append(this.nameEl, this.metaEl, this.badgeEl, this.gpuBtn, this.tbBtn, this.logBtn, this.stopBtn, this.closeBtn);
+    bar.append(this.nameEl, this.metaEl, this.badgeEl, this.logBtn, this.stopBtn, this.closeBtn);
 
-    this.gpuTimer = null;
-    this.gpus = new TileGpuPanel(this);
+    this.pollTimer = null;
 
     this.progWrap = document.createElement("div");
     this.progWrap.className = "console-tile__progress";
@@ -563,7 +430,7 @@ class ConsoleTile {
     this.outEl = document.createElement("div");
     this.outEl.className = "console-tile__out";
 
-    this.root.append(bar, this.progWrap, this.picker.el, this.gpus.el, this.log.el, this.outEl, this.unitEl);
+    this.root.append(bar, this.progWrap, this.picker.el, this.log.el, this.outEl, this.unitEl);
     host.appendChild(this.root);
 
     const main = this._makeTerm();
@@ -628,10 +495,8 @@ class ConsoleTile {
       this.term.writeln(data.text);
     } else if (data.type === "status") {
       if (data.status === "running") {
-        if (!data.tby) {
-          this._note(this._runNote(data), data.adopted && !data.log ? "33" : "36");
-          this.metaEl.textContent = this._meta(data.adopted ? `pid ${data.pid} · adopted` : data.detached ? `pid ${data.pid} · detached` : `pid ${data.pid}`);
-        }
+        this._note(this._runNote(data), data.adopted && !data.log ? "33" : "36");
+        this.metaEl.textContent = this._meta(data.adopted ? `pid ${data.pid} · adopted` : data.detached ? `pid ${data.pid} · detached` : `pid ${data.pid}`);
         if (data.log) {
           this.job.log_path = data.log;
           this.logBtn.hidden = false;
@@ -640,7 +505,7 @@ class ConsoleTile {
       } else if (data.status === "scheduled") {
         this._note(`scheduled to run after ${data.after || "the current job"}`, "33");
       } else if (data.status === "queued") {
-        this._note(data.tby ? (data.phase === "transfer" ? "uploading data to SCRATCH — submits automatically when the transfer lands" : "pending on the SLURM queue") : `queued at position ${data.position} — ${this._queueBlocker(data.blocker)}`, "33");
+        this._note(`queued at position ${data.position} — ${this._queueBlocker(data.blocker)}`, "33");
         this.setStatus("queued");
       } else if (data.status === "cancelled") {
         this._note("cancelled before start", "33");
@@ -675,11 +540,6 @@ class ConsoleTile {
   }
 
   _baseMeta(job) {
-    if (job.terrabyte) {
-      const ids = job.slurm_jobs || [];
-      if (!ids.length) return "terrabyte · uploading data";
-      return ids.length > 1 ? `terrabyte · ${ids.length} SLURM jobs` : `terrabyte · slurm ${ids[0]}`;
-    }
     return job.pid ? `pid ${job.pid}` : "queued";
   }
 
@@ -689,34 +549,6 @@ class ConsoleTile {
       if (!window.confirm(`Stop ${this.job.script}?\n\nIt has been running for ${elapsed}. The process group is signalled at once and everything since the last checkpoint is lost.`)) return;
     }
     this.manager.stop(this.job.job_id);
-  }
-
-  async _openTensorboard() {
-    this.tbBtn.disabled = true;
-    try {
-      const res = await Api.post(`/api/jobs/${this.job.job_id}/tensorboard`, {});
-      if (!res.ok) {
-        Toast.show(res.error || "TensorBoard mirror failed", "error");
-        return;
-      }
-      Toast.show(res.mirror_live ? "Event files mirrored — refreshing every minute while the job runs" : "Event files mirrored", "ok");
-      window.open(await this._awaitTensorboard(res.id, res.url), "_blank");
-    } finally {
-      this.tbBtn.disabled = false;
-    }
-  }
-
-  async _awaitTensorboard(id, url) {
-    for (let i = 0; i < 20; i++) {
-      const data = await Api.get("/api/tensorboard");
-      if (data.error) break;
-
-      const inst = (data.instances || []).find((x) => x.id === id);
-      if (inst && inst.status === "running") return inst.url;
-      if (inst && inst.status === "failed") break;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-    return url;
   }
 
   _note(text, color, term) {
@@ -735,73 +567,33 @@ class ConsoleTile {
       this.picker.rebuild();
     }
 
-    if (status === "running" || (this.job.terrabyte && status === "queued")) this._watchGpus();
+    if (status === "running") this._watchProgress();
     else {
-      const hadTimer = Boolean(this.gpuTimer);
-      this._unwatchGpus();
+      const hadTimer = Boolean(this.pollTimer);
+      this._unwatchProgress();
       if (hadTimer) this._pollProgress();
     }
   }
 
-  _watchGpus() {
-    if (this.gpuTimer) return;
-    this._pollGpus();
+  _watchProgress() {
+    if (this.pollTimer) return;
     this._pollProgress();
-    this.gpuTimer = setInterval(() => {
-      this._pollGpus();
-      this._pollProgress();
-    }, ConsoleTile.GPU_POLL_MS);
+    this.pollTimer = setInterval(() => this._pollProgress(), ConsoleTile.POLL_MS);
   }
 
-  _unwatchGpus() {
-    clearInterval(this.gpuTimer);
-    this.gpuTimer = null;
-    this.gpuBtn.hidden = true;
-    this.gpus.el.hidden = true;
-  }
-
-  async _pollGpus() {
-    const data = await Api.get(`/api/jobs/${this.job.job_id}/gpus`);
-
-    const live = Boolean(data.ok && data.live);
-    this.gpuBtn.hidden = !live;
-    if (!live) {
-      this.gpus.el.hidden = true;
-      return;
-    }
-
-    const pool = data.gpus || [];
-    this.gpuBtn.textContent = pool.length ? `GPUs ${pool.join(",")}` : "GPUs parked";
-    this.gpus.setPool(pool);
+  _unwatchProgress() {
+    clearInterval(this.pollTimer);
+    this.pollTimer = null;
   }
 
   async _pollProgress() {
     const data = await Api.get(`/api/jobs/${this.job.job_id}/progress`);
-
-    if (data.ok && data.transfer) {
-      this._renderTransfer(data.transfer);
-      return;
-    }
 
     const prog = data && data.ok && data.progress;
     if (!prog) return;
     if (prog.units) this._renderUnits(prog.units);
     if (!prog.total) return;
     this._renderProgress(prog);
-  }
-
-  _renderTransfer(t) {
-    const pct = t.pct != null ? t.pct : 0;
-    const bits = [`upload ${t.index}/${t.total}`];
-    if (t.pct != null) bits.push(`${t.pct}%`);
-    if (t.rate) bits.push(t.rate);
-    if (t.eta) bits.push(`ETA ${t.eta}`);
-
-    this.progWrap.hidden = false;
-    this.progFill.style.width = `${pct}%`;
-    this.progFill.classList.remove("is-failing");
-    this.progText.textContent = bits.join(" · ");
-    this.progText.title = t.dest || "";
   }
 
   _renderUnits(units) {
@@ -879,13 +671,13 @@ class ConsoleTile {
     if (p.eta_s != null) bits.push(`avg ${Format.duration(p.average_s)}/unit`, `ETA ${Format.duration(p.eta_s)}`, `finish ≈ ${p.finish_at.slice(11, 16)}`);
     else if (done < p.total) bits.push("estimating ETA");
     if (p.failed) bits.push(`${p.failed} FAILED`);
-    if (p.running && p.running.length) bits.push(`${p.running.length} on GPU now`);
+    if (p.running && p.running.length) bits.push(`${p.running.length} running now`);
 
     this.progWrap.hidden = false;
     this.progFill.style.width = `${Math.round((100 * done) / p.total)}%`;
     this.progFill.classList.toggle("is-failing", p.failed > 0);
     this.progText.textContent = bits.join(" · ");
-    this.progText.title = p.failed ? `failed: ${p.failed_units.join(", ")}` : (p.running || []).map((r) => `GPU ${r.gpu}: ${r.name}`).join("\n");
+    this.progText.title = p.failed ? `failed: ${p.failed_units.join(", ")}` : (p.running || []).map((r) => r.name).join("\n");
   }
 
   fit() {
@@ -924,7 +716,7 @@ class ConsoleTile {
     this._disconnect();
     this.picker._closeMenu();
     this._closeUnitStream();
-    this._unwatchGpus();
+    this._unwatchProgress();
     this.term.dispose();
     if (this.unitTerm) this.unitTerm.dispose();
     this.root.remove();
@@ -953,7 +745,7 @@ class RunConsole {
   }
 
   static isLive(job) {
-    return job.status === "running" || (job.terrabyte && job.status === "queued");
+    return job.status === "running";
   }
 
   async refresh() {

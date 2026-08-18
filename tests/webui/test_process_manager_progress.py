@@ -21,8 +21,8 @@ from tests.webui.conftest import SLEEP_LONG, wait_for_status, wait_until_finishe
 
 @pytest.fixture
 def manager(make_manager):
-    """Returns a process manager whose backbone and dataloader scripts are long sleeps."""
-    return make_manager({name: SLEEP_LONG for name in ("train_backbone", "tune_dataloader")})
+    """Returns a process manager whose preprocessing scripts are long sleeps."""
+    return make_manager({name: SLEEP_LONG for name in ("pre_process", "analyze_preprocessing")})
 
 
 def _progress_path(manager: ProcessManager, job_id: str) -> Path:
@@ -53,7 +53,7 @@ def _snapshot(done: int = 12, failed: int = 1, total: int = 30) -> dict:
 
 def test_progress_reports_unsupported_for_non_pool_scripts(manager):
     """A script without a GPU pool reports progress as unsupported."""
-    result = manager.launch("tune_dataloader", sys.executable)
+    result = manager.launch("analyze_preprocessing", sys.executable)
 
     assert manager.progress(result["job_id"]) == {"ok": True, "supported": False, "live": False}
 
@@ -62,7 +62,7 @@ def test_progress_reports_unsupported_for_non_pool_scripts(manager):
 
 def test_progress_before_the_file_exists_is_not_live(manager):
     """Before the file is written, progress is supported but not live and names the expected path."""
-    result = manager.launch("train_backbone", sys.executable)
+    result = manager.launch("pre_process", sys.executable, {"gpus_file": str(manager.paths.repo_root / "pool.json")})
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")
@@ -73,14 +73,14 @@ def test_progress_before_the_file_exists_is_not_live(manager):
     assert info["supported"] is True
     assert info["live"] is False
     assert "progress" not in info
-    assert info["path"].endswith(f"{job_id}_progress.json")
+    assert info["path"].endswith("pool_progress.json")
 
     manager.stop(job_id)
 
 
 def test_progress_reads_the_live_snapshot(manager):
     """A written progress file is read back verbatim and reported as live."""
-    result = manager.launch("train_backbone", sys.executable)
+    result = manager.launch("pre_process", sys.executable, {"gpus_file": str(manager.paths.repo_root / "pool.json")})
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")
@@ -100,7 +100,7 @@ def test_progress_reads_the_live_snapshot(manager):
 
 def test_list_jobs_embeds_the_progress_of_running_fan_outs(manager):
     """list_jobs embeds the snapshot of a running fan-out job."""
-    result = manager.launch("train_backbone", sys.executable)
+    result = manager.launch("pre_process", sys.executable, {"gpus_file": str(manager.paths.repo_root / "pool.json")})
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")
@@ -118,7 +118,7 @@ def test_list_jobs_embeds_the_progress_of_running_fan_outs(manager):
 
 def test_list_jobs_leaves_other_jobs_without_progress(manager):
     """list_jobs leaves non-fan-out jobs with a null progress field."""
-    result = manager.launch("tune_dataloader", sys.executable)
+    result = manager.launch("analyze_preprocessing", sys.executable)
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")
@@ -132,7 +132,7 @@ def test_list_jobs_leaves_other_jobs_without_progress(manager):
 
 def test_progress_of_a_finished_job_keeps_the_snapshot_but_is_not_live(manager):
     """A finished job still serves its last snapshot from progress but not from list_jobs."""
-    result = manager.launch("train_backbone", sys.executable)
+    result = manager.launch("pre_process", sys.executable, {"gpus_file": str(manager.paths.repo_root / "pool.json")})
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")
@@ -155,7 +155,7 @@ def test_progress_of_a_finished_job_keeps_the_snapshot_but_is_not_live(manager):
 
 def test_progress_rejects_an_unreadable_file(manager):
     """A malformed progress file is reported as an unreadable progress file."""
-    result = manager.launch("train_backbone", sys.executable)
+    result = manager.launch("pre_process", sys.executable, {"gpus_file": str(manager.paths.repo_root / "pool.json")})
     job_id = result["job_id"]
 
     assert wait_for_status(manager, job_id, "running")

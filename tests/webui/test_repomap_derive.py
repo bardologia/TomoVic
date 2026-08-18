@@ -17,8 +17,8 @@ def test_import_graph_finds_known_internal_edges():
     """The import graph carries a known pipeline edge and every target is itself a node."""
     graph = ImportGraph(REPO_ROOT).build()
 
-    assert "pipelines.backbone.inference.pipeline" in graph
-    assert "pipelines.backbone.inference.metrics" in graph["pipelines.backbone.inference.pipeline"]
+    assert "pipelines.processing.generation.pipeline" in graph
+    assert "pipelines.processing.generation.artifacts" in graph["pipelines.processing.generation.pipeline"]
     assert all(target in graph for targets in graph.values() for target in targets)
 
 
@@ -27,7 +27,7 @@ def test_skeleton_groups_by_top_folder():
     skeleton = RepoMapDeriver(REPO_ROOT).skeleton()
     folders  = {folder["folder"] for folder in skeleton["folders"]}
 
-    assert {"main", "pipelines", "tools", "models", "configuration", "webui"} <= folders
+    assert {"main", "pipelines", "tools", "configuration", "webui"} <= folders
 
     pipelines = next(folder for folder in skeleton["folders"] if folder["folder"] == "pipelines")
     assert pipelines["nodes"] and pipelines["edges"]
@@ -52,11 +52,11 @@ def test_drift_reports_vanished_modules():
 
 def test_drift_rejects_a_module_path_that_is_only_a_package_directory():
     """A .py path that exists only as a package directory is reported as missing."""
-    curated = {"folders": [{"folder": "configuration", "diagrams": [{"key": "d", "nodes": [{"id": "cfg", "module": "configuration/dataset.py"}]}]}]}
+    curated = {"folders": [{"folder": "configuration", "diagrams": [{"key": "d", "nodes": [{"id": "cfg", "module": "configuration/sar.py"}]}]}]}
     drift   = RepoMapDeriver(REPO_ROOT).drift(curated)
 
-    assert (REPO_ROOT / "configuration" / "dataset").is_dir()
-    assert [entry["module"] for entry in drift["missing_files"]] == ["configuration/dataset.py"]
+    assert (REPO_ROOT / "configuration" / "sar").is_dir()
+    assert [entry["module"] for entry in drift["missing_files"]] == ["configuration/sar.py"]
 
 
 def test_drift_accepts_a_directory_node_without_a_py_suffix():
@@ -71,7 +71,7 @@ def test_relative_and_webui_local_imports_resolve():
     """Relative imports and webui-local imports resolve to fully qualified module names."""
     graph = ImportGraph(REPO_ROOT).build()
 
-    assert "models.blocks" in graph["models.backbone.swin_unet"]
+    assert "tools.sar.track_parameters" in graph["tools.sar.geometry_field"]
     assert "webui.project_paths" in graph["webui.script_config_resolver"]
     assert "webui.routers.dispatch" in graph["webui.request_router"]
 

@@ -9,7 +9,7 @@ class Router {
     });
     this.links = [...document.querySelectorAll("[data-route]")];
     this.groups = [...document.querySelectorAll(".nav__group")];
-    this.navAlias = { launch: "scripts", ablation: "scripts" };
+    this.navAlias = { launch: "scripts" };
     this.current = null;
 
     window.addEventListener("hashchange", () => this._sync());

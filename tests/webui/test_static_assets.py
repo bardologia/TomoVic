@@ -42,7 +42,7 @@ def test_shared_helpers_load_before_their_users():
     assert loaded.index("shared_charts.js") < loaded.index("home.js")
     assert loaded.index("canvas_base.js") < loaded.index("gauges.js")
 
-    for user in ("equations.js", "physics_loss.js", "flow_view.js"):
+    for user in ("equations.js", "flow_view.js"):
         assert loaded.index("mathjax.js") < loaded.index(user)
 
 
@@ -93,6 +93,4 @@ def test_launch_widget_modules_hold_one_class_family_each():
     assert counts["python_literal.js"] == 1
     assert counts["config_form.js"] == 1
     assert counts["form_widgets.js"] == 3
-    assert counts["gpu_pickers.js"] == 2
-    assert counts["model_panels.js"] == 3
     assert "launch_widgets.js" not in counts
