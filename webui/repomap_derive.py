@@ -19,7 +19,7 @@ class ImportGraph:
         repo_root: Root of the repository whose sources are parsed.
     """
 
-    ROOTS = ("main", "pipelines", "tools", "models", "configuration", "webui")
+    ROOTS = ("main", "pipelines", "tools", "configuration", "webui")
 
     def __init__(self, repo_root: Path) -> None:
         """Stores the repository root the graph is built from."""

@@ -12,17 +12,16 @@ from pathlib import Path
 
 
 class ProjectPaths:
-    """Resolved paths of a DLR-TomoSAR checkout plus its script and interpreter registry.
+    """Resolved paths of a TomoVic checkout plus its script and interpreter registry.
 
     Attributes:
         webui_root: Directory holding this module and the static assets.
-        repo_root: Root of the DLR-TomoSAR repository.
+        repo_root: Root of the TomoVic repository.
         main_dir: Directory holding the entry-point scripts.
         scripts_dir: Directory holding the auxiliary scripts.
         config_dir: Root of the configuration package.
         static_dir: Directory served as the front end's static assets.
         logs_dir: Directory the web UI writes logs and state files into.
-        gpu_guard_dir: Directory holding GPU guard state files.
         gpu_pools_dir: Directory holding per-job live GPU pool files.
         saved_runs_dir: Directory holding saved launch configurations.
     """
@@ -34,60 +33,7 @@ class ProjectPaths:
         "generate_interferograms" : ["conda:stetools"],
     }
 
-    ENTRY_OVERRIDES = {
-        "train_backbone": {
-            "config_module" : "configuration.training.backbone",
-            "config_class"  : "BackboneEntryConfig",
-        },
-        "train_profile_autoencoder": {
-            "config_module" : "configuration.training.profile_autoencoder",
-            "config_class"  : "ProfileAeEntryConfig",
-        },
-        "train_image_autoencoder": {
-            "config_module" : "configuration.training.image_autoencoder",
-            "config_class"  : "ImageAeEntryConfig",
-        },
-        "train_jepa": {
-            "config_module" : "configuration.training.jepa",
-            "config_class"  : "JepaEntryConfig",
-        },
-        "train_unrolled": {
-            "config_module" : "configuration.training.unrolled",
-            "config_class"  : "UnrolledEntryConfig",
-        },
-        "train_dual": {
-            "config_module" : "configuration.training.dual",
-            "config_class"  : "DualEntryConfig",
-        },
-        "infer_backbone": {
-            "config_module" : "configuration.inference",
-            "config_class"  : "BackboneInferenceEntryConfig",
-        },
-        "infer_profile_autoencoder": {
-            "config_module" : "configuration.inference",
-            "config_class"  : "ProfileAeInferenceEntryConfig",
-        },
-        "infer_image_autoencoder": {
-            "config_module" : "configuration.inference",
-            "config_class"  : "ImageAeInferenceEntryConfig",
-        },
-        "infer_unrolled": {
-            "config_module" : "configuration.inference",
-            "config_class"  : "UnrolledInferenceEntryConfig",
-        },
-        "infer_dual": {
-            "config_module" : "configuration.inference",
-            "config_class"  : "DualInferenceEntryConfig",
-        },
-        "cross_validate": {
-            "config_module" : "configuration.cross_validation.general",
-            "config_class"  : "CrossValidationConfig",
-        },
-        "sweep_patches": {
-            "config_module" : "configuration.patch_sweep.general",
-            "config_class"  : "PatchSweepConfig",
-        },
-    }
+    ENTRY_OVERRIDES = {}
 
     def __init__(self, root: Path | None = None) -> None:
         """Resolves every project directory and verifies the root is a real checkout.
@@ -105,7 +51,6 @@ class ProjectPaths:
         self.config_dir     = self.repo_root / "configuration"
         self.static_dir     = self.webui_root / "static"
         self.logs_dir       = self.repo_root / "logs"
-        self.gpu_guard_dir  = self.logs_dir / "gpu_guard"
         self.gpu_pools_dir  = self.logs_dir / "gpu_pools"
         self.saved_runs_dir = self.logs_dir / "saved_runs"
 
@@ -116,7 +61,7 @@ class ProjectPaths:
         missing = [name for name in self.REQUIRED_DIRS if not (self.repo_root / name).is_dir()]
 
         if missing:
-            raise ValueError(f"project root {self.repo_root} is not a DLR-TomoSAR repository: missing {', '.join(missing)}")
+            raise ValueError(f"project root {self.repo_root} is not a TomoVic repository: missing {', '.join(missing)}")
 
     def tree_signature(self, paths) -> tuple:
         """Returns a cache key of (name, mtime_ns) pairs for the given paths.
@@ -140,47 +85,11 @@ class ProjectPaths:
         return self.tree_signature(sorted(self.config_dir.rglob("*.py")))
 
     SCRIPT_DIRS = {
-        "pre_process"                     : "processing",
-        "extract_params"                  : "processing",
-        "inject_external_params"          : "processing",
-        "generate_tomogram"               : "processing",
-        "generate_interferograms"         : "processing",
-        "train_backbone"                  : "training",
-        "train_profile_autoencoder"       : "training",
-        "train_image_autoencoder"         : "training",
-        "train_jepa"                      : "training",
-        "train_unrolled"                  : "training",
-        "train_dual"                      : "training",
-        "infer_backbone"                  : "inference",
-        "infer_profile_autoencoder"       : "inference",
-        "infer_image_autoencoder"         : "inference",
-        "infer_unrolled"                  : "inference",
-        "infer_dual"                      : "inference",
-        "benchmark"                       : "experiments",
-        "cross_validate"                  : "experiments",
-        "sweep_patches"                   : "experiments",
-        "tune"                            : "experiments",
-        "tune_dataloader"                 : "experiments",
-        "analyze_preprocessing"           : "analysis",
-        "analyze_param_extraction"        : "analysis",
-        "compare_trials"                  : "analysis",
-        "compare_preprocessing_trials"    : "analysis",
-        "compare_param_extraction_trials" : "analysis",
-        "compare_runs"                    : "analysis",
-        "compare_seeds"                   : "analysis",
-        "xray_weights"                    : "analysis",
-        "xray_activations"                : "analysis",
-        "measure_receptive_field"         : "analysis",
-        "attribute_inputs"                : "analysis",
-        "capture_attention"               : "analysis",
-        "probe_layers"                    : "analysis",
-        "compare_representations"         : "analysis",
-        "map_loss_landscape"              : "analysis",
-        "stress_inputs"                   : "analysis",
-        "animate_training"                : "analysis",
-        "export_paper_figures"            : "analysis",
-        "export_tensorboard_plots"        : "analysis",
-        "collect_reports"                 : "analysis",
+        "pre_process"                  : "processing",
+        "generate_tomogram"            : "processing",
+        "generate_interferograms"      : "processing",
+        "analyze_preprocessing"        : "analysis",
+        "compare_preprocessing_trials" : "analysis",
     }
 
     def has_script(self, key: str) -> bool:
@@ -191,7 +100,7 @@ class ProjectPaths:
         """Returns the absolute path, repo-relative path and entry config class of a script.
 
         Args:
-            key: Registered script key, such as "train_backbone".
+            key: Registered script key, such as "pre_process".
 
         Returns:
             Mapping with "path", "rel", "config_module" and "config_class"; the

@@ -210,7 +210,7 @@ class ProcessManager:
     HISTORY_LIMIT    = 50
     LOG_VIEW_BYTES   = 4194304
     ENDED_STATES     = ("finished", "failed", "cancelled")
-    POOL_SCRIPTS     = ("train_backbone", "train_dual", "train_jepa", "train_image_autoencoder", "train_profile_autoencoder", "train_unrolled", "sweep_patches", "benchmark", "cross_validate", "tune", "infer_backbone", "infer_profile_autoencoder", "infer_image_autoencoder", "infer_unrolled", "infer_dual")
+    POOL_SCRIPTS     = ()
     POOL_FIELD       = "gpus_file"
 
     def __init__(self, paths: ProjectPaths, logger: WebLogger, notifier: JobNotifier, describer: JobDescriber) -> None:
@@ -1428,40 +1428,6 @@ class ProcessManager:
             os.kill(pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
-
-    def job_for_pid(self, pid: int) -> str | None:
-        """Returns the job id owning a process, walking up its ancestors, or None."""
-        with self.lock:
-            running = {record["pid"]: record["job_id"] for record in self.jobs.values() if record["status"] == "running" and record["pid"] is not None}
-
-        owner = self._ancestor_match(pid, set(running), {})
-
-        return None if owner is None else running[owner]
-
-    def job_fate(self, job_id: str, pid: int) -> str:
-        """Classifies what became of the job a GPU-guarded process belonged to.
-
-        Args:
-            job_id: Job to classify.
-            pid: Pid the caller observed, compared against the record so a job
-                that re-pointed at a detached process reads as "released".
-
-        Returns:
-            One of "pending", "released", "stopped", "crashed", "finished" or
-            "unknown".
-        """
-        with self.lock:
-            record = dict(self.jobs.get(job_id) or {})
-
-        if not record:
-            return "unknown"
-        if record["status"] == "running":
-            return "pending" if record["pid"] == pid else "released"
-        if record["status"] == "failed":
-            return "stopped" if record.get("stopped") else "crashed"
-        if record["status"] == "finished":
-            return "finished" if record["exit_code"] == 0 else "unknown"
-        return "unknown"
 
     def list_jobs(self) -> list[dict]:
         """Returns every job record newest first, with a live progress snapshot attached.

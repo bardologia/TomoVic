@@ -29,15 +29,15 @@ def _opened(browser: ResultsBrowser, root: Path) -> ResultsBrowser:
 
 
 def test_the_tree_reports_the_stage_it_recognises(browser, tmp_path):
-    """A run holding a tensorboard directory is reported as the training stage."""
-    run = tmp_path / "train_run"
-    (run / "tensorboard").mkdir(parents=True)
+    """A run holding SLC images is reported as the preprocess stage."""
+    run = tmp_path / "preproc_run"
+    (run / "images" / "slc").mkdir(parents=True)
 
     payload = browser.tree(str(run))
 
     assert payload["ok"]    is True
-    assert payload["name"]  == "train_run"
-    assert payload["stage"] == "training"
+    assert payload["name"]  == "preproc_run"
+    assert payload["stage"] == "preprocess"
     assert payload["root"]  == str(run)
 
 
@@ -51,12 +51,10 @@ def test_an_unrecognised_run_falls_back_to_results(browser, tmp_path):
 def test_the_earliest_matching_marker_wins(browser, tmp_path):
     """With several markers present, the earliest one in the marker order decides the stage."""
     run = tmp_path / "everything"
-    (run / "pipeline").mkdir(parents=True)
-    (run / "pipeline" / "resolved_config.json").write_text("{}")
-    (run / "tensorboard").mkdir()
-    (run / "inference").mkdir()
+    (run / "images" / "slc").mkdir(parents=True)
+    (run / "report.md").write_text("x")
 
-    assert browser.tree(str(run))["stage"] == "benchmark"
+    assert browser.tree(str(run))["stage"] == "preprocess"
 
 
 def test_the_catalog_lists_datasets_with_their_parameter_runs(browser, tmp_path):
@@ -80,8 +78,9 @@ def test_the_catalog_lists_datasets_with_their_parameter_runs(browser, tmp_path)
 def test_the_catalog_orders_runs_by_recency_and_labels_the_stage(browser, tmp_path):
     """The run catalog is ordered newest first and labels each run with its stage."""
     runs = tmp_path / "runs"
-    (runs / "old_run" / "tensorboard").mkdir(parents=True)
-    (runs / "new_run" / "inference").mkdir(parents=True)
+    (runs / "old_run" / "images" / "slc").mkdir(parents=True)
+    (runs / "new_run" / "report.md").parent.mkdir(parents=True)
+    (runs / "new_run" / "report.md").write_text("x")
 
     os.utime(runs / "old_run", (1_000_000, 1_000_000))
     os.utime(runs / "new_run", (2_000_000, 2_000_000))
@@ -89,8 +88,8 @@ def test_the_catalog_orders_runs_by_recency_and_labels_the_stage(browser, tmp_pa
     payload = browser.catalog("", str(runs))["runs"]
 
     assert [entry["name"] for entry in payload["items"]] == ["new_run", "old_run"]
-    assert payload["items"][0]["stage"] == "inference"
-    assert payload["items"][1]["stage"] == "training"
+    assert payload["items"][0]["stage"] == "comparison"
+    assert payload["items"][1]["stage"] == "preprocess"
 
 
 def test_an_unset_catalog_root_reports_itself_without_failing(browser):

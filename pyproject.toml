@@ -13,7 +13,6 @@ dependencies    = [
     "scipy==1.17.1",
     "matplotlib==3.10.8",
     "pillow==12.1.1",
-    "scikit-image==0.26.0",
     "h5py==3.16.0",
     "rich==15.0.0",
     "psutil==7.2.2",

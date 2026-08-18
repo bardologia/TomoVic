@@ -1,8 +1,7 @@
 """API routes for browsing entry points, launching runs and replaying saved runs.
 
 Covers the project/script catalog with resolved configuration layouts, the job
-list with log streaming and GPU-pool control across local and cluster backends,
-and the saved-run store.
+list with log streaming, and the saved-run store.
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import json
 import queue
 
-from backbone_model_library import BackboneModelLibrary
 from launch_layout          import LaunchLayout, LayoutError
 from process_manager        import ProcessManager
 from project_paths          import ProjectPaths
@@ -20,7 +18,6 @@ from run_launcher           import RunLauncher
 from saved_run_store        import SavedRunStore
 from script_catalog         import ScriptCatalog
 from script_config_resolver import ScriptConfigResolver
-from terrabyte_console      import TerrabyteJobManager
 
 
 class CatalogRouter(SubRouter):
@@ -31,24 +28,22 @@ class CatalogRouter(SubRouter):
         catalog: Script catalog holding the entry-point metadata.
         resolver: Resolver that imports each entry's config dataclass into leaves.
         layout: Layout builder turning config leaves into console panels.
-        models: Backbone model library, used for the project model count.
         launcher: Run launcher providing the preferred interpreter per entry.
     """
 
     PROJECT = {
-        "name"        : "DLR-TomoSAR",
-        "tagline"     : "Neural SAR tomography control console",
-        "description" : "Supervised deep learning that replaces per-pixel iterative optimisation in SAR tomographic parameter estimation, inferring all 3K Gaussian-mixture parameters of the elevation spectrum in one forward pass.",
-        "pipelines"   : ["Processing", "Parameter Extraction", "Dataset", "Training", "Inference", "Tuning"],
+        "name"        : "TomoVic",
+        "tagline"     : "SAR tomography data console",
+        "description" : "Preprocessing and visualization of SAR tomographic data: F-SAR ingestion, tomogram beamforming, interferogram formation, and interactive exploration of the resulting cubes, DEM and scene geometry.",
+        "pipelines"   : ["Processing", "Analysis"],
     }
 
-    def __init__(self, paths: ProjectPaths, catalog: ScriptCatalog, resolver: ScriptConfigResolver, layout: LaunchLayout, models: BackboneModelLibrary, launcher: RunLauncher) -> None:
+    def __init__(self, paths: ProjectPaths, catalog: ScriptCatalog, resolver: ScriptConfigResolver, layout: LaunchLayout, launcher: RunLauncher) -> None:
         """Stores the catalog collaborators and declares the routes."""
         self.paths    = paths
         self.catalog  = catalog
         self.resolver = resolver
         self.layout   = layout
-        self.models   = models
         self.launcher = launcher
 
         super().__init__(("/api/project", "/api/scripts"))
@@ -61,19 +56,16 @@ class CatalogRouter(SubRouter):
         table.wildcard("GET", "/api/scripts/", "",        self.script_detail)
 
     def project(self, exchange: HttpExchange) -> None:
-        """Answers with the project card: models, repo root, interpreters and counts."""
+        """Answers with the project card: repo root, interpreters and counts."""
         interpreters = self.paths.discover_interpreters()
-        model_names  = [model["name"] for family in self.models.collect() for model in family["models"]]
 
         exchange.send_json({
             **self.PROJECT,
-            "models"       : model_names,
             "repo_root"    : str(self.paths.repo_root),
             "interpreters" : interpreters,
             "preferred"    : self.paths.preferred_interpreter(interpreters),
             "counts"       : {
                 "scripts"   : len(self.catalog.list_scripts()),
-                "models"    : len(model_names),
                 "pipelines" : len(self.PROJECT["pipelines"]),
             },
         })
@@ -148,24 +140,19 @@ class RunConfigRouter(SubRouter):
 
 
 class JobRouter(SubRouter):
-    """Serves the job list and the per-job control endpoints of both job backends.
-
-    Local jobs are handled by the process manager and cluster jobs by the Terrabyte
-    console, selected from the job id prefix.
+    """Serves the job list and the per-job control endpoints of the process manager.
 
     Attributes:
         paths: Project paths used to validate entry-point keys.
         processes: Local process manager.
         launcher: Run launcher executing and queueing local runs.
-        cluster: Terrabyte job manager owning the cluster jobs.
     """
 
-    def __init__(self, paths: ProjectPaths, processes: ProcessManager, launcher: RunLauncher, cluster: TerrabyteJobManager) -> None:
-        """Stores the job backends and launcher, then declares the routes."""
+    def __init__(self, paths: ProjectPaths, processes: ProcessManager, launcher: RunLauncher) -> None:
+        """Stores the job backend and launcher, then declares the routes."""
         self.paths     = paths
         self.processes = processes
         self.launcher  = launcher
-        self.cluster   = cluster
 
         super().__init__(("/api/run", "/api/jobs"))
 
@@ -173,22 +160,18 @@ class JobRouter(SubRouter):
         """Registers the job listing, launch and per-job control routes."""
         table.add("GET",  "/api/jobs", self.jobs)
         table.add("POST", "/api/run",  self.run)
-        table.wildcard("GET",  "/api/jobs/", "/gpus",        self.gpu_pool)
-        table.wildcard("GET",  "/api/jobs/", "/progress",    self.progress)
-        table.wildcard("GET",  "/api/jobs/", "/log",         self.log)
-        table.wildcard("GET",  "/api/jobs/", "/stream",      self.stream)
-        table.wildcard("POST", "/api/jobs/", "/stop",        self.stop)
-        table.wildcard("POST", "/api/jobs/", "/gpus",        self.set_gpus)
-        table.wildcard("POST", "/api/jobs/", "/tensorboard", self.tensorboard_bridge)
+        table.wildcard("GET",  "/api/jobs/", "/gpus",     self.gpu_pool)
+        table.wildcard("GET",  "/api/jobs/", "/progress", self.progress)
+        table.wildcard("GET",  "/api/jobs/", "/log",      self.log)
+        table.wildcard("GET",  "/api/jobs/", "/stream",   self.stream)
+        table.wildcard("POST", "/api/jobs/", "/stop",     self.stop)
+        table.wildcard("POST", "/api/jobs/", "/gpus",     self.set_gpus)
 
     def jobs(self, exchange: HttpExchange) -> None:
-        """Adopts orphaned processes and answers with local and cluster jobs, newest first."""
+        """Adopts orphaned processes and answers with the local jobs, newest first."""
         self.processes.adopt_orphans()
 
-        merged = self.processes.list_jobs() + self.cluster.list_jobs()
-        merged.sort(key=lambda record: record["started"], reverse=True)
-
-        exchange.send_json({"jobs": merged})
+        exchange.send_json({"jobs": self.processes.list_jobs()})
 
     def run(self, exchange: HttpExchange) -> None:
         """Launches or queues the entry point described in the request body."""
@@ -205,11 +188,11 @@ class JobRouter(SubRouter):
 
     def gpu_pool(self, exchange: HttpExchange, job_id: str) -> None:
         """Answers with the GPU pool currently assigned to one job."""
-        exchange.send_result(self._backend(job_id).gpu_pool(job_id))
+        exchange.send_result(self.processes.gpu_pool(job_id))
 
     def progress(self, exchange: HttpExchange, job_id: str) -> None:
         """Answers with the progress and ETA of one job."""
-        exchange.send_result(self._backend(job_id).progress(job_id))
+        exchange.send_result(self.processes.progress(job_id))
 
     def log(self, exchange: HttpExchange, job_id: str) -> None:
         """Answers with one job's log, or the log of the requested sub-unit."""
@@ -217,7 +200,7 @@ class JobRouter(SubRouter):
         if unit == "invalid":
             return
 
-        exchange.send_result(self._backend(job_id).job_log(job_id, unit))
+        exchange.send_result(self.processes.job_log(job_id, unit))
 
     def stream(self, exchange: HttpExchange, job_id: str) -> None:
         """Streams one job's log as server-sent events until it ends or the client leaves.
@@ -233,17 +216,15 @@ class JobRouter(SubRouter):
         if unit == "invalid":
             return
 
-        backend = self._backend(job_id)
-
         if unit is not None:
-            opened = backend.unit_stream(job_id, unit)
+            opened = self.processes.unit_stream(job_id, unit)
             if not opened.get("ok"):
                 exchange.send_json(opened, 404)
                 return
             self._pump_stream(exchange, opened["stream"], opened["stop"])
             return
 
-        stream = backend.get_stream(job_id)
+        stream = self.processes.get_stream(job_id)
         if stream is None:
             exchange.send_json({"error": "unknown job"}, 404)
             return
@@ -305,23 +286,11 @@ class JobRouter(SubRouter):
 
     def stop(self, exchange: HttpExchange, job_id: str) -> None:
         """Stops the job addressed by the wildcard id."""
-        exchange.send_result(self._backend(job_id).stop(job_id))
+        exchange.send_result(self.processes.stop(job_id))
 
     def set_gpus(self, exchange: HttpExchange, job_id: str) -> None:
         """Resizes one job's GPU pool, optionally parking it off the GPUs."""
-        exchange.send_result(self._backend(job_id).set_gpus(job_id, exchange.body.get("gpus"), park=bool(exchange.body.get("park"))))
-
-    def _backend(self, job_id: str):
-        """Returns the cluster manager for Terrabyte job ids and the process manager otherwise."""
-        return self.cluster if job_id.startswith(TerrabyteJobManager.PREFIX) else self.processes
-
-    def tensorboard_bridge(self, exchange: HttpExchange, job_id: str) -> None:
-        """Opens a TensorBoard bridge onto a cluster job, refusing local job ids."""
-        if not job_id.startswith(TerrabyteJobManager.PREFIX):
-            exchange.send_json({"ok": False, "error": "local training runs start tensorboard automatically; this bridge mirrors terrabyte runs only"}, 400)
-            return
-
-        exchange.send_result(self.cluster.tensorboard_bridge(job_id, self.launcher.preferred_interpreter("train_backbone")))
+        exchange.send_result(self.processes.set_gpus(job_id, exchange.body.get("gpus"), park=bool(exchange.body.get("park"))))
 
 
 class SavedRunRouter(SubRouter):

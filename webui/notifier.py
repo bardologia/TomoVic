@@ -109,7 +109,7 @@ class JobNotifier:
             if not self.settings["topic"]:
                 return {"ok": False, "error": "set a topic first"}
 
-        error = self._send("DLR-TomoSAR test notification", f"the console on {socket.gethostname()} can reach you", "default")
+        error = self._send("TomoVic test notification", f"the console on {socket.gethostname()} can reach you", "default")
         if error is not None:
             return {"ok": False, "error": error}
         return {"ok": True}

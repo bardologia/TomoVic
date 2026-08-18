@@ -1,4 +1,4 @@
-"""Command-line entry point that starts the DLR-TomoSAR control console."""
+"""Command-line entry point that starts the TomoVic control console."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class ServeEntry:
 
     def __init__(self) -> None:
         """Builds the argument parser with the host, port and root options."""
-        self.parser = argparse.ArgumentParser(description="DLR-TomoSAR control console")
+        self.parser = argparse.ArgumentParser(description="TomoVic control console")
         self.parser.add_argument("--host", default="127.0.0.1")
         self.parser.add_argument("--port", type=int, default=8765)
         self.parser.add_argument("--root", type=Path, default=None, help="project root the console operates on (jobs, logs, runs); defaults to the repository holding this file")

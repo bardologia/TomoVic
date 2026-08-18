@@ -12,28 +12,22 @@ from pathlib import Path
 from cube_explorer import CubeExplorer
 from web_logger    import WebLogger
 
-from tests.webui.conftest import N_AZ, loaded_cube, make_cube_run
-
-SOURCES = ("pred", "gt", "reduced")
-
-
-def _loaded_explorer(base: Path) -> tuple[CubeExplorer, str]:
-    """Returns an explorer with a three-source cube loaded, plus its cube id."""
-    return loaded_cube(base, sources=SOURCES)
+from tests.webui.conftest         import N_AZ
+from tests.webui.preproc_fixtures import loaded_run, make_preproc_run
 
 
 def test_save_slices_writes_paper_figures(tmp_path):
     """Checks slices save under a coordinate-named directory with one non-empty figure per source and axis."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+    explorer, cube_id = loaded_run(tmp_path)
 
     result = explorer.save_slices(cube_id, az=3, rg=2, space="physical")
     assert result["ok"], result
 
     out_dir = Path(result["dir"])
-    assert out_dir == Path(cube_id).parent.parent / "figures" / "cube_slices" / "az0003_rg0002"
+    assert out_dir == Path(cube_id) / "figures" / "cube_slices" / "az0003_rg0002"
     assert result["rel"] == "figures/cube_slices/az0003_rg0002"
 
-    expected = {f"{axis}_{source}_physical.png" for source in SOURCES for axis in ("range", "azimuth")}
+    expected = {f"{axis}_full_physical.png" for axis in ("range", "azimuth")}
     assert set(result["files"]) == expected
 
     for name in expected:
@@ -43,7 +37,7 @@ def test_save_slices_writes_paper_figures(tmp_path):
 
 def test_save_slices_normalized_space_clips_indices(tmp_path):
     """Checks out-of-range azimuth and range indices are clamped and the files are tagged normalized."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+    explorer, cube_id = loaded_run(tmp_path)
 
     result = explorer.save_slices(cube_id, az=999, rg=-5, space="normalized")
     assert result["ok"], result
@@ -54,7 +48,7 @@ def test_save_slices_normalized_space_clips_indices(tmp_path):
 
 def test_save_slices_restores_figure_style(tmp_path):
     """Checks saving leaves the shared plot style back on report."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+    explorer, cube_id = loaded_run(tmp_path)
 
     from tools.reporting.plotting import PlotBase
 
@@ -64,7 +58,7 @@ def test_save_slices_restores_figure_style(tmp_path):
 
 def test_save_slices_rejects_unknown_space(tmp_path):
     """Checks an unknown colour space is refused."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+    explorer, cube_id = loaded_run(tmp_path)
 
     result = explorer.save_slices(cube_id, az=0, rg=0, space="banana")
     assert not result["ok"]
@@ -72,16 +66,17 @@ def test_save_slices_rejects_unknown_space(tmp_path):
 
 def test_save_slices_requires_loaded_cube(tmp_path):
     """Checks saving from an explorer with nothing loaded fails."""
-    stamp    = make_cube_run(tmp_path, sources=SOURCES)
+    run_dir  = make_preproc_run(tmp_path)
     explorer = CubeExplorer(WebLogger())
+    explorer.roots.open(str(tmp_path))
 
-    result = explorer.save_slices(str(stamp), az=0, rg=0)
+    result = explorer.save_slices(str(run_dir), az=0, rg=0)
     assert not result["ok"]
 
 
-def test_slice_png_still_serves_after_cut_refactor(tmp_path):
-    """Checks the interactive slice endpoint still returns a PNG."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+def test_slice_png_serves_the_full_source(tmp_path):
+    """Checks the interactive slice endpoint returns a PNG."""
+    explorer, cube_id = loaded_run(tmp_path)
 
-    png = explorer.slice_png(cube_id, "pred", "range", az=0, rg=2)
+    png = explorer.slice_png(cube_id, "full", "range", az=0, rg=2)
     assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"

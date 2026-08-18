@@ -24,5 +24,5 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-echo "Starting DLR-TomoSAR control console with: $PY"
+echo "Starting TomoVic control console with: $PY"
 exec "$PY" "$HERE/serve.py" --port "$PORT"

@@ -1,8 +1,8 @@
-"""Filesystem discovery of datasets, training runs and extracted parameter files.
+"""Filesystem discovery of datasets and run directories.
 
 Backs the web UI pickers by walking dataset roots and run roots, reporting which
-directories look like datasets, which runs carry checkpoints or inference output,
-and which parameter-extraction trials are complete.
+directories look like datasets and which runs carry checkpoints or inference
+output.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from web_logger import WebLogger
 
 
 class DatasetBrowser:
-    """Lists datasets, runs, run groups and parameter files under given roots.
+    """Lists datasets, runs and run groups under given roots.
 
     Every public method returns a JSON-ready dict carrying an ``ok`` flag, so the
     web UI can surface bad paths as errors instead of raising.
@@ -25,11 +25,6 @@ class DatasetBrowser:
 
     SEED_DIR        = re.compile(r"seed\d+")
     DATA_MARKER     = "data"
-    PARAMS_DIR      = "params"
-    PARAM_SUFFIX    = ".npy"
-    PARAM_META      = "param_extraction_meta.json"
-    PARAM_FILE      = "parameters.npy"
-    MAX_DEPTH       = 3
     CHECKPOINT_NAME = "best_model.pt"
     INFERENCE_DIR   = "inference"
     RUN_MARKER      = "meta"
@@ -47,8 +42,7 @@ class DatasetBrowser:
 
         Returns:
             Dict with ``ok``, the resolved ``base`` and a ``datasets`` list whose
-            entries carry name, path, whether a ``data`` subdirectory exists and
-            whether extracted parameter files were found.
+            entries carry name, path and whether a ``data`` subdirectory exists.
         """
         base = self._directory(raw_base)
         if base is None:
@@ -59,15 +53,10 @@ class DatasetBrowser:
             if not entry.is_dir() or entry.name.startswith("."):
                 continue
 
-            has_data   = (entry / self.DATA_MARKER).is_dir()
-            params_dir = entry / self.PARAMS_DIR
-            has_params = params_dir.is_dir() and self._has_param_files(params_dir)
-
             entries.append({
                 "name"       : entry.name,
                 "path"       : str(entry),
-                "is_dataset" : has_data,
-                "has_params" : has_params,
+                "is_dataset" : (entry / self.DATA_MARKER).is_dir(),
             })
 
         self.logger.info(f"datasets: listed {len(entries)} under {base}")
@@ -186,69 +175,6 @@ class DatasetBrowser:
         self.logger.info(f"run_groups: listed {len(entries)} under {base_label}")
         return {"ok": True, "base": base_label, "groups": entries}
 
-    def params(self, raw_dataset: str) -> dict:
-        """Lists the ``.npy`` parameter files stored under a dataset's params folder.
-
-        Args:
-            raw_dataset: Absolute path of the dataset directory.
-
-        Returns:
-            Dict with ``ok``, the dataset path, the ``params_root`` path and a
-            ``files`` list of name/path pairs relative to that root; the list is
-            empty when the params folder is absent.
-        """
-        dataset = self._directory(raw_dataset)
-        if dataset is None:
-            return {"ok": False, "error": f"not a directory: {raw_dataset}"}
-
-        params_dir = dataset / self.PARAMS_DIR
-        if not params_dir.is_dir():
-            return {"ok": True, "dataset": str(dataset), "params_root": str(params_dir), "files": []}
-
-        files = []
-        for path in sorted(self._param_files(params_dir)):
-            files.append({
-                "name" : str(path.relative_to(params_dir)),
-                "path" : str(path),
-            })
-
-        self.logger.info(f"params: found {len(files)} under {params_dir}")
-        return {"ok": True, "dataset": str(dataset), "params_root": str(params_dir), "files": files}
-
-    def param_trials(self, raw_base: str) -> dict:
-        """Lists completed parameter-extraction trials found anywhere under a root.
-
-        A trial counts as complete when its directory holds both the extraction
-        metadata file and ``parameters.npy``.
-
-        Args:
-            raw_base: Absolute path searched recursively.
-
-        Returns:
-            Dict with ``ok``, the resolved ``base`` and a ``trials`` list of entries
-            carrying the relative name, absolute path and owning dataset folder.
-        """
-        base = self._directory(raw_base)
-        if base is None:
-            return {"ok": False, "error": f"not a directory: {raw_base}"}
-
-        entries = []
-        for marker in sorted(base.rglob(self.PARAM_META)):
-            run_dir = marker.parent
-            if not (run_dir / self.PARAM_FILE).is_file():
-                continue
-
-            rel   = run_dir.relative_to(base)
-            parts = rel.parts
-            entries.append({
-                "name"    : str(rel),
-                "path"    : str(run_dir),
-                "dataset" : parts[0] if len(parts) > 1 else "",
-            })
-
-        self.logger.info(f"param_trials: listed {len(entries)} under {base}")
-        return {"ok": True, "base": str(base), "trials": entries}
-
     def _run_dirs(self, base: Path):
         """Yields every run directory below the given root."""
         yield from self._walk_runs(base, 0)
@@ -286,23 +212,3 @@ class DatasetBrowser:
 
         path = path.resolve()
         return path if path.is_dir() else None
-
-    def _has_param_files(self, params_dir: Path) -> bool:
-        """Returns True when at least one ``.npy`` parameter file lies under the folder."""
-        for _ in self._param_files(params_dir):
-            return True
-        return False
-
-    def _param_files(self, params_dir: Path):
-        """Yields every ``.npy`` parameter file below the params folder."""
-        yield from self._walk(params_dir, 0)
-
-    def _walk(self, directory: Path, depth: int):
-        """Yields ``.npy`` files, descending into visible subfolders up to MAX_DEPTH."""
-        entries = sorted(directory.iterdir())
-
-        for entry in entries:
-            if entry.is_file() and entry.suffix.lower() == self.PARAM_SUFFIX:
-                yield entry
-            elif entry.is_dir() and not entry.name.startswith(".") and depth < self.MAX_DEPTH:
-                yield from self._walk(entry, depth + 1)

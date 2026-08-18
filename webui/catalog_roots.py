@@ -2,7 +2,7 @@
 
 `CatalogRoots` validates the directories the user opens and remembers them, so
 later requests carrying a path can be confined to already-catalogued roots.
-`RunScanner` walks those roots to list inference stamps or checkpointed runs.
+`RunScanner` walks those roots to list preprocessing dataset runs.
 """
 
 from __future__ import annotations
@@ -105,13 +105,13 @@ class CatalogRoots:
 
 
 class RunScanner:
-    """Discovers inference stamps and checkpointed runs beneath a runs root.
+    """Discovers preprocessing dataset runs beneath a runs root.
 
     Attributes:
         roots: Catalogue the scanned base directories are registered in.
     """
 
-    STAMP_MARKER = "inference/*/cubes/pred_curves.npy"
+    STAMP_MARKER = "data/dataset.json"
 
     def __init__(self, roots: CatalogRoots) -> None:
         """Binds the scanner to a runs-root catalogue.
@@ -123,12 +123,12 @@ class RunScanner:
 
     @staticmethod
     def _entry(root: Path, run_dir: Path, stamp: str, target: Path) -> dict:
-        """Builds one listing entry for a discovered run or stamp.
+        """Builds one listing entry for a discovered run.
 
         Args:
             root: Runs root the listing is relative to.
             run_dir: Directory of the run the target belongs to.
-            stamp: Inference stamp name, empty for checkpoint listings.
+            stamp: Sub-run label, empty for plain run listings.
             target: Path the client sends back to select this entry.
 
         Returns:
@@ -142,12 +142,15 @@ class RunScanner:
         }
 
     def stamps(self, base: str, required: tuple[str, ...] = ()) -> dict:
-        """Lists inference stamps under a runs root that saved prediction cubes.
+        """Lists preprocessing dataset runs under a runs root that saved a dataset.
+
+        A run is any directory holding ``data/dataset.json``; the run directory
+        itself is the selectable target.
 
         Args:
             base: Runs root to scan; it is registered in the catalogue on success.
-            required: Extra paths, relative to each stamp directory, that must all
-                exist for the stamp to be listed.
+            required: Extra paths, relative to each run directory, that must all
+                exist for the run to be listed.
 
         Returns:
             Dictionary with "ok"; on success also "root" and "entries" sorted by
@@ -159,37 +162,8 @@ class RunScanner:
 
         entries = []
         for marker in sorted(root.rglob(self.STAMP_MARKER)):
-            stamp_dir = marker.parent.parent
-            if any(not (stamp_dir / rel).is_file() for rel in required):
-                continue
-
-            run_dir = stamp_dir.parent.parent
-            entries.append(self._entry(root, run_dir, stamp_dir.name, stamp_dir))
-
-        entries.sort(key=lambda entry: entry["id"], reverse=True)
-        return {"ok": True, "root": str(root), "entries": entries}
-
-    def checkpoint_runs(self, base: str, checkpoint_name: str, config_names: tuple[str, ...]) -> dict:
-        """Lists runs under a root that hold a given checkpoint and a resolved config.
-
-        Args:
-            base: Runs root to scan; it is registered in the catalogue on success.
-            checkpoint_name: Checkpoint filename to search for, e.g. "best_model.pt".
-            config_names: Candidate filenames under the run's meta directory; a run
-                is listed when at least one of them exists.
-
-        Returns:
-            Dictionary with "ok"; on success also "root" and "entries" sorted by
-            descending path, on failure "error" and an empty "entries" list.
-        """
-        root, error = self.roots.open(base)
-        if error:
-            return {"ok": False, "error": error, "entries": []}
-
-        entries = []
-        for marker in sorted(root.rglob(checkpoint_name)):
-            run_dir = marker.parent
-            if not any((run_dir / "meta" / name).is_file() for name in config_names):
+            run_dir = marker.parent.parent
+            if any(not (run_dir / rel).is_file() for rel in required):
                 continue
 
             entries.append(self._entry(root, run_dir, "", run_dir))

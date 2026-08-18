@@ -1,112 +1,91 @@
-"""Tests for the per-pixel metric layers of the cube explorer.
+"""Tests for the binary and image payloads of the cube explorer.
 
-Covers layer discovery and colour ranges, overlay rendering including
-thresholded and degenerate ranges, point queries with index clamping and NaN
-handling, the colormap whitelist behind the colour bar, and the selective
-metrics that recompute scores over the best-covered share of pixels.
+Covers the colormap whitelist behind the colour bar, the median-referenced DEM
+grid blob, the radar-coordinate point cloud with its amplitude threshold and
+subsampling cap, index clamping in point queries and the primary amplitude map.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 
-from cube_explorer import CubeExplorer
-
-from tests.webui.conftest import N_AZ, loaded_cube
-
-
-def _loaded_explorer(base: Path) -> tuple[CubeExplorer, str]:
-    """Returns an explorer with a metric-carrying cube loaded, plus its cube id."""
-    return loaded_cube(base, with_metrics=True)
-
-
-def test_meta_lists_metric_layers(tmp_path):
-    """Checks both saved metric maps are listed with finite, non-degenerate ranges and a display label."""
-    explorer, _ = _loaded_explorer(tmp_path)
-
-    layers = explorer.load_status()["cube"]["metric_maps"]
-    keys   = {layer["key"] for layer in layers}
-
-    assert keys == {"pixel_r2", "physics_valid_mask"}
-    assert all(np.isfinite(layer["vmin"]) and np.isfinite(layer["vmax"]) and layer["vmax"] > layer["vmin"] for layer in layers)
-    assert next(layer for layer in layers if layer["key"] == "pixel_r2")["label"] == "R2"
-
-
-def test_metric_overlay_png(tmp_path):
-    """Checks overlays render for the plain, thresholded and zero-width range cases."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
-
-    png = explorer.metric_overlay_png(cube_id, "pixel_r2", vmin=0.0, vmax=1.0, keep_min=float("-inf"), keep_max=float("inf"), alpha=0.75)
-    assert png and png[:4] == b"\x89PNG"
-
-    thresholded = explorer.metric_overlay_png(cube_id, "pixel_r2", vmin=0.0, vmax=1.0, keep_min=0.5, keep_max=float("inf"), alpha=1.0)
-    assert thresholded and thresholded[:4] == b"\x89PNG"
-
-    degenerate = explorer.metric_overlay_png(cube_id, "pixel_r2", vmin=2.0, vmax=2.0, keep_min=float("-inf"), keep_max=float("inf"), alpha=0.5)
-    assert degenerate and degenerate[:4] == b"\x89PNG"
-
-
-def test_metric_overlay_rejects_unknown_key(tmp_path):
-    """Checks unknown layers, misshaped cubes and unloaded cubes yield no overlay."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
-
-    assert explorer.metric_overlay_png(cube_id, "banana", 0.0, 1.0, float("-inf"), float("inf"), 0.75) is None
-    assert explorer.metric_overlay_png(cube_id, "misshaped", 0.0, 1.0, float("-inf"), float("inf"), 0.75) is None
-    assert explorer.metric_overlay_png("wrong", "pixel_r2", 0.0, 1.0, float("-inf"), float("inf"), 0.75) is None
-
-
-def test_metric_value_at(tmp_path):
-    """Checks point queries return the stored value, None for NaN, clamped indices, and fail for unknown layers."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
-
-    stamp = Path(cube_id)
-    r2    = np.load(stamp / "cubes" / "pixel_r2.npy")
-
-    result = explorer.metric_value_at(cube_id, "pixel_r2", az=2, rg=3)
-    assert result["ok"] and result["value"] == float(r2[2, 3])
-
-    nan_result = explorer.metric_value_at(cube_id, "pixel_r2", az=0, rg=0)
-    assert nan_result["ok"] and nan_result["value"] is None
-
-    clipped = explorer.metric_value_at(cube_id, "pixel_r2", az=99, rg=-1)
-    assert clipped["ok"] and clipped["az"] == N_AZ - 1 and clipped["rg"] == 0
-
-    assert not explorer.metric_value_at(cube_id, "banana", 0, 0)["ok"]
+from tests.webui.conftest         import N_AZ, N_ELEV, N_RG
+from tests.webui.preproc_fixtures import loaded_run
 
 
 def test_cbar_png_whitelist(tmp_path):
     """Checks the colour bar renders for a whitelisted colormap and refuses an unknown name."""
-    explorer, _ = _loaded_explorer(tmp_path)
+    explorer, _ = loaded_run(tmp_path)
 
     assert explorer.cbar_png("viridis")[:4] == b"\x89PNG"
     assert explorer.cbar_png("banana") is None
 
 
-def test_selective_metrics_keep_low_confidence_share(tmp_path):
-    """Checks reducing coverage keeps fewer pixels and improves the R2 of the retained ones."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+def test_primary_png_serves_for_the_loaded_cube_only(tmp_path):
+    """Checks the primary amplitude map renders for the loaded id and refuses others."""
+    explorer, cube_id = loaded_run(tmp_path)
 
-    full = explorer.selective_metrics(cube_id, "pixel_r2", coverage=1.0)
-    half = explorer.selective_metrics(cube_id, "pixel_r2", coverage=0.5)
-
-    assert full["ok"] and half["ok"]
-    assert full["n_kept"]  == full["n_total"]
-    assert half["n_kept"]  <  full["n_kept"]
-    assert half["coverage"] <= 0.6
-
-    r2_full = next(row for row in full["rows"] if row["key"] == "pixel_r2")
-    r2_half = next(row for row in half["rows"] if row["key"] == "pixel_r2")
-
-    assert full["direction"] == "high"
-    assert r2_full["kept"] == r2_full["full"]
-    assert r2_half["kept"] >= r2_half["full"]
+    assert explorer.primary_png(cube_id)[:4] == b"\x89PNG"
+    assert explorer.primary_png("wrong") is None
 
 
-def test_selective_metrics_reject_unknown_layer(tmp_path):
-    """Checks an unknown layer and an unloaded cube both fail cleanly."""
-    explorer, cube_id = _loaded_explorer(tmp_path)
+def test_dem_grid_bin_is_median_referenced(tmp_path):
+    """Checks the DEM blob carries the grid extents, the median height and median-relative values."""
+    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
 
-    assert explorer.selective_metrics(cube_id, "banana", coverage=0.5)["ok"] is False
-    assert explorer.selective_metrics("wrong", "pixel_r2", coverage=0.5)["ok"] is False
+    blob = explorer.dem_grid_bin(cube_id)
+    raw  = np.frombuffer(blob, dtype=np.float32)
+
+    header, grid = raw[:4], raw[4:].reshape(N_AZ, N_RG)
+    assert int(header[0]) == N_AZ and int(header[1]) == N_RG
+    assert header[2] == 680.0
+
+    finite = np.isfinite(grid)
+    assert np.isnan(grid[2, 3])
+    assert np.all(grid[finite] == 0.0)
+
+
+def test_dem_grid_none_without_dem(tmp_path):
+    """Checks a run without a DEM serves no grid blob."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    assert explorer.dem_grid_bin(cube_id) is None
+    assert explorer.dem_grid_bin("wrong") is None
+
+
+def test_points_bin_threshold_and_cap(tmp_path):
+    """Checks the point blob honours the amplitude floor, records the total and subsamples to the cap."""
+    sparse          = np.zeros((N_ELEV, N_AZ, N_RG), dtype=np.float32)
+    sparse[2, 3, 4] = 2.0
+    sparse[4, 5, 1] = 1.0
+
+    explorer, cube_id = loaded_run(tmp_path, tomogram=sparse)
+
+    blob = explorer.points_bin(cube_id, "full", amp_min=0.5, max_points=0)
+    raw  = np.frombuffer(blob, dtype=np.float32)
+
+    header, rows = raw[:4], raw[4:].reshape(-1, 4)
+    assert int(header[0]) == 2 and int(header[1]) == 2
+    assert {(int(r[0]), int(r[1])) for r in rows} == {(3, 4), (5, 1)}
+    assert np.all((rows[:, 2] >= -10.0) & (rows[:, 2] <= 30.0))
+
+    capped        = explorer.points_bin(cube_id, "full", amp_min=-1.0, max_points=10)
+    capped_header = np.frombuffer(capped, dtype=np.float32)[:4]
+    assert int(capped_header[0]) == 10
+    assert int(capped_header[1]) == N_ELEV * N_AZ * N_RG
+
+
+def test_points_bin_rejects_unknown_source_and_unloaded_cube(tmp_path):
+    """Checks an unknown source and an unloaded cube both yield no blob."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    assert explorer.points_bin(cube_id, "banana", amp_min=0.0, max_points=0) is None
+    assert explorer.points_bin("wrong", "full", amp_min=0.0, max_points=0) is None
+
+
+def test_profiles_clip_out_of_range_indices(tmp_path):
+    """Checks out-of-range pixel indices are clamped into the cube footprint."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    result = explorer.profiles(cube_id, az=99, rg=-1)
+    assert result["ok"] and result["az"] == N_AZ - 1 and result["rg"] == 0

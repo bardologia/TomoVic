@@ -1,7 +1,6 @@
 """API routes of the results-oriented console tabs.
 
-Serves the results browser, the dataset and run pickers, the run leaderboard and
-the TensorBoard-backed training curves.
+Serves the results browser and the dataset and run pickers.
 """
 
 from __future__ import annotations
@@ -9,8 +8,6 @@ from __future__ import annotations
 from dataset_browser  import DatasetBrowser
 from results_browser  import ResultsBrowser
 from routers.dispatch import HttpExchange, RouteTable, SubRouter
-from run_leaderboard  import RunLeaderboard
-from training_curves  import TrainingCurves
 
 
 class ResultsRouter(SubRouter):
@@ -65,11 +62,9 @@ class DatasetRouter(SubRouter):
 
     def declare(self, table: RouteTable) -> None:
         """Registers the /api/fs routes."""
-        table.add("GET", "/api/fs/datasets",     self.dataset_roots)
-        table.add("GET", "/api/fs/runs",         self.runs)
-        table.add("GET", "/api/fs/run_groups",   self.run_groups)
-        table.add("GET", "/api/fs/param_trials", self.param_trials)
-        table.add("GET", "/api/fs/params",       self.params)
+        table.add("GET", "/api/fs/datasets",   self.dataset_roots)
+        table.add("GET", "/api/fs/runs",       self.runs)
+        table.add("GET", "/api/fs/run_groups", self.run_groups)
 
     def dataset_roots(self, exchange: HttpExchange) -> None:
         """Answers with the datasets found under the requested base directory."""
@@ -82,70 +77,3 @@ class DatasetRouter(SubRouter):
     def run_groups(self, exchange: HttpExchange) -> None:
         """Answers with the run directories grouped by their parent trial."""
         exchange.send_result(self.datasets.run_groups(exchange.texts("base")))
-
-    def param_trials(self, exchange: HttpExchange) -> None:
-        """Answers with the parameter-extraction trials under the requested base."""
-        exchange.send_result(self.datasets.param_trials(exchange.text("base")))
-
-    def params(self, exchange: HttpExchange) -> None:
-        """Answers with the parameter runs belonging to one dataset."""
-        exchange.send_result(self.datasets.params(exchange.text("dataset")))
-
-
-class LeaderboardRouter(SubRouter):
-    """Routes the /api/leaderboard endpoints onto the run leaderboard.
-
-    Attributes:
-        leaderboard: Run leaderboard answering the requests.
-    """
-
-    def __init__(self, leaderboard: RunLeaderboard) -> None:
-        """Stores the run leaderboard and declares its routes."""
-        self.leaderboard = leaderboard
-
-        super().__init__(("/api/leaderboard",))
-
-    def declare(self, table: RouteTable) -> None:
-        """Registers the /api/leaderboard routes."""
-        table.add("GET", "/api/leaderboard",        self.table_view)
-        table.add("GET", "/api/leaderboard/trials", self.trials)
-        table.add("GET", "/api/leaderboard/diff",   self.diff)
-
-    def table_view(self, exchange: HttpExchange) -> None:
-        """Answers with one row per inference result under the requested base."""
-        exchange.send_result(self.leaderboard.table(exchange.text("base")))
-
-    def trials(self, exchange: HttpExchange) -> None:
-        """Answers with the seed-aggregated trial table under the requested base."""
-        exchange.send_result(self.leaderboard.trials(exchange.text("base")))
-
-    def diff(self, exchange: HttpExchange) -> None:
-        """Answers with the metric and config diff of the selected runs."""
-        exchange.send_result(self.leaderboard.diff(exchange.texts("run")), 404)
-
-
-class CurvesRouter(SubRouter):
-    """Routes the /api/curves endpoints onto the training-curve reader.
-
-    Attributes:
-        curves: Training curve service answering the requests.
-    """
-
-    def __init__(self, curves: TrainingCurves) -> None:
-        """Stores the training curve service and declares its routes."""
-        self.curves = curves
-
-        super().__init__(("/api/curves",))
-
-    def declare(self, table: RouteTable) -> None:
-        """Registers the /api/curves routes."""
-        table.add("GET", "/api/curves",      self.curves_view)
-        table.add("GET", "/api/curves/runs", self.runs)
-
-    def curves_view(self, exchange: HttpExchange) -> None:
-        """Answers with the requested scalar tag's series for every selected run."""
-        exchange.send_result(self.curves.curves(exchange.texts("run"), exchange.text("tag")))
-
-    def runs(self, exchange: HttpExchange) -> None:
-        """Answers with the runs holding TensorBoard scalars under the requested base."""
-        exchange.send_result(self.curves.runs(exchange.text("base")))

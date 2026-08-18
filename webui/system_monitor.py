@@ -112,7 +112,7 @@ class GpuProbe:
             self.failed = True
 
         if first:
-            self.logger.error(f"{reason}: GPU occupancy is unknown, so the schedule, charity and intrusion checks stand down until it answers again")
+            self.logger.error(f"{reason}: GPU occupancy is unknown until it answers again")
 
     def _recovered(self) -> None:
         """Clears the failure flag and logs recovery when the probe was failing."""

@@ -27,22 +27,11 @@ class ConfigRegistry:
     DESCRIPTIONS_FILE = "config_descriptions.json"
 
     SECTION_TITLES = {
-        "sar"              : "SAR Processing",
-        "param_extraction" : "Parameter Extraction",
-        "normalization"    : "Normalization",
-        "dataset"          : "Dataset",
-        "architectures"    : "Model Architectures",
-        "training"         : "Training",
-        "inference"        : "Inference",
-        "benchmark"        : "Benchmark",
-        "cross_validation" : "Cross-validation",
-        "patch_sweep"      : "Patch Sweep",
-        "tuning"           : "Tuning",
-        "comparison"       : "Run Comparison",
-        "diagnostics"      : "Diagnostics",
+        "sar"        : "SAR Processing",
+        "comparison" : "Run Comparison",
     }
 
-    SECTION_ORDER = ["sar", "param_extraction", "normalization", "dataset", "architectures", "training", "inference", "benchmark", "cross_validation", "patch_sweep", "tuning", "comparison", "diagnostics"]
+    SECTION_ORDER = ["sar", "comparison"]
 
     def __init__(self, paths: ProjectPaths) -> None:
         """Loads the description file and prepares an empty parse cache.

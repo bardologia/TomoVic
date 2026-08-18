@@ -1,11 +1,10 @@
 """Interactive server-side backend for the web UI cube explorer tabs.
 
-Opens the tomographic cubes written by inference (prediction, ground truth,
-Capon reduced and the full raw tomogram), stitches cross-validation folds into a
-single azimuth mosaic, and renders slices, planes, parameter maps, metric
-overlays and geocoded point clouds as PNG or packed binary payloads. Cubes are
-indexed by elevation bin, azimuth pixel and range pixel; elevation axes are in
-metres and geocoded positions in ECEF metres.
+Opens the raw tomogram cubes written by the preprocessing pipeline together
+with their DEM and primary SLC amplitude, and renders slices, planes,
+transects and geocoded point clouds as PNG or packed binary payloads. Cubes
+are indexed by elevation bin, azimuth pixel and range pixel; elevation axes
+are in metres and geocoded positions in ECEF metres.
 """
 
 from __future__ import annotations
@@ -23,12 +22,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 
 from catalog_roots              import CatalogRoots, RunScanner
 from lru_cache                  import LruCache
-from tools.loss.param_loss      import ParamMatcher
-from tools.runtime.completion   import CompletionMarker
 from tools.reporting.plotting   import PlotBase
 from tools.sar.geocoding        import SceneGeocoder
 from tools.sar.track_parameters import TrackParameters
@@ -44,12 +40,7 @@ class SliceFigureArchiver(PlotBase):
     """
 
     LABELS = {
-        "pred"    : "Prediction",
-        "predb"   : "Prediction B",
-        "diff"    : "Prediction A − B",
-        "gt"      : "GT (Gaussian)",
-        "reduced" : "Capon reduced",
-        "full"    : "Capon full (raw)",
+        "full" : "Capon full (raw)",
     }
 
     def render(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, axis: str, az: int, rg: int, space: str, path: Path, cmap: str = "jet", label: str | None = None) -> Path:
@@ -74,7 +65,6 @@ class SliceFigureArchiver(PlotBase):
         """
         x_label   = "azimuth index" if axis == "range" else "range index"
         title_pos = f"range = {rg}" if axis == "range" else f"azimuth = {az}"
-        y_label   = "elevation bin" if source == "full" else "elevation [m]"
         cbar      = "intensity (per-column normalised)" if space == "normalized" else "intensity"
         extent    = [0, int(data.shape[1]), float(heights[0]), float(heights[-1])]
         title     = f"{self.LABELS[source]} — {title_pos}" if label is None else f"{label} — {self.LABELS[source]} — {title_pos}"
@@ -85,7 +75,7 @@ class SliceFigureArchiver(PlotBase):
             return self._imshow_figure(
                 data,
                 x_label        = x_label,
-                y_label        = y_label,
+                y_label        = "elevation [m]",
                 title          = title,
                 cmap           = cmap,
                 vmin           = vmin,
@@ -126,7 +116,7 @@ class SliceFigureArchiver(PlotBase):
             return self._imshow_figure(
                 data,
                 x_label        = "sample along transect",
-                y_label        = "elevation bin" if source == "full" else "elevation [m]",
+                y_label        = "elevation [m]",
                 title          = f"{self.LABELS[source]} — transect az{start[0]},rg{start[1]} to az{end[0]},rg{end[1]}",
                 cmap           = cmap,
                 vmin           = vmin,
@@ -142,20 +132,20 @@ class SliceFigureArchiver(PlotBase):
 
 
 class StitchedRaw:
-    """Lazy elevation-plane view over azimuth blocks belonging to different folds.
+    """Lazy elevation-plane view over azimuth blocks belonging to different runs.
 
-    Presents several per-fold cubes as one array of shape (elevation, azimuth,
-    range); a plane is materialised only when indexed, and azimuth rows no fold
+    Presents several per-block cubes as one array of shape (elevation, azimuth,
+    range); a plane is materialised only when indexed, and azimuth rows no block
     covers stay NaN.
 
     Attributes:
-        blocks: Pairs of (azimuth offset into the mosaic, per-fold cube).
+        blocks: Pairs of (azimuth offset into the mosaic, per-block cube).
         shape: Shape of the stitched cube, (elevation, azimuth, range).
         dtype: Element type of the assembled planes.
     """
 
     def __init__(self, blocks: list, shape: tuple, dtype: np.dtype) -> None:
-        """Stores the fold blocks and the shape of the mosaic they compose."""
+        """Stores the blocks and the shape of the mosaic they compose."""
         self.blocks = blocks
         self.shape  = shape
         self.dtype  = dtype
@@ -174,25 +164,21 @@ class StitchedRaw:
 
 
 class StampReader:
-    """Reads the cubes, metrics and metric maps of one inference stamp directory.
+    """Reads the artifacts of one preprocessing run directory.
 
-    A stamp directory lives at ``<run>/inference/<stamp>`` and holds a ``cubes``
-    folder plus ``metrics.json``.
+    A preprocessing run directory holds ``data/dataset.json`` describing the
+    global crop and artifact filenames, the artifact cubes under ``data`` and
+    the run metadata under ``meta``.
 
     Attributes:
-        stamp_dir: Directory of the completed inference stamp.
+        run_dir: Directory of the preprocessing run.
+        cached_layout: Parsed dataset layout, filled on first access.
     """
 
-    METRIC_EXCLUDED = ("_curves", "params_")
-
-    def __init__(self, stamp_dir: Path) -> None:
-        """Stores the inference stamp directory to read from."""
-        self.stamp_dir = stamp_dir
-
-    @property
-    def run_dir(self) -> Path:
-        """Run directory that owns this inference stamp."""
-        return self.stamp_dir.parent.parent
+    def __init__(self, run_dir: Path) -> None:
+        """Stores the preprocessing run directory to read from."""
+        self.run_dir       = run_dir
+        self.cached_layout = None
 
     @property
     def save_dir(self) -> Path:
@@ -202,508 +188,126 @@ class StampReader:
     @property
     def where(self) -> str:
         """Human-readable location used in error messages."""
-        return str(self.stamp_dir)
+        return str(self.run_dir)
 
-    def display(self) -> dict:
-        """Returns the run and stamp names shown in the web UI."""
-        return {"run": self.run_dir.name, "stamp": self.stamp_dir.name}
-
-    def mosaic_meta(self) -> dict | None:
-        """Returns None, since a single stamp is not a fold mosaic."""
-        return None
-
-    def metrics(self) -> dict:
-        """Returns the parsed ``metrics.json`` payload of the stamp.
+    def layout(self) -> dict:
+        """Returns the parsed ``data/dataset.json`` layout of the run.
 
         Raises:
-            FileNotFoundError: If the stamp holds no ``metrics.json``.
+            FileNotFoundError: If the run holds no ``data/dataset.json``.
         """
-        path = self.stamp_dir / "metrics.json"
+        if self.cached_layout is not None:
+            return self.cached_layout
+
+        path = self.run_dir / "data" / "dataset.json"
         if not path.is_file():
-            raise FileNotFoundError(f"metrics.json missing in {self.stamp_dir}; rerun inference to regenerate it")
+            raise FileNotFoundError(f"dataset.json missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
 
-        return json.loads(path.read_text(encoding="utf-8"))
+        self.cached_layout = json.loads(path.read_text(encoding="utf-8"))
+        return self.cached_layout
 
-    def curves(self, name: str) -> np.ndarray | None:
-        """Memory-maps a curve cube of shape (elevation, azimuth, range).
+    def display(self) -> dict:
+        """Returns the run and tomogram tag shown in the web UI."""
+        return {"run": self.run_dir.name, "stamp": self.layout()["tomogram_tag"]}
+
+    def global_crop(self) -> tuple[int, int, int, int]:
+        """Returns the run's crop as (azimuth start, azimuth end, range start, range end)."""
+        return tuple(int(v) for v in self.layout()["global_crop"])
+
+    def artifact_path(self, key: str) -> Path | None:
+        """Resolves one artifact of the run to an existing file.
 
         Args:
-            name: Cube key such as "pred", "gt" or "reduced".
+            key: Artifact key inside the layout's ``artifacts`` block.
 
         Returns:
-            The memory-mapped cube, or None when the stamp carries no such cube.
+            The artifact path, or None when the layout lists no such artifact or
+            the file does not exist.
         """
-        path = self.stamp_dir / "cubes" / f"{name}_curves.npy"
-        if not path.is_file():
+        name = self.layout()["artifacts"].get(key)
+        if not name:
+            return None
+
+        path = self.run_dir / "data" / name
+        return path if path.is_file() else None
+
+    def tomogram(self) -> np.ndarray:
+        """Memory-maps the full tomogram cube of shape (elevation, azimuth, range).
+
+        Raises:
+            FileNotFoundError: If the run stores no full tomogram.
+        """
+        path = self.artifact_path("tomogram_full")
+        if path is None:
+            raise FileNotFoundError(f"tomogram_full missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
+
+        return np.load(path, mmap_mode="r")
+
+    def dem(self) -> np.ndarray | None:
+        """Memory-maps the full DEM of shape (azimuth, range), or None when absent."""
+        path = self.artifact_path("dem_full")
+        if path is None:
             return None
 
         return np.load(path, mmap_mode="r")
 
-    def param_block(self, name: str) -> np.ndarray | None:
-        """Loads a Gaussian parameter cube of shape (3 * n_slots, azimuth, range).
+    def primary(self) -> np.ndarray:
+        """Memory-maps the primary SLC image of shape (azimuth, range).
 
-        Channels run amplitude, mu in metres and sigma in metres per slot.
-
-        Args:
-            name: Parameter source, "pred" or "gt".
-
-        Returns:
-            The float32 parameter cube, or None when the stamp stores none.
+        Raises:
+            FileNotFoundError: If the run stores no primary SLC.
         """
-        path = self.stamp_dir / "cubes" / f"params_{name}.npy"
+        path = self.artifact_path("primary")
+        if path is None:
+            raise FileNotFoundError(f"primary SLC missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
+
+        return np.load(path, mmap_mode="r")
+
+    def height_range(self) -> tuple[float, float]:
+        """Returns the tomogram's elevation axis extent in metres.
+
+        Raises:
+            FileNotFoundError: If the run holds no ``meta/config_state.json``.
+        """
+        path = self.run_dir / "meta" / "config_state.json"
+        if not path.is_file():
+            raise FileNotFoundError(f"config_state.json missing in {self.run_dir / 'meta'}; rerun preprocessing to regenerate it")
+
+        state = json.loads(path.read_text(encoding="utf-8"))
+        low, high = state["tomogram_config"]["height_range"]
+        return float(low), float(high)
+
+    def track_parameters(self) -> TrackParameters | None:
+        """Loads the run's track parameters, or None when the file is absent."""
+        path = self.run_dir / "meta" / TrackParameters.FILENAME
         if not path.is_file():
             return None
 
-        return np.asarray(np.load(path), dtype=np.float32)
-
-    def metric_maps(self, n_az: int, n_rg: int) -> dict:
-        """Loads every per-pixel metric map matching the cube footprint.
-
-        Args:
-            n_az: Azimuth extent the map must have, in pixels.
-            n_rg: Range extent the map must have, in pixels.
-
-        Returns:
-            Mapping from map name to a float32 array of shape (n_az, n_rg); curve
-            and parameter cubes are skipped, as are arrays of other shapes.
-        """
-        maps = {}
-        for path in sorted((self.stamp_dir / "cubes").glob("*.npy")):
-            if any(marker in path.name for marker in self.METRIC_EXCLUDED):
-                continue
-
-            raw = np.load(path, mmap_mode="r")
-            if raw.ndim != 2 or raw.shape != (n_az, n_rg):
-                continue
-
-            maps[path.stem] = np.asarray(raw, dtype=np.float32)
-
-        return maps
-
-
-class FoldMosaic:
-    """Presents the per-fold inference cubes of one cross-validation run as one cube.
-
-    Exposes the same reader interface as StampReader, stitching the folds along
-    azimuth after checking that they agree on elevation axis, range span, tracks
-    and preprocessing run.
-
-    Attributes:
-        cv_root: Root directory of the cross-validation run.
-        split: Split name the fold inferences were run on.
-        seed: Seed subdirectory name when the folds are seed sweeps, else None.
-        members: Tuples of (fold index, fold directory name, stamp directory).
-        plan: Cached mosaic layout, filled on first resolution.
-    """
-
-    SEP     = "::cv::"
-    FOLD_RE = re.compile(r"(?:^|_)fold_(\d+)$")
-    SEED_RE = re.compile(r"^seed\d+$")
-
-    def __init__(self, cv_root: Path, split: str, seed: str | None, members: list) -> None:
-        """Stores the fold members of one cross-validation split and seed."""
-        self.cv_root = cv_root
-        self.split   = split
-        self.seed    = seed
-        self.members = members
-        self.plan    = None
-
-    @classmethod
-    def member_of(cls, stamp_dir: Path) -> tuple | None:
-        """Classifies a stamp directory as a fold of a cross-validation run.
-
-        Args:
-            stamp_dir: Candidate inference stamp directory.
-
-        Returns:
-            The (cv root, split, seed) key the stamp belongs to, or None when it
-            does not sit under ``<cv root>/folds/fold_N`` or is incomplete.
-        """
-        run_dir  = stamp_dir.parent.parent
-        seed     = run_dir.name if cls.SEED_RE.match(run_dir.name) else None
-        fold_dir = run_dir.parent if seed else run_dir
-
-        if stamp_dir.parent.name != "inference":
-            return None
-        if cls.FOLD_RE.search(fold_dir.name) is None:
-            return None
-        if fold_dir.parent.name != "folds":
-            return None
-
-        cv_root = fold_dir.parent.parent
-        if not (cv_root / "pipeline").is_dir():
-            return None
-        if not CompletionMarker.is_complete(stamp_dir):
-            return None
-
-        return cv_root, CompletionMarker.payload(stamp_dir)["split"], seed
-
-    @classmethod
-    def catalog(cls, root: Path, entries: list) -> list:
-        """Derives the mosaic catalogue entries implied by a list of stamp entries.
-
-        Args:
-            root: Runs root the entry names are reported relative to.
-            entries: Stamp catalogue entries, each carrying an ``id`` path.
-
-        Returns:
-            One catalogue entry per (cv root, split, seed) group found under root,
-            sorted by composite id descending.
-        """
-        groups = {}
-        for entry in entries:
-            member = cls.member_of(Path(entry["id"]))
-            if member is not None:
-                groups.setdefault(member, []).append(entry)
-
-        mosaics = []
-        for (cv_root, split, seed), members in groups.items():
-            if not cv_root.is_relative_to(root):
-                continue
-
-            mosaics.append({
-                "id"    : cls.compose_id(cv_root, split, seed),
-                "run"   : cv_root.name,
-                "group" : str(cv_root.relative_to(root).parent),
-                "stamp" : cls.label(split, seed),
-                "cv"    : {"split": split, "seed": seed, "folds": len(members)},
-            })
-
-        mosaics.sort(key=lambda entry: entry["id"], reverse=True)
-        return mosaics
-
-    @staticmethod
-    def label(split: str, seed: str | None) -> str:
-        """Returns the display label of a mosaic over the given split and seed."""
-        parts = ["all folds", split] + ([seed] if seed else [])
-        return " · ".join(parts)
-
-    @classmethod
-    def compose_id(cls, cv_root: Path, split: str, seed: str | None) -> str:
-        """Returns the cube id encoding a cv root, split and optional seed."""
-        tail = split if seed is None else f"{split}::{seed}"
-        return f"{cv_root}{cls.SEP}{tail}"
-
-    @classmethod
-    def parse(cls, cube_id: str) -> tuple | None:
-        """Decodes a mosaic cube id.
-
-        Args:
-            cube_id: Identifier as produced by ``compose_id``.
-
-        Returns:
-            The (cv root, split, seed) triple, or None when the id is not a mosaic
-            id or is malformed.
-        """
-        if cls.SEP not in cube_id:
-            return None
-
-        head, tail = cube_id.split(cls.SEP, 1)
-        parts      = tail.split("::")
-        if not head or not parts[0] or len(parts) > 2:
-            return None
-        if len(parts) == 2 and cls.SEED_RE.match(parts[1]) is None:
-            return None
-
-        seed = parts[1] if len(parts) == 2 else None
-        return Path(head).resolve(), parts[0], seed
-
-    @classmethod
-    def open(cls, cv_root: Path, split: str, seed: str | None) -> "FoldMosaic | None":
-        """Builds a mosaic from the latest completed inference of every fold.
-
-        Args:
-            cv_root: Root directory of the cross-validation run.
-            split: Split name whose fold inferences are gathered.
-            seed: Seed subdirectory to descend into, or None for plain folds.
-
-        Returns:
-            The mosaic ordered by fold index, or None when the run holds no folds.
-        """
-        from pipelines.shared.inference.metadata import CompletedInference
-
-        folds_dir = cv_root / "folds"
-        if not folds_dir.is_dir():
-            return None
-
-        members = []
-        for child in sorted(folds_dir.iterdir()):
-            match = cls.FOLD_RE.search(child.name)
-            if match is None or not child.is_dir():
-                continue
-
-            run_dir = child / seed if seed else child
-            members.append((int(match.group(1)), child.name, CompletedInference.latest(run_dir / "inference", split)))
-
-        if not members:
-            return None
-
-        members.sort()
-        return cls(cv_root, split, seed, members)
-
-    @property
-    def run_dir(self) -> Path:
-        """Run directory of the first fold, used to resolve dataset metadata."""
-        return self._resolve()["run_dir"]
-
-    @property
-    def save_dir(self) -> Path:
-        """Directory figures saved from the mosaic are written under."""
-        return self.cv_root
-
-    @property
-    def where(self) -> str:
-        """Human-readable location used in error messages."""
-        return f"{self.cv_root} ({self.label(self.split, self.seed)})"
-
-    def display(self) -> dict:
-        """Returns the run and mosaic labels shown in the web UI."""
-        return {"run": self.cv_root.name, "stamp": self.label(self.split, self.seed)}
-
-    def mosaic_meta(self) -> dict:
-        """Returns the split, seed, fold count and uncovered azimuth gaps."""
-        return {"split": self.split, "seed": self.seed, "n_folds": len(self.members), "gaps": self._resolve()["gaps"]}
-
-    def metrics(self) -> dict:
-        """Returns the merged metrics payload covering the whole mosaic footprint."""
-        return self._resolve()["metrics"]
-
-    def curves(self, name: str) -> StitchedRaw | None:
-        """Returns a lazy stitched curve cube over all folds.
-
-        Args:
-            name: Cube key such as "pred", "gt" or "reduced".
-
-        Returns:
-            A StitchedRaw of shape (elevation, azimuth, range), or None when no
-            fold carries the cube.
-
-        Raises:
-            ValueError: If only some folds carry the cube, or a fold's cube shape
-                does not match its azimuth block or the elevation bin count.
-        """
-        plan    = self._resolve()
-        readers = [(block, StampReader(block["stamp"]).curves(name)) for block in plan["blocks"]]
-
-        missing = [block["name"] for block, raw in readers if raw is None]
-        if len(missing) == len(readers):
-            return None
-        if missing:
-            raise ValueError(f"source '{name}' is missing from folds {missing}; regenerate those fold inferences")
-
-        blocks = []
-        n_elev = None
-        for block, raw in readers:
-            extent = (block["az_end"] - block["az_start"], plan["n_rg"])
-            if raw.ndim != 3 or raw.shape[1:] != extent:
-                raise ValueError(f"fold {block['name']} source '{name}' shape {tuple(raw.shape)} does not match its fold region {extent}")
-            if n_elev is None:
-                n_elev = int(raw.shape[0])
-            elif raw.shape[0] != n_elev:
-                raise ValueError(f"fold {block['name']} source '{name}' has {raw.shape[0]} elevation bins but fold {plan['blocks'][0]['name']} has {n_elev}")
-
-            blocks.append((block["az_start"] - plan["az0"], raw))
-
-        dtype = np.result_type(np.float32, *[raw.dtype for _, raw in readers])
-        return StitchedRaw(blocks, (n_elev, plan["n_az"], plan["n_rg"]), dtype)
-
-    def param_block(self, name: str) -> np.ndarray | None:
-        """Stitches the per-fold Gaussian parameter cubes into one mosaic.
-
-        Args:
-            name: Parameter source, "pred" or "gt".
-
-        Returns:
-            Float32 array of shape (3 * n_slots, azimuth, range) with NaN in
-            uncovered azimuth rows, or None when no fold carries the block.
-
-        Raises:
-            ValueError: If only some folds carry the block, the folds disagree on
-                the slot count, or a fold's block does not match its azimuth block.
-        """
-        plan    = self._resolve()
-        readers = [(block, StampReader(block["stamp"]).param_block(name)) for block in plan["blocks"]]
-
-        missing = [block["name"] for block, raw in readers if raw is None]
-        if len(missing) == len(readers):
-            return None
-        if missing:
-            raise ValueError(f"params_{name} is missing from folds {missing}; regenerate those fold inferences")
-
-        rows = {raw.shape[0] for _, raw in readers}
-        if len(rows) > 1:
-            raise ValueError(f"folds disagree on the params_{name} slot count: {sorted(rows)}")
-
-        canvas = np.full((rows.pop(), plan["n_az"], plan["n_rg"]), np.nan, dtype=np.float32)
-        for block, raw in readers:
-            extent = (block["az_end"] - block["az_start"], plan["n_rg"])
-            if raw.ndim != 3 or raw.shape[1:] != extent:
-                raise ValueError(f"fold {block['name']} params_{name} shape {tuple(raw.shape)} does not match its fold region {extent}")
-
-            offset = block["az_start"] - plan["az0"]
-            canvas[:, offset:offset + raw.shape[1]] = raw
-
-        return canvas
-
-    def metric_maps(self, n_az: int, n_rg: int) -> dict:
-        """Stitches the per-fold metric maps into mosaic-wide maps.
-
-        Args:
-            n_az: Azimuth extent of the mosaic, in pixels.
-            n_rg: Range extent of the mosaic, in pixels.
-
-        Returns:
-            Mapping from map name to a float32 array of shape (n_az, n_rg), NaN in
-            uncovered azimuth rows.
-
-        Raises:
-            ValueError: If the folds do not all carry the same set of metric maps.
-        """
-        plan     = self._resolve()
-        per_fold = [(block, StampReader(block["stamp"]).metric_maps(block["az_end"] - block["az_start"], n_rg)) for block in plan["blocks"]]
-
-        keys = set(per_fold[0][1])
-        for block, maps in per_fold[1:]:
-            if set(maps) != keys:
-                raise ValueError(f"fold {block['name']} carries metric maps {sorted(set(maps))} but fold {per_fold[0][0]['name']} carries {sorted(keys)}")
-
-        stitched = {}
-        for key in keys:
-            canvas = np.full((n_az, n_rg), np.nan, dtype=np.float32)
-            for block, maps in per_fold:
-                offset = block["az_start"] - plan["az0"]
-                canvas[offset:offset + maps[key].shape[0]] = maps[key]
-            stitched[key] = canvas
-
-        return stitched
-
-    def _resolve(self) -> dict:
-        """Computes and caches the mosaic layout from the fold metrics payloads.
-
-        Returns:
-            Dict with the merged ``metrics``, the ordered azimuth ``blocks``, the
-            uncovered azimuth ``gaps``, the mosaic origin ``az0``, its ``n_az`` and
-            ``n_rg`` extents and the first fold's ``run_dir``.
-
-        Raises:
-            FileNotFoundError: If a fold has no completed inference cube.
-            ValueError: If folds disagree on elevation axis, range span, tracks or
-                preprocessing run, or if their azimuth blocks overlap.
-        """
-        if self.plan is not None:
-            return self.plan
-
-        for _, name, stamp in self.members:
-            if stamp is None or not (stamp / "cubes" / "pred_curves.npy").is_file():
-                raise FileNotFoundError(f"fold {name} has no completed '{self.split}' inference cube; run cross-validation inference for every fold")
-
-        payloads = [StampReader(stamp).metrics() for _, _, stamp in self.members]
-
-        first   = payloads[0]
-        anchor  = self.members[0][1]
-        axis    = (float(first["x_axis_min"]), float(first["x_axis_max"]))
-        rg_span = tuple(int(v) for v in first["split_region"][2:])
-        tracks  = first.get("tracks")
-
-        for (_, name, _), payload in zip(self.members[1:], payloads[1:]):
-            if (float(payload["x_axis_min"]), float(payload["x_axis_max"])) != axis:
-                raise ValueError(f"fold {name} covers elevation axis [{payload['x_axis_min']}, {payload['x_axis_max']}] but fold {anchor} covers {list(axis)}")
-            if tuple(int(v) for v in payload["split_region"][2:]) != rg_span:
-                raise ValueError(f"fold {name} covers range span {payload['split_region'][2:]} but fold {anchor} covers {list(rg_span)}")
-            if payload.get("tracks") != tracks:
-                raise ValueError(f"fold {name} was inferred from different tracks than fold {anchor}")
-
-        placed = sorted(zip(self.members, payloads), key=lambda pair: int(pair[1]["split_region"][0]))
-
-        blocks   = []
-        gaps     = []
-        previous = None
-        for (_, name, stamp), payload in placed:
-            az_start, az_end = (int(v) for v in payload["split_region"][:2])
-            if previous is not None and az_start < previous:
-                raise ValueError(f"fold {name} azimuth block [{az_start}, {az_end}) overlaps the previous fold; the fold plan is inconsistent")
-            if previous is not None and az_start > previous:
-                gaps.append([previous, az_start])
-
-            previous = az_end
-            blocks.append({"name": name, "stamp": stamp, "az_start": az_start, "az_end": az_end})
-
-        preprocs = set()
-        for _, name, stamp in self.members:
-            path = stamp.parent.parent / "meta" / "dataset_creation_config.json"
-            preprocs.add(json.loads(path.read_text(encoding="utf-8"))["preprocessing_run_directory"] if path.is_file() else None)
-
-        if len(preprocs) > 1:
-            raise ValueError(f"folds disagree on the preprocessing run: {sorted(str(v) for v in preprocs)}")
-
-        az0 = blocks[0]["az_start"]
-        az1 = blocks[-1]["az_end"]
-
-        metrics = {
-            "x_axis_min"   : axis[0],
-            "x_axis_max"   : axis[1],
-            "split_region" : [az0, az1, rg_span[0], rg_span[1]],
-        }
-        if tracks is not None:
-            metrics["tracks"] = tracks
-
-        self.plan = {
-            "metrics" : metrics,
-            "blocks"  : blocks,
-            "gaps"    : gaps,
-            "az0"     : az0,
-            "n_az"    : az1 - az0,
-            "n_rg"    : rg_span[1] - rg_span[0],
-            "run_dir" : self.members[0][2].parent.parent,
-        }
-        return self.plan
+        return TrackParameters.load(path)
 
 
 class CubeExplorer:
-    """Loads one tomographic cube at a time and serves views of it to the web UI.
+    """Loads one preprocessing run at a time and serves views of it to the web UI.
 
-    Holds a single loaded cube in memory behind a lock: its per-source curve
-    cubes, the primary SLC amplitude map in dB, Gaussian parameter blocks, metric
-    maps, the cropped DEM and the geocoding context. Loading runs in a background
-    thread whose progress is polled through ``load_status``.
+    Holds a single loaded cube in memory behind a lock: the raw tomogram, the
+    primary SLC amplitude map in dB, the DEM and the geocoding context. Loading
+    runs in a background thread whose progress is polled through ``load_status``.
 
     Attributes:
         logger: Web logger for load and save reporting.
         archiver: Renderer used when slices are saved to disk.
         roots: Catalogued run roots that bound which cube ids may be opened.
-        scanner: Scanner listing inference stamps under a root.
+        scanner: Scanner listing preprocessing runs under a root.
         lock: Guards the loaded cube and the load status.
         loaded: Currently loaded cube state, or None.
         status: Load state machine payload polled by the front end.
     """
 
-    SOURCES             = ("pred", "predb", "diff", "gt", "reduced", "full")
-    PARAM_SOURCES       = ("pred", "gt")
-    CLOUD_CURVE_SOURCES = ("reduced", "full")
-    GLOBE_SOURCES       = ("pred", "gt", "reduced")
-    PARAM_FIELDS        = {"amp": 0, "mu": 1, "sigma": 2}
-    PARAM_BAD           = "#10151a"
+    SOURCES             = ("full",)
+    CLOUD_CURVE_SOURCES = ("full",)
+    GLOBE_SOURCES       = ("full",)
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
-
-    METRIC_LABELS = {
-        "pixel_mse"                : "MSE",
-        "pixel_mae"                : "MAE",
-        "pixel_r2"                 : "R2",
-        "pixel_cos"                : "cosine",
-        "pixel_peak"               : "peak shift",
-        "physics_coherence_error"  : "coherence err",
-        "physics_covariance_error" : "covariance err",
-        "physics_valid_mask"       : "valid mask",
-        "seed_std_profile"         : "seed std profile",
-        "seed_std_amp"             : "seed std amp",
-        "seed_std_mu"              : "seed std mu",
-        "seed_std_sigma"           : "seed std sigma",
-        "label_r2"                 : "label R2",
-        "flip_consistency"         : "flip disagreement",
-        "failure_mode"             : "failure mode",
-        "label_suspect"            : "label suspect",
-    }
 
     def __init__(self, logger: WebLogger) -> None:
         """Builds the explorer with an idle load status and no cube loaded."""
@@ -715,13 +319,11 @@ class CubeExplorer:
         self.loaded   = None
         self.status   = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
 
-    def list_cubes(self, base: str, include_cv: bool = False) -> dict:
-        """Lists the inference cubes available under a runs root.
+    def list_cubes(self, base: str) -> dict:
+        """Lists the preprocessing runs available under a runs root.
 
         Args:
             base: Runs root to scan.
-            include_cv: When True, cross-validation fold mosaics are prepended to
-                the individual fold stamps.
 
         Returns:
             Dict with ``ok``, the resolved ``root`` and the ``cubes`` catalogue.
@@ -730,17 +332,13 @@ class CubeExplorer:
         if not scanned["ok"]:
             return {"ok": False, "error": scanned["error"], "cubes": []}
 
-        cubes = scanned["entries"]
-        if include_cv:
-            cubes = FoldMosaic.catalog(Path(scanned["root"]), cubes) + cubes
-
-        return {"ok": True, "root": scanned["root"], "cubes": cubes}
+        return {"ok": True, "root": scanned["root"], "cubes": scanned["entries"]}
 
     def start_load(self, cube_id: str) -> dict:
         """Starts loading a cube in a background thread.
 
         Args:
-            cube_id: Stamp directory path or a fold mosaic composite id.
+            cube_id: Preprocessing run directory path.
 
         Returns:
             Dict with ``ok`` True once the load was started or the cube is already
@@ -790,116 +388,6 @@ class CubeExplorer:
         plt.imsave(buf, primary, cmap="gray", vmin=float(vmin), vmax=float(vmax), format="png")
         return buf.getvalue()
 
-    def attach_second(self, cube_id: str, other_id: str) -> dict:
-        """Attaches a second run's prediction cube for side-by-side comparison.
-
-        Adds a ``predb`` source and a signed ``diff`` source holding
-        prediction A minus prediction B.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            other_id: Id of the cube to compare against.
-
-        Returns:
-            Dict with ``ok`` and the updated cube metadata, or ``ok`` False when
-            the ids clash or the two cubes disagree on shape or elevation axis.
-        """
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return {"ok": False, "error": "cube not loaded"}
-            pred = self.loaded["entries"]["pred"]
-
-        other = self._open_source(other_id)
-        if other is None:
-            return {"ok": False, "error": f"unknown cube id: {other_id}"}
-        if other_id == cube_id:
-            return {"ok": False, "error": "pick a different inference result to compare against"}
-
-        try:
-            raw = other.curves("pred")
-            if raw.shape != pred["cube"].shape:
-                return {"ok": False, "error": f"comparison cube shape {tuple(raw.shape)} does not match {tuple(pred['cube'].shape)}"}
-
-            other_axis = self._curve_axis(other, raw.shape[0])
-            if not np.allclose(other_axis, pred["x_axis"]):
-                return {"ok": False, "error": "comparison cube covers a different elevation axis"}
-
-            predb = self._ingest(raw, pred["x_axis"], lambda: None)
-        except (ValueError, FileNotFoundError) as exc:
-            return {"ok": False, "error": str(exc)}
-
-        diff = self._diff_entry(pred, predb)
-
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return {"ok": False, "error": "cube not loaded"}
-
-            self.loaded["entries"]["predb"] = predb
-            self.loaded["entries"]["diff"]  = diff
-
-            meta = dict(self.loaded["meta"])
-            meta["sources"]   = [s for s in self.SOURCES if s in self.loaded["entries"]]
-            meta["n_elev"]    = {s: int(self.loaded["entries"][s]["cube"].shape[0]) for s in self.loaded["entries"]}
-            meta["intensity"] = {s: [e["vmin"], e["vmax"]] for s, e in self.loaded["entries"].items()}
-            meta["attached"]  = {"id": other_id, **other.display()}
-            self.loaded["meta"] = meta
-
-        self.logger.ok(f"attached comparison cube: {other_id}")
-        return {"ok": True, "cube": meta}
-
-    def detach_second(self, cube_id: str) -> dict:
-        """Drops the attached comparison cube and its difference source.
-
-        Args:
-            cube_id: Id of the loaded cube.
-
-        Returns:
-            Dict with ``ok`` and the updated cube metadata, or ``ok`` False when
-            that cube is not the loaded one.
-        """
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return {"ok": False, "error": "cube not loaded"}
-
-            self.loaded["entries"].pop("predb", None)
-            self.loaded["entries"].pop("diff", None)
-
-            meta = dict(self.loaded["meta"])
-            meta["sources"]   = [s for s in self.SOURCES if s in self.loaded["entries"]]
-            meta["n_elev"]    = {s: int(self.loaded["entries"][s]["cube"].shape[0]) for s in self.loaded["entries"]}
-            meta["intensity"] = {s: [e["vmin"], e["vmax"]] for s, e in self.loaded["entries"].items()}
-            meta["attached"]  = None
-            self.loaded["meta"] = meta
-
-        return {"ok": True, "cube": meta}
-
-    @staticmethod
-    def _diff_entry(pred: dict, predb: dict) -> dict:
-        """Builds the signed difference entry between two prediction cubes.
-
-        Args:
-            pred: Loaded entry for prediction A.
-            predb: Loaded entry for prediction B, on the same elevation axis.
-
-        Returns:
-            An entry whose cube is A minus B, with symmetric colour limits set to
-            the 99th percentile of the absolute difference over a subsample.
-        """
-        cube = pred["cube"] - predb["cube"]
-
-        sample = cube[:, :: max(1, cube.shape[1] // 256), :: max(1, cube.shape[2] // 256)]
-        sample = np.abs(sample[np.isfinite(sample)])
-        peak   = float(np.percentile(sample, 99.0)) if sample.size else 1.0
-        peak   = peak if peak > 0.0 else 1.0
-
-        return {
-            "cube"      : cube,
-            "x_axis"    : pred["x_axis"],
-            "vmin"      : -peak,
-            "vmax"      : peak,
-            "diverging" : True,
-        }
-
     def profiles(self, cube_id: str, az: int, rg: int) -> dict:
         """Returns the elevation profile of every source at one pixel.
 
@@ -929,79 +417,6 @@ class CubeExplorer:
             sources[source] = {"heights": heights.tolist(), "values": values.astype(float).tolist()}
 
         return {"ok": True, "az": az, "rg": rg, "sources": sources}
-
-    def slice_ssim(self, cube_id: str, az: int, rg: int, space: str = "physical") -> dict:
-        """Scores each source's range and azimuth slice against the ground truth.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            az: Azimuth pixel index of the azimuth slice.
-            rg: Range pixel index of the range slice.
-            space: "normalized" to peak-normalise columns before scoring.
-
-        Returns:
-            Dict with ``ok``, the clipped indices and per-source SSIM values under
-            ``range`` and ``azimuth``; the score maps are empty when the cube
-            carries no ground truth.
-        """
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return {"ok": False, "error": "cube not loaded"}
-            entries = self.loaded["entries"]
-            meta    = self.loaded["meta"]
-
-        gt = entries.get("gt")
-        if gt is None:
-            return {"ok": True, "az": int(az), "rg": int(rg), "range": {}, "azimuth": {}}
-
-        az = int(np.clip(az, 0, meta["n_az"] - 1))
-        rg = int(np.clip(rg, 0, meta["n_rg"] - 1))
-
-        gt_cube = gt["cube"]
-        out     = {"range": {}, "azimuth": {}}
-
-        for source in ("pred", "predb", "reduced", "full"):
-            entry = entries.get(source)
-            if entry is None or entry["cube"].shape != gt_cube.shape:
-                continue
-
-            cube = entry["cube"]
-            out["range"][source]   = self._ssim_score(cube[:, :, rg], gt_cube[:, :, rg], space)
-            out["azimuth"][source] = self._ssim_score(cube[:, az, :], gt_cube[:, az, :], space)
-
-        return {"ok": True, "az": az, "rg": rg, "range": out["range"], "azimuth": out["azimuth"]}
-
-    @staticmethod
-    def _ssim_score(cur: np.ndarray, ref: np.ndarray, space: str) -> float | None:
-        """Returns the SSIM of one slice against a reference slice.
-
-        Args:
-            cur: Candidate slice of shape (elevation bins, samples).
-            ref: Reference slice of the same shape.
-            space: "normalized" to peak-normalise columns of both before scoring.
-
-        Returns:
-            The SSIM value, or None when the reference is constant, the slice is
-            too small for a 3-pixel window or the score is not finite.
-        """
-        cur = np.nan_to_num(np.asarray(cur, dtype=np.float64))
-        ref = np.nan_to_num(np.asarray(ref, dtype=np.float64))
-
-        if space == "normalized":
-            cur = cur / np.where((p := cur.max(axis=0, keepdims=True)) > 1e-12, p, 1.0)
-            ref = ref / np.where((p := ref.max(axis=0, keepdims=True)) > 1e-12, p, 1.0)
-
-        data_range = float(ref.max() - ref.min())
-        if data_range <= 0.0:
-            return None
-
-        min_side = min(cur.shape)
-        win_size = min(7, min_side if min_side % 2 == 1 else min_side - 1)
-        if win_size < 3:
-            return None
-
-        value = float(ssim(ref, cur, data_range=data_range, win_size=win_size))
-        return value if np.isfinite(value) else None
 
     def slice_png(self, cube_id: str, source: str, axis: str, az: int, rg: int, space: str = "physical", cmap: str = "jet") -> bytes | None:
         """Renders one elevation slice of a source as a PNG.
@@ -1075,66 +490,6 @@ class CubeExplorer:
         plt.imsave(buf, np.nan_to_num(data, nan=vmin), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
         return buf.getvalue()
 
-    def param_map_png(self, cube_id: str, source: str, field: str, slot: int) -> bytes | None:
-        """Renders a Gaussian parameter map or a prediction-truth error map.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            source: "pred", "gt" or "error".
-            field: "amp", "mu", "sigma" or "count".
-            slot: Gaussian slot index, ignored for the count field.
-
-        Returns:
-            PNG bytes of the (azimuth, range) map with inactive pixels painted as
-            bad, or None when the field, source or cube is unavailable.
-        """
-        resolved = self._param_state(cube_id)
-        if resolved is None or field not in (*self.PARAM_FIELDS, "count"):
-            return None
-
-        params, meta = resolved
-
-        if source in self.PARAM_SOURCES:
-            block = params.get(source)
-            if block is None:
-                return None
-            data, vmin, vmax, cmap = self._param_source_map(block, meta, field, slot)
-        elif source == "error":
-            if not meta["error"]:
-                return None
-            data, vmin, vmax, cmap = self._param_error_map(params, meta, field, slot)
-        else:
-            return None
-
-        palette = plt.get_cmap(cmap).copy()
-        palette.set_bad(color=self.PARAM_BAD)
-
-        buf = io.BytesIO()
-        plt.imsave(buf, data, cmap=palette, vmin=vmin, vmax=vmax, format="png")
-        return buf.getvalue()
-
-    def param_cbar_png(self, cube_id: str, source: str, field: str) -> bytes | None:
-        """Renders the colour ramp matching a parameter map.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            source: "pred", "gt" or "error".
-            field: "amp", "mu", "sigma" or "count".
-
-        Returns:
-            PNG bytes of the ramp, or None when that combination has no colormap.
-        """
-        resolved = self._param_state(cube_id)
-        if resolved is None or field not in (*self.PARAM_FIELDS, "count"):
-            return None
-
-        _, meta = resolved
-        cmap    = self._param_cmap(source, field, meta)
-        if cmap is None:
-            return None
-
-        return self.cbar_png(cmap)
-
     def cbar_png(self, cmap: str) -> bytes | None:
         """Renders a horizontal 256-step colour ramp for one of the allowed colormaps.
 
@@ -1153,138 +508,13 @@ class CubeExplorer:
         plt.imsave(buf, ramp, cmap=cmap, vmin=0.0, vmax=1.0, format="png")
         return buf.getvalue()
 
-    def params_at(self, cube_id: str, az: int, rg: int) -> dict:
-        """Returns every Gaussian slot of every parameter source at one pixel.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            az: Azimuth pixel index, clipped into range.
-            rg: Range pixel index, clipped into range.
-
-        Returns:
-            Dict with ``ok``, the clipped indices, the slot count, the activity
-            amplitude threshold and per-source slot lists carrying amp, mu in
-            metres, sigma in metres and an ``active`` flag.
-        """
-        resolved = self._param_state(cube_id)
-        if resolved is None:
-            return {"ok": False, "error": "no parameter cubes are loaded"}
-
-        params, meta = resolved
-        n_slots      = meta["n_slots"]
-        threshold    = meta["threshold"]
-
-        az = int(np.clip(az, 0, next(iter(params.values())).shape[1] - 1))
-        rg = int(np.clip(rg, 0, next(iter(params.values())).shape[2] - 1))
-
-        sources = {}
-        for source, block in params.items():
-            slots = []
-            for k in range(n_slots):
-                amp   = float(block[3 * k,     az, rg])
-                mu    = float(block[3 * k + 1, az, rg])
-                sigma = float(block[3 * k + 2, az, rg])
-                slots.append({"amp": amp, "mu": mu, "sigma": sigma, "active": bool(amp >= threshold)})
-            sources[source] = slots
-
-        return {"ok": True, "az": az, "rg": rg, "n_slots": n_slots, "threshold": threshold, "sources": sources}
-
-    def _param_state(self, cube_id: str) -> tuple[dict, dict] | None:
-        """Returns the loaded parameter blocks and their metadata, or None."""
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return None
-            params = self.loaded["params"]
-            meta   = self.loaded["meta"]["params"]
-
-        if meta is None or not params:
-            return None
-        return params, meta
-
-    def _param_source_map(self, block: np.ndarray, meta: dict, field: str, slot: int) -> tuple[np.ndarray, float, float, str]:
-        """Builds the map of one parameter field for a single source.
-
-        Args:
-            block: Parameter cube of shape (3 * n_slots, azimuth, range).
-            meta: Parameter metadata carrying the threshold, slot count and ranges.
-            field: "amp", "mu", "sigma" or "count".
-            slot: Gaussian slot index, clipped into range; ignored for "count".
-
-        Returns:
-            Tuple of the (azimuth, range) map, its colour limits and the colormap
-            name; mu and sigma are NaN where the slot amplitude is below threshold.
-        """
-        threshold = meta["threshold"]
-        n_slots   = meta["n_slots"]
-
-        if field == "count":
-            amps = block[0::3]
-            data = (amps >= threshold).sum(axis=0).astype(np.float32)
-            vmin, vmax = meta["ranges"]["count"]
-            return data, vmin, vmax, "viridis"
-
-        slot    = int(np.clip(slot, 0, n_slots - 1))
-        channel = np.asarray(block[3 * slot + self.PARAM_FIELDS[field]], dtype=np.float32)
-
-        if field in ("mu", "sigma"):
-            active  = block[3 * slot] >= threshold
-            channel = np.where(active, channel, np.nan)
-
-        vmin, vmax = meta["ranges"][field]
-        return channel, vmin, vmax, "viridis"
-
-    def _param_error_map(self, params: dict, meta: dict, field: str, slot: int) -> tuple[np.ndarray, float, float, str]:
-        """Builds the prediction-against-truth error map of one parameter field.
-
-        Args:
-            params: Loaded parameter blocks, holding both "pred" and "gt".
-            meta: Parameter metadata carrying the threshold, slot count and ranges.
-            field: "amp", "mu", "sigma" or "count".
-            slot: Gaussian slot index, clipped into range; ignored for "count".
-
-        Returns:
-            Tuple of the (azimuth, range) map, its colour limits and the colormap
-            name; "count" gives the signed slot-count difference on a diverging
-            map, the other fields give absolute differences restricted to pixels
-            where both sources have the slot active.
-        """
-        threshold = meta["threshold"]
-        n_slots   = meta["n_slots"]
-        pred      = params["pred"]
-        gt        = params["gt"]
-
-        if field == "count":
-            count_pred = (pred[0::3] >= threshold).sum(axis=0).astype(np.float32)
-            count_gt   = (gt[0::3]   >= threshold).sum(axis=0).astype(np.float32)
-            vmin, vmax = meta["ranges"]["error_count"]
-            return count_pred - count_gt, vmin, vmax, "coolwarm"
-
-        slot   = int(np.clip(slot, 0, n_slots - 1))
-        offset = 3 * slot + self.PARAM_FIELDS[field]
-        diff   = np.abs(np.asarray(pred[offset], dtype=np.float32) - np.asarray(gt[offset], dtype=np.float32))
-
-        if field in ("mu", "sigma"):
-            active = (pred[3 * slot] >= threshold) & (gt[3 * slot] >= threshold)
-            diff   = np.where(active, diff, np.nan)
-
-        vmin, vmax = meta["ranges"][f"error_{field}"]
-        return diff, vmin, vmax, "inferno"
-
-    def _param_cmap(self, source: str, field: str, meta: dict):
-        """Returns the colormap name for a parameter map, or None when unavailable."""
-        if source in self.PARAM_SOURCES:
-            return "viridis"
-        if source == "error" and meta["error"]:
-            return "coolwarm" if field == "count" else "inferno"
-        return None
-
     def points_bin(self, cube_id: str, source: str, amp_min: float, max_points: int) -> bytes | None:
         """Packs a scatterer point cloud in radar coordinates as a binary blob.
 
         Args:
             cube_id: Id of the loaded cube.
-            source: Parameter source ("pred", "gt") or curve source
-                ("reduced", "full").
+            source: Curve source to draw voxels from, restricted to
+                CLOUD_CURVE_SOURCES.
             amp_min: Minimum amplitude a point must carry to be emitted.
             max_points: Cap on emitted points; 0 or less emits all of them.
 
@@ -1301,58 +531,12 @@ class CubeExplorer:
         return self._points_blob(rows, total)
 
     def _point_rows(self, cube_id: str, source: str, amp_min: float, max_points: int) -> tuple[np.ndarray, int] | None:
-        """Returns the (rows, total) point cloud of a parameter or curve source."""
-        if source in self.PARAM_SOURCES:
-            return self._param_rows(cube_id, source, amp_min, max_points)
-        if source in self.CLOUD_CURVE_SOURCES:
-            entry = self._entry(cube_id, source)
-            return None if entry is None else self._curve_rows(entry, amp_min, max_points)
-        return None
-
-    def _param_rows(self, cube_id: str, source: str, amp_min: float, max_points: int) -> tuple[np.ndarray, int] | None:
-        """Extracts one point per active Gaussian slot of a parameter source.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            source: Parameter source, "pred" or "gt".
-            amp_min: Minimum slot amplitude for a point to be kept.
-            max_points: Cap on emitted points, applied by even subsampling.
-
-        Returns:
-            Tuple of a float32 array of shape (points, 4) holding azimuth index,
-            range index, mu in metres and amplitude, and the unsubsampled count;
-            None when the source is not loaded.
-        """
-        resolved = self._param_state(cube_id)
-        if resolved is None:
+        """Returns the (rows, total) point cloud of a curve source."""
+        if source not in self.CLOUD_CURVE_SOURCES:
             return None
 
-        params, _ = resolved
-        block     = params.get(source)
-        if block is None:
-            return None
-
-        amps = block[0::3]
-        mus  = block[1::3]
-        mask = np.isfinite(amps) & (amps >= amp_min) & np.isfinite(mus)
-
-        k_idx, az_idx, rg_idx = np.nonzero(mask)
-        total                 = int(k_idx.size)
-
-        if total > max_points > 0:
-            keep   = np.linspace(0, total - 1, max_points).astype(int)
-            k_idx  = k_idx[keep]
-            az_idx = az_idx[keep]
-            rg_idx = rg_idx[keep]
-
-        rows = np.stack([
-            az_idx.astype(np.float32),
-            rg_idx.astype(np.float32),
-            mus[k_idx, az_idx, rg_idx].astype(np.float32),
-            amps[k_idx, az_idx, rg_idx].astype(np.float32),
-        ], axis=1)
-
-        return rows, total
+        entry = self._entry(cube_id, source)
+        return None if entry is None else self._curve_rows(entry, amp_min, max_points)
 
     @classmethod
     def _curve_rows(cls, entry: dict, amp_min: float, max_points: int) -> tuple[np.ndarray, int]:
@@ -1407,7 +591,7 @@ class CubeExplorer:
         return header.tobytes() + np.ascontiguousarray(rows).tobytes()
 
     def dem_grid_bin(self, cube_id: str) -> bytes | None:
-        """Packs the cropped DEM as a median-referenced height grid.
+        """Packs the DEM as a median-referenced height grid.
 
         Args:
             cube_id: Id of the loaded cube.
@@ -1480,155 +664,6 @@ class CubeExplorer:
         globe_rows = np.concatenate([offsets, rows[:, 2:3], rows[:, 3:4]], axis=1)
         header     = np.array([globe_rows.shape[0], total, 0.0, 0.0], dtype=np.float32)
         return header.tobytes() + np.ascontiguousarray(globe_rows).tobytes()
-
-    def metric_overlay_png(self, cube_id: str, key: str, vmin: float, vmax: float, keep_min: float, keep_max: float, alpha: float) -> bytes | None:
-        """Blends a metric map over the primary amplitude map as a PNG.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            key: Metric map name.
-            vmin: Lower colour limit; ignored when not below vmax, in which case
-                the map's own robust range is used.
-            vmax: Upper colour limit.
-            keep_min: Lowest metric value that is painted.
-            keep_max: Highest metric value that is painted.
-            alpha: Overlay opacity in [0, 1].
-
-        Returns:
-            PNG bytes of the blended RGB image, or None when the map is unknown.
-        """
-        resolved = self._metric_state(cube_id, key)
-        if resolved is None:
-            return None
-
-        data, primary, clim = resolved
-
-        if not vmax > vmin:
-            vmin, vmax = self._metric_range(data)
-        alpha = float(np.clip(alpha, 0.0, 1.0))
-
-        p_lo, p_hi = clim
-        base       = (np.clip((primary - p_lo) / max(p_hi - p_lo, 1e-12), 0.0, 1.0))[..., None].repeat(3, axis=2)
-
-        norm    = np.clip((data - vmin) / max(vmax - vmin, 1e-12), 0.0, 1.0)
-        colored = plt.get_cmap("viridis")(norm)[..., :3]
-        keep    = np.isfinite(data) & (data >= keep_min) & (data <= keep_max)
-        blend   = np.where(keep[..., None], base * (1.0 - alpha) + colored * alpha, base)
-
-        buf = io.BytesIO()
-        plt.imsave(buf, blend.astype(np.float32), format="png")
-        return buf.getvalue()
-
-    def metric_value_at(self, cube_id: str, key: str, az: int, rg: int) -> dict:
-        """Reads one metric map at a pixel.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            key: Metric map name.
-            az: Azimuth pixel index, clipped into range.
-            rg: Range pixel index, clipped into range.
-
-        Returns:
-            Dict with ``ok``, the clipped indices, the map ``key`` and its
-            ``value``, which is None where the map is not finite.
-        """
-        resolved = self._metric_state(cube_id, key)
-        if resolved is None:
-            return {"ok": False, "error": f"unknown metric map: {key}"}
-
-        data, _primary, _clim = resolved
-        az = int(np.clip(az, 0, data.shape[0] - 1))
-        rg = int(np.clip(rg, 0, data.shape[1] - 1))
-
-        value = float(data[az, rg])
-        return {"ok": True, "az": az, "rg": rg, "key": key, "value": value if np.isfinite(value) else None}
-
-    def _metric_state(self, cube_id: str, key: str) -> tuple[np.ndarray, np.ndarray, tuple[float, float]] | None:
-        """Returns the metric map, primary amplitude map and its colour limits."""
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return None
-            data    = self.loaded["metric_maps"].get(key)
-            primary = self.loaded["primary"]
-            clim    = self.loaded["primary_clim"]
-
-        if data is None:
-            return None
-        return data, primary, clim
-
-    SELECTIVE_KEYS    = ("pixel_mse", "pixel_mae", "pixel_r2", "pixel_cos", "pixel_peak")
-    HIGH_IS_CONFIDENT = ("pixel_r2", "pixel_cos", "label_r2", "physics_valid_mask")
-
-    def selective_metrics(self, cube_id: str, key: str, coverage: float) -> dict:
-        """Compares pixel metrics on the most confident pixels against all pixels.
-
-        Pixels are ranked by one confidence layer and the top coverage fraction is
-        kept; layers listed in HIGH_IS_CONFIDENT are ranked descending, the rest
-        ascending.
-
-        Args:
-            cube_id: Id of the loaded cube.
-            key: Metric map used as the confidence layer.
-            coverage: Fraction of finite pixels to keep, clipped to [0.01, 1].
-
-        Returns:
-            Dict with ``ok``, the layer name, the realised coverage, the quantile
-            ``threshold``, the ranking ``direction``, kept and total pixel counts,
-            and per-metric ``rows`` holding the kept and full-scene means.
-        """
-        resolved = self._metric_state(cube_id, key)
-        if resolved is None:
-            return {"ok": False, "error": f"unknown confidence layer: {key}"}
-
-        confidence, _primary, _clim = resolved
-
-        with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id:
-                return {"ok": False, "error": "cube changed while computing"}
-            maps = {name: data for name, data in self.loaded["metric_maps"].items() if name in self.SELECTIVE_KEYS}
-
-        if not maps:
-            return {"ok": False, "error": "no pixel metric maps are loaded for this cube"}
-
-        coverage = float(np.clip(coverage, 0.01, 1.0))
-        finite   = np.isfinite(confidence)
-
-        if not finite.any():
-            return {"ok": False, "error": f"confidence layer '{key}' holds no finite value"}
-
-        keep_high = key in self.HIGH_IS_CONFIDENT
-
-        if keep_high:
-            threshold = float(np.quantile(confidence[finite], 1.0 - coverage))
-            keep      = finite & (confidence >= threshold)
-        else:
-            threshold = float(np.quantile(confidence[finite], coverage))
-            keep      = finite & (confidence <= threshold)
-
-        rows = []
-        for name, data in sorted(maps.items()):
-            valid = np.isfinite(data)
-            kept  = data[keep & valid]
-            full  = data[valid]
-            if not full.size:
-                continue
-            rows.append({
-                "key"   : name,
-                "label" : self.METRIC_LABELS.get(name, name),
-                "kept"  : float(kept.mean()) if kept.size else None,
-                "full"  : float(full.mean()),
-            })
-
-        return {
-            "ok"        : True,
-            "layer"     : key,
-            "coverage"  : float(keep.sum() / max(finite.sum(), 1)),
-            "threshold" : threshold,
-            "direction" : "high" if keep_high else "low",
-            "n_kept"    : int(keep.sum()),
-            "n_total"   : int(finite.sum()),
-            "rows"      : rows,
-        }
 
     def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet") -> bytes | None:
         """Renders an elevation section along an arbitrary line as a PNG.
@@ -1845,35 +880,27 @@ class CubeExplorer:
                 return None
             return self.loaded["entries"].get(source)
 
-    def _open_source(self, cube_id: str) -> StampReader | FoldMosaic | None:
-        """Resolves a cube id to a reader.
+    def _open_source(self, cube_id: str) -> StampReader | None:
+        """Resolves a cube id to a preprocessing run reader.
 
         Args:
-            cube_id: Stamp directory path or a fold mosaic composite id.
+            cube_id: Preprocessing run directory path.
 
         Returns:
-            A FoldMosaic for mosaic ids, a StampReader for stamp directories that
-            hold ``cubes/pred_curves.npy``, or None when the id is unknown or
-            falls outside the catalogued roots.
+            A StampReader for run directories that hold ``data/dataset.json``, or
+            None when the id is unknown or falls outside the catalogued roots.
         """
         if not cube_id:
             return None
 
-        parsed = FoldMosaic.parse(cube_id)
-        if parsed is not None:
-            cv_root, split, seed = parsed
-            if not self.roots.contains(cv_root):
-                return None
-            return FoldMosaic.open(cv_root, split, seed)
-
-        stamp_dir = Path(cube_id).resolve()
-        if not self.roots.contains(stamp_dir):
+        run_dir = Path(cube_id).resolve()
+        if not self.roots.contains(run_dir):
             return None
-        if not (stamp_dir / "cubes" / "pred_curves.npy").is_file():
+        if not (run_dir / "data" / "dataset.json").is_file():
             return None
-        return StampReader(stamp_dir)
+        return StampReader(run_dir)
 
-    def _load_worker(self, cube_id: str, reader: StampReader | FoldMosaic) -> None:
+    def _load_worker(self, cube_id: str, reader: StampReader) -> None:
         """Loads a cube in the background and publishes the ready or error status.
 
         Args:
@@ -1881,11 +908,11 @@ class CubeExplorer:
             reader: Reader opened for that id.
         """
         try:
-            entries, meta, primary, params, metric_maps, dem, geo = self._load_all(reader)
+            entries, meta, primary, dem, geo = self._load_all(reader)
             clim = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
 
             with self.lock:
-                self.loaded = {"id": cube_id, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "params": params, "metric_maps": metric_maps, "dem": dem, "geo": geo}
+                self.loaded = {"id": cube_id, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "geo": geo}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
 
             self.logger.muted(f"cube ready: {cube_id} sources={meta['sources']}")
@@ -1896,40 +923,35 @@ class CubeExplorer:
 
             self.logger.error(f"cube load failed: {cube_id}: {exc}")
 
-    def _load_all(self, reader: StampReader | FoldMosaic) -> tuple[dict, dict, np.ndarray, dict, dict, np.ndarray | None, dict | None]:
-        """Reads every available source, map and geometry artifact of one cube.
+    def _load_all(self, reader: StampReader) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
+        """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
 
         Args:
-            reader: Stamp or mosaic reader to pull from.
+            reader: Preprocessing run reader to pull from.
 
         Returns:
             Tuple of the per-source entries, the front-end metadata payload, the
-            primary amplitude map in dB of shape (azimuth, range), the parameter
-            blocks, the metric maps, the cropped DEM in metres and the geocoding
-            context; the last two are None when the scene cannot be geolocated.
+            primary amplitude map in dB of shape (azimuth, range), the DEM in
+            metres and the geocoding context; the last two are None when the
+            scene cannot be geolocated.
 
         Raises:
-            ValueError: If the prediction cube is not three-dimensional or another
-                source's spatial shape disagrees with it.
+            ValueError: If the tomogram is not three-dimensional or its footprint
+                disagrees with the recorded global crop.
         """
-        pred_raw = reader.curves("pred")
-        if pred_raw.ndim != 3:
-            raise ValueError(f"pred_curves.npy is not a 3D cube: shape={pred_raw.shape}")
+        full_raw = reader.tomogram()
+        if full_raw.ndim != 3:
+            raise ValueError(f"full tomogram is not a 3D cube: shape={full_raw.shape}")
 
-        n_elev, n_az, n_rg = pred_raw.shape
-        curve_axis         = self._curve_axis(reader, n_elev)
+        n_elev, n_az, n_rg = full_raw.shape
 
-        plan = [("pred", pred_raw, curve_axis)]
-        for source in ("gt", "reduced"):
-            raw = reader.curves(source)
-            if raw is not None:
-                plan.append((source, raw, curve_axis))
+        az_lo, az_hi, rg_lo, rg_hi = reader.global_crop()
+        if (az_hi - az_lo, rg_hi - rg_lo) != (n_az, n_rg):
+            raise ValueError(f"global_crop {[az_lo, az_hi, rg_lo, rg_hi]} does not match the {n_az}x{n_rg} tomogram footprint")
 
-        full_raw = self._full_raw(reader, n_az, n_rg)
-        if full_raw is not None:
-            plan.append(("full", full_raw, np.arange(full_raw.shape[0], dtype=np.float64)))
+        x_axis = self._elevation_axis(reader, n_elev)
 
-        total = sum(raw.shape[0] for _, raw, _ in plan)
+        total = n_elev
         done  = [0]
 
         def advance(source: str) -> None:
@@ -1939,106 +961,73 @@ class CubeExplorer:
                 self.status["progress"] = done[0] / total
                 self.status["stage"]    = source
 
-        entries = {}
-        for source, raw, x_axis in plan:
-            if raw.shape[1:] != (n_az, n_rg):
-                raise ValueError(f"source '{source}' spatial shape {raw.shape[1:]} does not match pred {(n_az, n_rg)}")
-            entries[source] = self._ingest(raw, x_axis, lambda s=source: advance(s))
+        entries = {"full": self._ingest(full_raw, x_axis, lambda: advance("full"))}
 
-        primary     = self._primary_db(reader, n_az, n_rg)
-        params      = self._load_params(reader, n_az, n_rg)
-        metric_maps = reader.metric_maps(n_az, n_rg)
-        dem         = self._load_dem(reader, n_az, n_rg)
-        geo         = self._load_geo(reader, dem, n_az, n_rg)
-        mosaic      = reader.mosaic_meta()
-
-        if mosaic is not None and mosaic["gaps"]:
-            self.logger.warning(f"fold mosaic leaves azimuth rows {mosaic['gaps']} uncovered; those stripes render blank because no fold owns them, not because the model failed")
+        primary = self._primary_db(reader, n_az, n_rg)
+        dem     = self._load_dem(reader, n_az, n_rg)
+        geo     = self._load_geo(reader, dem, n_az, n_rg)
 
         meta = {
-            "sources"     : [s for s in self.SOURCES if s in entries],
-            "n_az"        : n_az,
-            "n_rg"        : n_rg,
-            "n_elev"      : {s: int(entries[s]["cube"].shape[0]) for s in entries},
-            "x_min"       : float(curve_axis[0]),
-            "x_max"       : float(curve_axis[-1]),
-            "intensity"   : {s: [entries[s]["vmin"], entries[s]["vmax"]] for s in entries},
-            "params"      : self._params_meta(params, curve_axis),
-            "metric_maps" : self._metric_maps_meta(metric_maps),
-            "attached"    : None,
-            "mosaic"      : mosaic,
-            "dem"         : dem is not None,
-            "spacing"     : self._load_spacing(reader),
-            "globe"       : self._globe_meta(geo),
+            "sources"   : [s for s in self.SOURCES if s in entries],
+            "n_az"      : n_az,
+            "n_rg"      : n_rg,
+            "n_elev"    : {s: int(entries[s]["cube"].shape[0]) for s in entries},
+            "x_min"     : float(x_axis[0]),
+            "x_max"     : float(x_axis[-1]),
+            "intensity" : {s: [entries[s]["vmin"], entries[s]["vmax"]] for s in entries},
+            "dem"       : dem is not None,
+            "spacing"   : self._load_spacing(reader),
+            "globe"     : self._globe_meta(geo),
         }
-        return entries, meta, primary, params, metric_maps, dem, geo
+        return entries, meta, primary, dem, geo
 
-    def _load_spacing(self, reader: StampReader | FoldMosaic) -> dict | None:
+    def _load_spacing(self, reader: StampReader) -> dict | None:
         """Returns the reference track's azimuth and range pixel spacing in metres.
 
         Args:
-            reader: Stamp or mosaic reader identifying the preprocessing run.
+            reader: Preprocessing run reader.
 
         Returns:
-            Dict with ``az`` and ``rg`` spacings, or None when the preprocessing
-            run or its track parameters cannot be resolved.
+            Dict with ``az`` and ``rg`` spacings, or None when the run stores no
+            track parameters.
         """
-        resolved = self._preproc_layout(reader)
-        if resolved is None:
+        params = reader.track_parameters()
+        if params is None:
             return None
 
-        preproc_dir, _ = resolved
-
-        params_path = preproc_dir / "meta" / TrackParameters.FILENAME
-        if not params_path.is_file():
-            return None
-
-        reference = TrackParameters.load(params_path).parameters[0]
+        reference = params.parameters[0]
         return {"az": float(reference["ps_az"]), "rg": float(reference["ps_rg"])}
 
-    def _load_dem(self, reader: StampReader | FoldMosaic, n_az: int, n_rg: int) -> np.ndarray | None:
-        """Crops the preprocessing DEM to the cube footprint.
+    def _load_dem(self, reader: StampReader, n_az: int, n_rg: int) -> np.ndarray | None:
+        """Loads the preprocessing DEM matching the tomogram footprint.
 
         Args:
-            reader: Stamp or mosaic reader identifying the preprocessing run.
+            reader: Preprocessing run reader.
             n_az: Azimuth extent of the cube, in pixels.
             n_rg: Range extent of the cube, in pixels.
 
         Returns:
             Float32 terrain heights in metres of shape (n_az, n_rg), or None when
-            the preprocessing run publishes no full DEM.
+            the run publishes no full DEM.
 
         Raises:
-            ValueError: If the stored DEM does not cover the cube region.
+            ValueError: If the stored DEM does not match the tomogram footprint.
         """
-        resolved = self._preproc_layout(reader)
-        if resolved is None:
+        raw = reader.dem()
+        if raw is None:
             return None
 
-        preproc_dir, layout = resolved
+        if raw.ndim != 2 or raw.shape != (n_az, n_rg):
+            raise ValueError(f"dem_full shape {raw.shape} does not match the {n_az}x{n_rg} tomogram footprint")
 
-        dem_name = layout["artifacts"].get("dem_full")
-        if not dem_name:
-            return None
+        return np.asarray(raw, dtype=np.float32)
 
-        dem_path = preproc_dir / "data" / dem_name
-        if not dem_path.is_file():
-            return None
-
-        az_lo, az_hi, rg_lo, rg_hi = self._crop_bounds(reader, layout, n_az, n_rg)
-
-        raw = np.load(dem_path, mmap_mode="r")
-        if raw.ndim != 2 or az_hi > raw.shape[0] or rg_hi > raw.shape[1] or az_lo < 0 or rg_lo < 0:
-            raise ValueError(f"dem_full shape {raw.shape} does not cover the cube region az[{az_lo}:{az_hi}] rg[{rg_lo}:{rg_hi}]")
-
-        return np.asarray(raw[az_lo:az_hi, rg_lo:rg_hi], dtype=np.float32)
-
-    def _load_geo(self, reader: StampReader | FoldMosaic, dem: np.ndarray | None, n_az: int, n_rg: int) -> dict | None:
+    def _load_geo(self, reader: StampReader, dem: np.ndarray | None, n_az: int, n_rg: int) -> dict | None:
         """Builds the geocoding context used by the globe view.
 
         Args:
-            reader: Stamp or mosaic reader identifying the preprocessing run.
-            dem: Cropped DEM in metres, or None to skip geocoding entirely.
+            reader: Preprocessing run reader.
+            dem: DEM in metres, or None to skip geocoding entirely.
             n_az: Azimuth extent of the cube, in pixels.
             n_rg: Range extent of the cube, in pixels.
 
@@ -2046,24 +1035,17 @@ class CubeExplorer:
             Dict with the scene geocoder, the cube's azimuth and range origins in
             full-scene pixels, the DEM, the median terrain height in metres, the
             ECEF anchor of the scene centre, the lon/lat bounding box, the flight
-            lines when the stamp records its track selection, and the beam
-            segment; None when the track parameters lack the geocoding keys or the
-            DEM holds no finite height.
+            lines when the run records its pass labels, and the beam segment;
+            None when the track parameters lack the geocoding keys or the DEM
+            holds no finite height.
         """
         if dem is None:
             return None
 
-        resolved = self._preproc_layout(reader)
-        if resolved is None:
+        params = reader.track_parameters()
+        if params is None:
             return None
 
-        preproc_dir, _ = resolved
-
-        params_path = preproc_dir / "meta" / TrackParameters.FILENAME
-        if not params_path.is_file():
-            return None
-
-        params    = TrackParameters.load(params_path)
         reference = params.parameters[0]
         if any(key not in reference for key in SceneGeocoder.REQUIRED_KEYS):
             return None
@@ -2075,9 +1057,8 @@ class CubeExplorer:
         geocoder    = SceneGeocoder(reference)
         base_height = float(np.median(dem[finite]))
 
-        metrics                  = reader.metrics()
-        az_start, _, rg_start, _ = (int(v) for v in metrics["split_region"])
-        used_tracks              = metrics.get("tracks")
+        az_start, _, rg_start, _ = reader.global_crop()
+        pass_labels              = reader.layout()["pass_labels"]
 
         _, _, anchor = geocoder.geocode([az_start + n_az / 2], [rg_start + n_rg / 2], [base_height])
 
@@ -2093,19 +1074,18 @@ class CubeExplorer:
             "base_height" : base_height,
             "anchor_ecef" : anchor[0],
             "bbox"        : [float(lon.min()), float(lat.min()), float(lon.max()), float(lat.max())],
-            "tracks"      : self._track_lines(params, used_tracks, az_start, n_az) if used_tracks is not None else None,
+            "tracks"      : self._track_lines(params, pass_labels, az_start, n_az) if pass_labels is not None else None,
             "beam"        : self._beam_segment(geocoder, reference, dem, base_height, az_start, rg_start, n_az, n_rg),
         }
 
     TRACK_LINE_POINTS = 17
 
-    def _track_lines(self, params: TrackParameters, used: dict, az_start: int, n_az: int) -> dict:
-        """Geocodes the flight line of every track used by the run.
+    def _track_lines(self, params: TrackParameters, labels: list, az_start: int, n_az: int) -> dict:
+        """Geocodes the flight line of every pass of the run.
 
         Args:
             params: Track parameters of the whole stack.
-            used: Track selection recorded by the inference stamp, carrying the
-                track ``labels`` and the ``reference`` track.
+            labels: Pass labels recorded by the run, primary first.
             az_start: Azimuth origin of the cube in full-scene pixels.
             n_az: Azimuth extent of the cube, in pixels.
 
@@ -2115,18 +1095,15 @@ class CubeExplorer:
             flight altitudes in metres.
 
         Raises:
-            ValueError: If a used track is absent from the track parameters or the
-                run's reference track is not the stack primary.
+            ValueError: If a recorded pass is absent from the track parameters.
         """
-        labels    = list(used["labels"])
-        reference = used["reference"]
+        labels    = list(labels)
+        reference = params.reference
 
         by_label = dict(zip(params.labels, params.parameters))
         missing  = [label for label in labels if label not in by_label]
         if missing:
-            raise ValueError(f"run tracks {missing} are absent from track_parameters.json labels {params.labels}")
-        if reference != params.reference:
-            raise ValueError(f"run reference track '{reference}' does not match the stack primary '{params.reference}'")
+            raise ValueError(f"run passes {missing} are absent from track_parameters.json labels {params.labels}")
 
         az_grid = np.linspace(az_start, az_start + n_az, self.TRACK_LINE_POINTS)
 
@@ -2149,7 +1126,7 @@ class CubeExplorer:
         Args:
             geocoder: Geocoder of the reference track.
             reference: Reference track parameters, carrying its ``h0`` in metres.
-            dem: Cropped DEM in metres.
+            dem: DEM in metres.
             base_height: Median terrain height in metres, used where the DEM is
                 not finite at the sampled edges.
             az_start: Azimuth origin of the cube in full-scene pixels.
@@ -2193,8 +1170,8 @@ class CubeExplorer:
 
         Returns:
             Dict with the ECEF anchor, lon/lat bounding box, base height in
-            metres, the geocoder's residual RMS in metres and, when the stamp
-            records its tracks, the flight lines and beam expressed as ECEF
+            metres, the geocoder's residual RMS in metres and, when the run
+            records its pass labels, the flight lines and beam expressed as ECEF
             offsets from the anchor; None when geo is None.
         """
         if geo is None:
@@ -2210,7 +1187,7 @@ class CubeExplorer:
             "bbox"           : geo["bbox"],
             "base_height"    : geo["base_height"],
             "residual_rms_m" : geo["geocoder"].residual_rms_m,
-            "tracks_note"    : None if tracks is not None else "this inference stamp stores no track selection, so the flight lines cannot be drawn",
+            "tracks_note"    : None if tracks is not None else "this preprocessing run stores no pass labels, so the flight lines cannot be drawn",
             "tracks"         : None if tracks is None else {
                 "labels"    : tracks["labels"],
                 "reference" : tracks["reference"],
@@ -2228,122 +1205,13 @@ class CubeExplorer:
             },
         }
 
-    def _metric_maps_meta(self, metric_maps: dict) -> list:
-        """Describes each metric map with its display label and robust colour range."""
-        layers = []
-        for key, data in metric_maps.items():
-            vmin, vmax = self._metric_range(data)
-            layers.append({
-                "key"   : key,
-                "label" : self.METRIC_LABELS.get(key, key),
-                "vmin"  : vmin,
-                "vmax"  : vmax,
-            })
-        return layers
-
-    @staticmethod
-    def _metric_range(data: np.ndarray) -> tuple[float, float]:
-        """Returns the 1st-to-99th percentile range of a map, widened when degenerate."""
-        finite = data[np.isfinite(data)]
-        if not finite.size:
-            return 0.0, 1.0
-
-        vmin, vmax = (float(v) for v in np.percentile(finite, [1.0, 99.0]))
-        if not vmax > vmin:
-            vmin, vmax = float(finite.min()), float(finite.max())
-        if not vmax > vmin:
-            vmax = vmin + 1.0
-        return vmin, vmax
-
-    def _load_params(self, reader: StampReader | FoldMosaic, n_az: int, n_rg: int) -> dict:
-        """Loads the Gaussian parameter cubes that match the cube footprint.
-
-        Args:
-            reader: Stamp or mosaic reader to pull from.
-            n_az: Azimuth extent of the cube, in pixels.
-            n_rg: Range extent of the cube, in pixels.
-
-        Returns:
-            Mapping from parameter source to a (3 * n_slots, n_az, n_rg) block.
-
-        Raises:
-            ValueError: If a block is not a (3K, azimuth, range) cube or does not
-                match the cube footprint.
-        """
-        params = {}
-        for source in self.PARAM_SOURCES:
-            raw = reader.param_block(source)
-            if raw is None:
-                continue
-
-            if raw.ndim != 3 or raw.shape[0] % 3 != 0 or raw.shape[0] == 0:
-                raise ValueError(f"params_{source}.npy is not a (3K, az, rg) cube: shape={raw.shape}")
-            if raw.shape[1:] != (n_az, n_rg):
-                raise ValueError(f"params_{source}.npy spatial shape {raw.shape[1:]} does not match the {n_az}x{n_rg} cube")
-
-            params[source] = raw
-
-        return params
-
-    def _params_meta(self, params: dict, curve_axis: np.ndarray) -> dict | None:
-        """Describes the loaded parameter blocks for the front end.
-
-        Args:
-            params: Loaded parameter blocks keyed by source.
-            curve_axis: Elevation axis in metres, used as the mu display range.
-
-        Returns:
-            Dict with the available ``sources``, the slot count, the activity
-            amplitude threshold, whether error maps are possible and the colour
-            ``ranges`` for each field and each error field; None when no
-            parameter block was loaded.
-        """
-        if not params:
-            return None
-
-        n_slots   = next(iter(params.values())).shape[0] // 3
-        threshold = ParamMatcher.ACTIVE_AMP_THR
-        has_error = "pred" in params and "gt" in params
-
-        ranges = {
-            "amp"   : [0.0, self._field_ceiling(params, 0)],
-            "mu"    : [float(curve_axis[0]), float(curve_axis[-1])],
-            "sigma" : [0.0, self._field_ceiling(params, 2)],
-            "count" : [0.0, float(n_slots)],
-        }
-
-        if has_error:
-            for field, offset in self.PARAM_FIELDS.items():
-                diff = np.abs(params["pred"][offset::3] - params["gt"][offset::3])
-                high = float(np.nanpercentile(diff, 99.0)) if diff.size else 1.0
-                ranges[f"error_{field}"] = [0.0, high if high > 0.0 else 1.0]
-            ranges["error_count"] = [-float(n_slots), float(n_slots)]
-
-        return {
-            "sources"   : [s for s in self.PARAM_SOURCES if s in params],
-            "n_slots"   : n_slots,
-            "threshold" : threshold,
-            "error"     : has_error,
-            "ranges"    : ranges,
-        }
-
-    @staticmethod
-    def _field_ceiling(params: dict, offset: int) -> float:
-        """Returns the largest 99th percentile of one parameter channel across sources."""
-        high = 0.0
-        for block in params.values():
-            channels = block[offset::3]
-            if channels.size:
-                high = max(high, float(np.nanpercentile(channels, 99.0)))
-        return high if high > 0.0 else 1.0
-
     def _ingest(self, raw: np.ndarray, x_axis: np.ndarray, advance) -> dict:
         """Materialises a cube plane by plane and derives its display colour limits.
 
         Args:
             raw: Lazy or memory-mapped cube of shape (elevation, azimuth, range);
                 complex planes are reduced to their magnitude.
-            x_axis: Elevation axis in metres, or bin indices for the raw tomogram.
+            x_axis: Elevation axis in metres.
             advance: Callback invoked once per ingested elevation plane.
 
         Returns:
@@ -2368,112 +1236,16 @@ class CubeExplorer:
             "vmax"   : float(vmax),
         }
 
-    def _curve_axis(self, reader: StampReader | FoldMosaic, n_elev: int) -> np.ndarray:
+    def _elevation_axis(self, reader: StampReader, n_elev: int) -> np.ndarray:
         """Returns the n_elev evenly spaced elevation bin centres in metres."""
-        metrics = reader.metrics()
-        return np.linspace(float(metrics["x_axis_min"]), float(metrics["x_axis_max"]), n_elev)
+        low, high = reader.height_range()
+        return np.linspace(low, high, n_elev)
 
-    def _preproc_layout(self, reader: StampReader | FoldMosaic) -> tuple[Path, dict] | None:
-        """Resolves the preprocessing run backing a cube and its dataset layout.
-
-        Args:
-            reader: Stamp or mosaic reader whose run metadata is read.
-
-        Returns:
-            Tuple of the preprocessing run directory and the parsed
-            ``data/dataset.json`` layout, or None when either is missing.
-        """
-        meta_path = reader.run_dir / "meta" / "dataset_creation_config.json"
-        if not meta_path.is_file():
-            return None
-
-        payload     = json.loads(meta_path.read_text(encoding="utf-8"))
-        preproc_dir = Path(payload["preprocessing_run_directory"])
-        layout_path = preproc_dir / "data" / "dataset.json"
-        if not layout_path.is_file():
-            return None
-
-        layout = json.loads(layout_path.read_text(encoding="utf-8"))
-        return preproc_dir, layout
-
-    def _crop_bounds(self, reader: StampReader | FoldMosaic, layout: dict, n_az: int, n_rg: int) -> tuple[int, int, int, int]:
-        """Maps the cube's split region into indices of the preprocessing arrays.
+    def _primary_db(self, reader: StampReader, n_az: int, n_rg: int) -> np.ndarray:
+        """Loads the primary SLC and returns its amplitude in dB.
 
         Args:
-            reader: Stamp or mosaic reader whose metrics carry the split region.
-            layout: Dataset layout carrying the global crop applied at preprocessing.
-            n_az: Azimuth extent of the cube, in pixels.
-            n_rg: Range extent of the cube, in pixels.
-
-        Returns:
-            Tuple (azimuth low, azimuth high, range low, range high) of indices
-            into the preprocessing arrays.
-
-        Raises:
-            KeyError: If the metrics payload carries no split region.
-            ValueError: If the split region does not match the cube extents.
-        """
-        metrics = reader.metrics()
-        if "split_region" not in metrics:
-            raise KeyError(f"metrics.json in {reader.where} has no split_region; rerun inference to regenerate it")
-
-        az_start, az_end, rg_start, rg_end = (int(v) for v in metrics["split_region"])
-        if (az_end - az_start, rg_end - rg_start) != (n_az, n_rg):
-            raise ValueError(f"split_region {metrics['split_region']} does not match the {n_az}x{n_rg} cube")
-
-        global_crop = layout["global_crop"]
-
-        az_lo = az_start - global_crop[0]
-        az_hi = az_end   - global_crop[0]
-        rg_lo = rg_start - global_crop[2]
-        rg_hi = rg_end   - global_crop[2]
-        return az_lo, az_hi, rg_lo, rg_hi
-
-    def _full_raw(self, reader: StampReader | FoldMosaic, n_az: int, n_rg: int) -> np.ndarray | None:
-        """Crops the full Capon tomogram of the preprocessing run to the cube footprint.
-
-        Args:
-            reader: Stamp or mosaic reader identifying the preprocessing run.
-            n_az: Azimuth extent of the cube, in pixels.
-            n_rg: Range extent of the cube, in pixels.
-
-        Returns:
-            Memory-mapped view of shape (elevation bins, n_az, n_rg), or None when
-            the preprocessing run publishes no full tomogram.
-
-        Raises:
-            ValueError: If the tomogram is not three-dimensional or does not cover
-                the cube region.
-        """
-        resolved = self._preproc_layout(reader)
-        if resolved is None:
-            return None
-
-        preproc_dir, layout = resolved
-
-        tomo_name = layout["artifacts"].get("tomogram_full")
-        if not tomo_name:
-            return None
-
-        tomo_path = preproc_dir / "data" / tomo_name
-        if not tomo_path.is_file():
-            return None
-
-        az_lo, az_hi, rg_lo, rg_hi = self._crop_bounds(reader, layout, n_az, n_rg)
-
-        raw = np.load(tomo_path, mmap_mode="r")
-        if raw.ndim != 3:
-            raise ValueError(f"full tomogram is not a 3D cube: shape={raw.shape}")
-        if az_lo < 0 or rg_lo < 0 or az_hi > raw.shape[1] or rg_hi > raw.shape[2]:
-            raise ValueError(f"cube region az[{az_lo}:{az_hi}] rg[{rg_lo}:{rg_hi}] falls outside the full tomogram {raw.shape}")
-
-        return raw[:, az_lo:az_hi, rg_lo:rg_hi]
-
-    def _primary_db(self, reader: StampReader | FoldMosaic, n_az: int, n_rg: int) -> np.ndarray:
-        """Crops the primary SLC and returns its amplitude in dB.
-
-        Args:
-            reader: Stamp or mosaic reader identifying the preprocessing run.
+            reader: Preprocessing run reader.
             n_az: Azimuth extent of the cube, in pixels.
             n_rg: Range extent of the cube, in pixels.
 
@@ -2482,52 +1254,35 @@ class CubeExplorer:
             floored at 1e-12 before the logarithm.
 
         Raises:
-            FileNotFoundError: If the preprocessing run, its primary artifact
-                entry or the primary file itself is missing.
-            ValueError: If the primary is not a 2D image or does not cover the
-                cube region.
+            FileNotFoundError: If the run stores no primary SLC.
+            ValueError: If the primary is not a 2D image or does not match the
+                tomogram footprint.
         """
-        resolved = self._preproc_layout(reader)
-        if resolved is None:
-            raise FileNotFoundError(f"cannot resolve the preprocessing run for {reader.where}; the primary SLC is required for the cube map")
-
-        preproc_dir, layout = resolved
-
-        primary_name = layout["artifacts"].get("primary")
-        if not primary_name:
-            raise FileNotFoundError(f"dataset.json in {preproc_dir} lists no primary artifact")
-
-        primary_path = preproc_dir / "data" / primary_name
-        if not primary_path.is_file():
-            raise FileNotFoundError(f"primary SLC missing: {primary_path}")
-
-        az_lo, az_hi, rg_lo, rg_hi = self._crop_bounds(reader, layout, n_az, n_rg)
-
-        raw = np.load(primary_path, mmap_mode="r")
+        raw = reader.primary()
         if raw.ndim != 2:
             raise ValueError(f"primary SLC is not a 2D image: shape={raw.shape}")
-        if az_lo < 0 or rg_lo < 0 or az_hi > raw.shape[0] or rg_hi > raw.shape[1]:
-            raise ValueError(f"cube region az[{az_lo}:{az_hi}] rg[{rg_lo}:{rg_hi}] falls outside the primary SLC {raw.shape}")
+        if raw.shape != (n_az, n_rg):
+            raise ValueError(f"primary SLC shape {raw.shape} does not match the {n_az}x{n_rg} tomogram footprint in {reader.where}")
 
-        amplitude = np.abs(np.asarray(raw[az_lo:az_hi, rg_lo:rg_hi])).astype(np.float32)
+        amplitude = np.abs(np.asarray(raw)).astype(np.float32)
         return 20.0 * np.log10(np.maximum(amplitude, 1e-12))
 
 
 class SliceCollector:
     """Renders the same slices across many runs for side-by-side comparison.
 
-    Opens stamps lazily through an LRU cache of lightweight contexts, so several
-    runs can be previewed and collected without displacing the cube loaded in the
-    Cube tab. Fold mosaics are rejected here.
+    Opens preprocessing runs lazily through an LRU cache of lightweight
+    contexts, so several runs can be previewed and collected without displacing
+    the cube loaded in the Cube tab.
 
     Attributes:
         cubes: Explorer supplying the readers, archiver and cut helpers.
         logger: Web logger for render and collection reporting.
         render_lock: Serialises figure writing during a collection.
-        contexts: LRU cache of opened stamp contexts, keyed by stamp directory.
+        contexts: LRU cache of opened run contexts, keyed by run directory.
     """
 
-    SOURCES    = ("pred", "gt", "reduced", "full")
+    SOURCES    = ("full",)
     AXES       = ("range", "azimuth")
     MAX_RUNS   = 24
     MAX_POINTS = 24
@@ -2544,10 +1299,10 @@ class SliceCollector:
         """Describes one collectable cube.
 
         Args:
-            cube_id: Stamp directory path.
+            cube_id: Preprocessing run directory path.
 
         Returns:
-            Dict with ``ok``, the stamp id, run, group and stamp names, the cube's
+            Dict with ``ok``, the run id, run, group and tag names, the cube's
             azimuth and range extents, the available ``sources`` and their
             intensity limits, or ``ok`` False with the reason.
         """
@@ -2562,7 +1317,7 @@ class SliceCollector:
         entries = context["entries"]
         return {
             "ok"        : True,
-            "id"        : str(context["stamp_dir"]),
+            "id"        : str(context["run_dir"]),
             "run"       : context["run"],
             "group"     : context["group"],
             "stamp"     : context["stamp"],
@@ -2576,7 +1331,7 @@ class SliceCollector:
         """Renders one slice of a collectable cube as a PNG.
 
         Args:
-            cube_id: Stamp directory path.
+            cube_id: Preprocessing run directory path.
             source: Cube key to render.
             axis: "range" or "azimuth".
             az: Azimuth pixel index, clipped into range.
@@ -2623,7 +1378,7 @@ class SliceCollector:
         per point and cut, next to a ``collection.json`` manifest.
 
         Args:
-            ids: Stamp directory paths, deduplicated, at most MAX_RUNS.
+            ids: Preprocessing run directory paths, deduplicated, at most MAX_RUNS.
             points: Dicts with ``az`` and ``rg`` pixel indices, at most MAX_POINTS.
             sources: Cube keys to render, a non-empty subset of SOURCES.
             axes: Cut axes to render, a non-empty subset of AXES.
@@ -2710,7 +1465,7 @@ class SliceCollector:
             "sources" : sources,
             "points"  : [{"az": az, "rg": rg} for az, rg in points],
             "clims"   : {source: (list(clim) if clim else None) for source, clim in clims.items()},
-            "runs"    : [{"id": str(c["stamp_dir"]), "run": c["run"], "group": c["group"], "stamp": c["stamp"], "label": label} for c, label in zip(contexts, labels)],
+            "runs"    : [{"id": str(c["run_dir"]), "run": c["run"], "group": c["group"], "stamp": c["stamp"], "label": label} for c, label in zip(contexts, labels)],
             "missing" : missing,
             "files"   : files,
         }
@@ -2755,10 +1510,10 @@ class SliceCollector:
         """Builds one unique file label per context.
 
         Run names are used as-is, prefixed with their group when the name repeats
-        and suffixed with the stamp name when that is still not unique.
+        and suffixed with the tomogram tag when that is still not unique.
 
         Args:
-            contexts: Opened stamp contexts, in collection order.
+            contexts: Opened run contexts, in collection order.
 
         Returns:
             One label per context, in the same order.
@@ -2787,7 +1542,7 @@ class SliceCollector:
         """Returns the colour range covering one source across every context.
 
         Args:
-            contexts: Opened stamp contexts.
+            contexts: Opened run contexts.
             source: Cube key whose limits are merged.
             space: Only "physical" yields shared limits.
 
@@ -2840,24 +1595,19 @@ class SliceCollector:
         return data[order], heights, float(vmin), float(vmax)
 
     def _context(self, cube_id: str) -> dict | None:
-        """Returns the cached or freshly built context of a stamp.
+        """Returns the cached or freshly built context of a preprocessing run.
 
         Args:
-            cube_id: Stamp directory path.
+            cube_id: Preprocessing run directory path.
 
         Returns:
-            The stamp context, or None when the id is unknown.
-
-        Raises:
-            ValueError: If the id refers to a cross-validation fold mosaic.
+            The run context, or None when the id is unknown.
         """
         reader = self.cubes._open_source(cube_id)
         if reader is None:
             return None
-        if isinstance(reader, FoldMosaic):
-            raise ValueError("cross-validation mosaics load in the Cube tab only; pick the individual fold cubes here")
 
-        key    = str(reader.stamp_dir)
+        key    = str(reader.run_dir)
         cached = self.contexts.get(key)
         if cached is not None:
             return cached
@@ -2868,55 +1618,43 @@ class SliceCollector:
         return context
 
     def _build_context(self, reader: StampReader) -> dict:
-        """Opens the cubes of a stamp without materialising them.
+        """Opens the tomogram of a run without materialising it.
 
         Args:
-            reader: Reader of the stamp to open.
+            reader: Reader of the run to open.
 
         Returns:
-            Context with the stamp directory, its runs root, the run, group and
-            stamp names, the azimuth and range extents and the lazily held
+            Context with the run directory, its runs root, the run, group and
+            tag names, the azimuth and range extents and the lazily held
             ``entries`` per source.
 
         Raises:
-            ValueError: If the stamp lies outside every catalogued runs root, the
-                prediction cube is not three-dimensional, or a source disagrees
-                with it spatially.
+            ValueError: If the run lies outside every catalogued runs root or the
+                tomogram is not three-dimensional.
         """
-        stamp_dir = reader.stamp_dir
-        root      = self._root_for(stamp_dir)
-        if root is None:
-            raise ValueError(f"{stamp_dir} is outside every catalogued runs root")
-
-        pred_raw = reader.curves("pred")
-        if pred_raw.ndim != 3:
-            raise ValueError(f"pred_curves.npy is not a 3D cube: shape={pred_raw.shape}")
-
-        n_elev, n_az, n_rg = pred_raw.shape
-        curve_axis         = self.cubes._curve_axis(reader, n_elev)
-
-        entries = {"pred": self._entry(pred_raw, curve_axis)}
-        for source in ("gt", "reduced"):
-            raw = reader.curves(source)
-            if raw is not None:
-                if raw.shape[1:] != (n_az, n_rg):
-                    raise ValueError(f"source '{source}' spatial shape {raw.shape[1:]} does not match pred {(n_az, n_rg)}")
-                entries[source] = self._entry(raw, curve_axis)
-
-        full_raw = self.cubes._full_raw(reader, n_az, n_rg)
-        if full_raw is not None:
-            entries["full"] = self._entry(full_raw, np.arange(full_raw.shape[0], dtype=np.float64))
-
         run_dir = reader.run_dir
+        root    = self._root_for(run_dir)
+        if root is None:
+            raise ValueError(f"{run_dir} is outside every catalogued runs root")
+
+        full_raw = reader.tomogram()
+        if full_raw.ndim != 3:
+            raise ValueError(f"full tomogram is not a 3D cube: shape={full_raw.shape}")
+
+        n_elev, n_az, n_rg = full_raw.shape
+        x_axis             = self.cubes._elevation_axis(reader, n_elev)
+
+        entries = {"full": self._entry(full_raw, x_axis)}
+
         return {
-            "stamp_dir" : stamp_dir,
-            "root"      : root,
-            "run"       : run_dir.name,
-            "group"     : str(run_dir.relative_to(root).parent),
-            "stamp"     : stamp_dir.name,
-            "n_az"      : n_az,
-            "n_rg"      : n_rg,
-            "entries"   : entries,
+            "run_dir" : run_dir,
+            "root"    : root,
+            "run"     : run_dir.name,
+            "group"   : str(run_dir.relative_to(root).parent),
+            "stamp"   : reader.layout()["tomogram_tag"],
+            "n_az"    : n_az,
+            "n_rg"    : n_rg,
+            "entries" : entries,
         }
 
     @staticmethod
@@ -2925,7 +1663,7 @@ class SliceCollector:
 
         Args:
             raw: Memory-mapped cube of shape (elevation, azimuth, range).
-            x_axis: Elevation axis in metres, or bin indices for the raw tomogram.
+            x_axis: Elevation axis in metres.
 
         Returns:
             Entry with the untouched ``cube``, its ``x_axis`` and the 1st and 99th
@@ -2943,7 +1681,6 @@ class SliceCollector:
             "vmax"   : float(vmax),
         }
 
-    def _root_for(self, stamp_dir: Path) -> Path | None:
-        """Returns the catalogued runs root containing the stamp, or None."""
-        return self.cubes.roots.enclosing(stamp_dir)
-
+    def _root_for(self, run_dir: Path) -> Path | None:
+        """Returns the catalogued runs root containing the run, or None."""
+        return self.cubes.roots.enclosing(run_dir)
