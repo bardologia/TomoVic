@@ -2,7 +2,9 @@
 
 Covers run resolution against the catalogued roots and the ``data/dataset.json``
 marker, the metadata a finished load reports, elevation profiles, transect
-rendering and figure saving, and the colormap selection rules.
+rendering and figure saving, the colormap selection rules, and the parametrized
+tomogram loaded from a Gaussian parameter run: tag listing, source flipping,
+lazy reconstruction, the per-pixel slot readout and error handling.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from cube_explorer import CubeExplorer
 from web_logger    import WebLogger
 
 from tests.webui.conftest         import N_AZ, N_ELEV, N_RG, load_cube
-from tests.webui.preproc_fixtures import loaded_run, make_preproc_run, open_runs
+from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run, make_param_run, make_preproc_run, open_runs
 
 
 def test_load_reports_run_metadata(tmp_path):
@@ -163,3 +165,126 @@ def test_second_explorer_requires_its_own_load(tmp_path):
 
     load_cube(explorer, str(run_dir))
     assert explorer.save_slices(str(run_dir), az=0, rg=0)["ok"]
+
+
+def _two_slot_parameters() -> np.ndarray:
+    """Returns a two-slot parameter cube with one inactive slot at pixel (1, 2)."""
+    parameters = np.zeros((6, N_AZ, N_RG), dtype=np.float32)
+
+    parameters[0] = 0.8
+    parameters[1] = 12.0
+    parameters[2] = 3.0
+    parameters[3] = 0.5
+    parameters[4] = -2.0
+    parameters[5] = 2.0
+
+    parameters[3, 1, 2] = 0.0
+    return parameters
+
+
+def test_param_runs_listing(tmp_path):
+    """Checks tag listing is empty without params, sorted with them, and refuses unknown ids."""
+    explorer, cube_id = loaded_run(tmp_path)
+    assert explorer.param_runs(cube_id) == {"ok": True, "tags": []}
+
+    make_param_run(Path(cube_id), "params_b", k=2)
+    make_param_run(Path(cube_id), "params_a", k=3)
+    (Path(cube_id) / "params" / "logs").mkdir()
+
+    assert explorer.param_runs(cube_id) == {"ok": True, "tags": ["params_a", "params_b"]}
+    assert not explorer.param_runs(str(tmp_path / "nowhere"))["ok"]
+
+
+def test_load_with_param_tag_flips_sources(tmp_path):
+    """Checks loading with a parameter run adds the param source and its metadata payload."""
+    explorer, cube_id = loaded_param_run(tmp_path, tag="params_k2", k=2)
+    meta              = explorer.load_status()["cube"]
+
+    assert meta["sources"] == ["full", "param"]
+    assert meta["param"]["tag"] == "params_k2"
+    assert meta["param"]["n_gaussians"] == 2 and meta["param"]["k_max"] == 2
+    assert set(meta["param"]["fields"]) == {"amplitude", "mean", "sigma"}
+    assert meta["n_elev"]["param"] == N_ELEV
+
+    vmin, vmax = meta["intensity"]["param"]
+    assert vmax > vmin >= 0.0
+
+
+def test_load_without_param_tag_keeps_full_only(tmp_path):
+    """Checks a plain load ignores stored parameter runs and refuses the param source."""
+    run_dir = make_preproc_run(tmp_path)
+    make_param_run(run_dir, "params_k2")
+
+    explorer, run_ids = open_runs(tmp_path, expected=1)
+    load_cube(explorer, run_ids[0])
+
+    meta = explorer.load_status()["cube"]
+    assert meta["sources"] == ["full"] and meta["param"] is None
+    assert explorer.slice_png(run_ids[0], "param", "range", az=0, rg=0) is None
+    assert not explorer.params_at(run_ids[0], az=0, rg=0)["ok"]
+
+
+def test_unknown_param_tag_is_refused(tmp_path):
+    """Checks a load with a tag the run does not hold fails loudly and names the tag."""
+    run_dir = make_preproc_run(tmp_path)
+    make_param_run(run_dir, "params_k2")
+
+    explorer, run_ids = open_runs(tmp_path, expected=1)
+    result            = explorer.start_load(run_ids[0], param_tag="banana")
+
+    assert not result["ok"] and "banana" in result["error"]
+
+
+def test_param_profile_matches_analytic_mixture(tmp_path):
+    """Checks the reconstructed profile at a pixel equals the analytic Gaussian sum of its parameters."""
+    parameters        = _two_slot_parameters()
+    explorer, cube_id = loaded_param_run(tmp_path, tag="params_k2", parameters=parameters)
+
+    result = explorer.profiles(cube_id, az=2, rg=3)
+    assert result["ok"] and set(result["sources"]) == {"full", "param"}
+
+    heights = np.asarray(result["sources"]["param"]["heights"])
+    assert np.allclose(heights, np.linspace(HEIGHT_RANGE[0], HEIGHT_RANGE[1], N_ELEV))
+    assert result["sources"]["param"]["heights"] == result["sources"]["full"]["heights"]
+
+    pixel    = parameters[:, 2, 3]
+    analytic = sum(pixel[3 * k] * np.exp(-((heights - pixel[3 * k + 1]) ** 2) / (2.0 * pixel[3 * k + 2] ** 2)) for k in range(2))
+    assert np.allclose(result["sources"]["param"]["values"], analytic, atol=1e-6)
+
+
+def test_params_at_orders_slots_by_mean(tmp_path):
+    """Checks the per-pixel readout returns every slot ordered by mean, inactive ones included."""
+    parameters        = _two_slot_parameters()
+    explorer, cube_id = loaded_param_run(tmp_path, tag="params_k2", parameters=parameters)
+
+    result = explorer.params_at(cube_id, az=1, rg=2)
+    assert result["ok"] and result["tag"] == "params_k2"
+    assert result["az"] == 1 and result["rg"] == 2
+
+    assert [slot["mean"] for slot in result["slots"]] == [-2.0, 12.0]
+    assert result["slots"][0] == {"amplitude": 0.0, "mean": -2.0, "sigma": 2.0}
+    assert np.allclose([result["slots"][1][key] for key in ("amplitude", "mean", "sigma")], [0.8, 12.0, 3.0])
+
+    clipped = explorer.params_at(cube_id, az=999, rg=-5)
+    assert clipped["ok"] and clipped["az"] == N_AZ - 1 and clipped["rg"] == 0
+
+
+def test_param_slice_plane_and_transect_render(tmp_path):
+    """Checks the parametrized tomogram renders as slices, planes and transects in both spaces."""
+    explorer, cube_id = loaded_param_run(tmp_path)
+
+    assert explorer.slice_png(cube_id, "param", "range", az=1, rg=2)[:4] == b"\x89PNG"
+    assert explorer.slice_png(cube_id, "param", "azimuth", az=1, rg=2, space="normalized")[:4] == b"\x89PNG"
+    assert explorer.plane_png(cube_id, "param", frac=0.5)[:4] == b"\x89PNG"
+    assert explorer.transect_png(cube_id, "param", 0, 0, N_AZ - 1, N_RG - 1)[:4] == b"\x89PNG"
+
+
+def test_save_slices_include_the_param_source(tmp_path):
+    """Checks figure saving writes both the raw and the parametrized cuts once a parameter run is loaded."""
+    explorer, cube_id = loaded_param_run(tmp_path)
+
+    result = explorer.save_slices(cube_id, az=1, rg=1)
+    assert result["ok"], result
+
+    expected = {"range_full_physical.png", "azimuth_full_physical.png", "range_param_physical.png", "azimuth_param_physical.png"}
+    assert set(result["files"]) == expected

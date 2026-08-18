@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from tests.webui.conftest         import N_AZ, N_ELEV, N_RG
-from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_run
+from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run
 
 
 def globe_blob(explorer, cube_id, source="full", amp_min=0.0, max_points=0):
@@ -162,6 +162,16 @@ def test_globe_points_honour_the_amplitude_threshold(tmp_path):
 
     assert int(header[0]) == 2
     assert rows.shape[0] == 2
+
+
+def test_globe_points_serve_the_parametrized_tomogram(tmp_path):
+    """Checks the geocoded point cloud also renders from the reconstructed param source."""
+    explorer, cube_id = loaded_param_run(tmp_path, with_geo=True)
+    header, rows      = globe_blob(explorer, cube_id, source="param", max_points=100)
+
+    assert int(header[0]) > 0
+    assert np.all(np.isfinite(rows))
+    assert np.all((rows[:, 3] >= HEIGHT_RANGE[0]) & (rows[:, 3] <= HEIGHT_RANGE[1]))
 
 
 def test_globe_points_reject_unknown_source_and_unloaded_cube(tmp_path):

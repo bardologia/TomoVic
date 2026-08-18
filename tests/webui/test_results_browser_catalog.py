@@ -41,6 +41,20 @@ def test_the_tree_reports_the_stage_it_recognises(browser, tmp_path):
     assert payload["root"]  == str(run)
 
 
+def test_a_parameter_run_is_reported_as_the_param_extraction_stage(browser, tmp_path):
+    """A run holding a fit report or example-fit images is reported as the param extraction stage."""
+    run = tmp_path / "params_k5"
+    (run / "images" / "example_fits").mkdir(parents=True)
+
+    assert browser.tree(str(run))["stage"] == "param extraction"
+
+    other = tmp_path / "params_k2"
+    other.mkdir()
+    (other / "fit_report.md").write_text("x")
+
+    assert browser.tree(str(other))["stage"] == "param extraction"
+
+
 def test_an_unrecognised_run_falls_back_to_results(browser, tmp_path):
     """A directory with no stage marker falls back to the results stage."""
     (tmp_path / "misc").mkdir()

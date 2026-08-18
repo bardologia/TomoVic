@@ -37,18 +37,24 @@ DEFER_HEAVY_IMPORTS = (
     "generate_interferograms",
     "generate_tomogram",
     "pre_process",
+    "extract_params",
     "analyze_preprocessing",
+    "analyze_param_extraction",
 )
 
 CLI_MODULES = (
     "pre_process",
+    "extract_params",
     "analyze_preprocessing",
+    "analyze_param_extraction",
     "compare_preprocessing_trials",
 )
 
 ENTRY_CONFIGS = {
     "pre_process"                  : ("configuration.sar.processing_config", "PreProcessEntryConfig"),
+    "extract_params"               : ("configuration.param_extraction",      "ExtractParamsEntryConfig"),
     "analyze_preprocessing"        : ("configuration.sar.processing_config", "PreprocessInferenceConfig"),
+    "analyze_param_extraction"     : ("configuration.param_extraction",      "ParamExtractionInferenceConfig"),
     "compare_preprocessing_trials" : ("configuration.comparison",            "PreprocessingComparisonConfig"),
 }
 
@@ -104,7 +110,7 @@ def test_script_imports_in_launcher_subprocess(script, tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("name", ("pre_process",))
+@pytest.mark.parametrize("name", ("pre_process", "extract_params"))
 def test_entry_pins_the_environment_before_the_numeric_stack_loads(name, tmp_path):
     """EnvironmentPinner runs before numpy, scipy or pipelines are imported."""
     script = _script_path(name)

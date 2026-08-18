@@ -64,6 +64,12 @@ removed, and the per-pixel acquisition geometry. The output is a run directory w
 distributions of an existing run, and `main/analysis/compare_preprocessing_trials.py`
 compares runs that differ by multilook window.
 
+`main/processing/extract_params.py` fits per-pixel Gaussian mixtures to the tomogram
+profiles, producing a parametrized tomogram: `params/<tag>/parameters.npy` under the
+run, holding amplitude, mean and width per component. The fit kernels run on jax
+(`pip install "tomovic[fitting]"`, CPU is fine), and
+`main/analysis/analyze_param_extraction.py` renders its figures and fit report.
+
 ## 3. The console
 
 ```bash
@@ -73,7 +79,9 @@ webui/run.sh            # or: python webui/serve.py --port 8765
 Open the printed URL. The Cube tab is the main viewer: open a preprocessing run
 directory (anything holding `data/dataset.json`) and browse elevation, azimuth and range
 slices, plane cuts, transects, the DEM grid, the point cloud, and the scene on a Cesium
-globe with the flight tracks drawn from the acquisition geometry. The Slices tab
+globe with the flight tracks drawn from the acquisition geometry. When the run holds a
+parameter extraction, the parametrized tomogram appears as a second source next to the
+raw Capon cube, with the fitted components readable per pixel. The Slices tab
 collects slices across runs for side-by-side reading. Results browses the figures,
 reports and logs a run wrote. Scripts, Launch and Console launch and monitor the three
 entry points from the browser, with the same config form the CLI exposes. The Model,

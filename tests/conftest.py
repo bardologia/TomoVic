@@ -1,7 +1,7 @@
 """Shared pytest fixtures and logging stubs for the whole test suite.
 
 Session-scoped fixtures expose the gitignored test_data/ tree (preprocessed stacks,
-and metadata); they skip when that tree is absent.
+metadata and extracted Gaussian parameters); they skip when that tree is absent.
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ if str(_REPO_ROOT) not in sys.path:
 _TEST_DATA = _REPO_ROOT / "test_data"
 _DATA      = _TEST_DATA / "data"
 _META      = _TEST_DATA / "meta"
+
+_PARAMS    = _TEST_DATA / "params" / "params_k5_lam0.01_sig4_sigma"
 
 _HAS_DATA = _TEST_DATA.is_dir() and (_DATA / "dataset.json").is_file()
 
@@ -200,6 +202,32 @@ def meta_dir() -> Path:
     """Returns the test_data/meta directory holding dataset metadata."""
     _require_data()
     return _META
+
+
+@pytest.fixture(scope="session")
+def params_dir() -> Path:
+    """Returns the extracted-parameter run directory used by the tests."""
+    _require_data()
+    return _PARAMS
+
+
+@pytest.fixture(scope="session")
+def param_extraction_meta(params_dir) -> dict:
+    """Returns the parsed param_extraction_meta.json of the parameter run."""
+    return json.loads((params_dir / "param_extraction_meta.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def parameters(params_dir) -> np.ndarray:
+    """Returns the memory-mapped Gaussian parameters of shape (params, azimuth, range)."""
+    return np.load(params_dir / "parameters.npy", mmap_mode="r")
+
+
+@pytest.fixture(scope="session")
+def fit_diagnostics(params_dir) -> dict:
+    """Returns the fit diagnostics of the parameter run keyed by array name."""
+    npz = np.load(params_dir / "fit_diagnostics.npz")
+    return {k: npz[k] for k in npz.files}
 
 
 @pytest.fixture(scope="session")

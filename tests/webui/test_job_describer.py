@@ -23,6 +23,19 @@ ANALYZE_LEAVES = [
     {"path": "runs_dir", "value": "/data/datasets/traunstein"},
 ]
 
+EXTRACT_LEAVES = [
+    {"path": "dataset_filter",    "value": "[]"},
+    {"path": "fit_k_values",      "value": "[5]"},
+    {"path": "fit_lambda_values", "value": "[0.01]"},
+    {"path": "fit_modes",         "value": "['sigma', 'sigma_amp']"},
+    {"path": "output_suffix",     "value": "None"},
+]
+
+ANALYZE_PARAMS_LEAVES = [
+    {"path": "run_tags",   "value": "[]"},
+    {"path": "params_dir", "value": "/data/datasets/traunstein"},
+]
+
 
 class KnownScriptPaths:
     """Stand-in project paths answering only which script keys exist.
@@ -86,6 +99,25 @@ def test_pre_process_named_dataset_appears():
 def test_analyze_empty_run_tags_reads_all_trials():
     """An empty run_tags list reads as all trials alongside the runs root."""
     text = _describer({"analyze_preprocessing": ANALYZE_LEAVES}).describe("analyze_preprocessing", "python", {})
+
+    assert "trials all trials" in text
+    assert "root traunstein" in text
+
+
+def test_extract_params_shows_its_sweep_grids():
+    """The extraction sweep is described by its dataset filter, K grid, lambda grid and fit modes."""
+    text = _describer({"extract_params": EXTRACT_LEAVES}).describe("extract_params", "python", {})
+
+    assert "datasets all datasets" in text
+    assert "K [5]" in text
+    assert "lambda [0.01]" in text
+    assert "modes [sigma, sigma_amp]" in text
+    assert "suffix" not in text
+
+
+def test_analyze_param_extraction_reads_all_trials():
+    """An empty run_tags list reads as all trials alongside the params root."""
+    text = _describer({"analyze_param_extraction": ANALYZE_PARAMS_LEAVES}).describe("analyze_param_extraction", "python", {})
 
     assert "trials all trials" in text
     assert "root traunstein" in text

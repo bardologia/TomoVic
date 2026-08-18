@@ -74,11 +74,11 @@ def test_every_library_router_is_bound_to_a_real_library(server):
 
 
 def test_the_script_catalog_lists_every_console_entry(server):
-    """The catalog endpoint lists exactly the three console entry points."""
+    """The catalog endpoint lists exactly the five console entry points."""
     status, payload = _get(server, "/api/scripts")
 
     assert status == 200
-    assert {entry["key"] for entry in payload["scripts"]} == {"pre_process", "analyze_preprocessing", "compare_preprocessing_trials"}
+    assert {entry["key"] for entry in payload["scripts"]} == {"pre_process", "extract_params", "analyze_preprocessing", "analyze_param_extraction", "compare_preprocessing_trials"}
 
 
 def test_an_unknown_endpoint_is_still_a_404(server):

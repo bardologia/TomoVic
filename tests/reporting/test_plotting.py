@@ -510,3 +510,24 @@ def test_report_save_keeps_png(plotter, tmp_path):
     assert out == tmp_path / "line.png"
     with Image.open(out) as img:
         assert img.format == "PNG"
+
+
+@pytest.mark.real_data
+@pytest.mark.slow
+def test_imshow_real_parameter_window_with_clim(plotter, parameters, small_window, tmp_path):
+    """Verifies a real parameter window renders and saves under percentile colour limits."""
+    window = np.asarray(parameters[0][small_window], dtype=np.float32)
+    lo, hi = plotter._shared_clim(window, q_low=2.0, q_high=98.0)
+
+    out = plotter._imshow_figure(
+        window,
+        x_label = "range",
+        y_label = "azimuth",
+        title   = "param 0",
+        cmap    = "viridis",
+        vmin    = lo,
+        vmax    = hi,
+        path    = tmp_path / "param.png",
+    )
+    assert out.exists()
+    assert out.stat().st_size > 0

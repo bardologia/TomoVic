@@ -2,13 +2,15 @@
 
 Writes run directories following the ``data/dataset.json`` layout the
 preprocessing pipeline produces, with a full tomogram, a primary SLC, an
-optional DEM and optional track parameters, and provides helpers that register
-a runs root and drive CubeExplorer loading over those runs.
+optional DEM, optional track parameters and optional Gaussian parameter runs
+under ``params/<tag>``, and provides helpers that register a runs root and
+drive CubeExplorer loading over those runs.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -110,6 +112,69 @@ def make_preproc_run(base: Path, group: str = "group", name: str = "run_a", seed
     return run_dir
 
 
+def make_param_run(run_dir: Path, tag: str, k: int = 2, seed: int = 1, parameters: np.ndarray | None = None) -> Path:
+    """Writes one synthetic Gaussian parameter run under a preprocessing run.
+
+    Follows the on-disk schema of the parameter-extraction pipeline: a
+    ``params/<tag>`` directory holding ``parameters.npy``,
+    ``param_extraction_meta.json`` and ``fit_diagnostics.npz`` describing the
+    parametrized tomogram fitted from the raw data.
+
+    Args:
+        run_dir: Preprocessing run directory receiving ``params/<tag>``.
+        tag: Name of the parameter run directory.
+        k: Number of Gaussian slots when the parameters are generated.
+        seed: Seed of the generator filling the parameter cube.
+        parameters: Parameter cube of shape (3 * k, N_AZ, N_RG) written as-is
+            when given, interleaved per slot as amplitude, mean in metres and
+            sigma in metres; its slot count overrides ``k``.
+
+    Returns:
+        Path of the created parameter run directory.
+    """
+    param_dir = run_dir / "params" / tag
+    param_dir.mkdir(parents=True)
+
+    if parameters is None:
+        rng        = np.random.default_rng(seed)
+        parameters = np.zeros((3 * k, N_AZ, N_RG), dtype=np.float32)
+        for slot in range(k):
+            parameters[3 * slot]     = rng.uniform(0.1, 1.0, (N_AZ, N_RG))
+            parameters[3 * slot + 1] = rng.uniform(HEIGHT_RANGE[0], HEIGHT_RANGE[1], (N_AZ, N_RG))
+            parameters[3 * slot + 2] = rng.uniform(1.0, 5.0, (N_AZ, N_RG))
+    else:
+        parameters = np.asarray(parameters, dtype=np.float32)
+        k          = parameters.shape[0] // 3
+
+    np.save(param_dir / "parameters.npy", parameters.astype(np.float32))
+    np.savez(param_dir / "fit_diagnostics.npz", final_loss=np.zeros((N_AZ, N_RG), dtype=np.float32))
+
+    meta = {
+        "timestamp"           : "2026-08-18T00:00:00",
+        "processed_data_path" : str(run_dir),
+        "source_tomogram"     : str(run_dir / "data" / "tomogram_full.npy"),
+        "height_range"        : list(HEIGHT_RANGE),
+        "output_directory"    : str(param_dir),
+        "output_prefix"       : "params",
+        "output_suffix"       : tag,
+        "parameters_npy"      : "parameters.npy",
+        "diagnostics_npz"     : "fit_diagnostics.npz",
+        "k_max"               : int(k),
+        "lambda_k"            : 0.01,
+        "sigma_init_divisor"  : 4.0,
+        "activity_threshold"  : 0.001,
+        "threshold_factor"    : 0.25,
+        "truncation_index"    : N_ELEV,
+        "fit_sigma"           : True,
+        "fit_amplitude"       : False,
+        "fit_mean"            : False,
+        "fitting_method"      : "sigma_adam",
+    }
+    (param_dir / "param_extraction_meta.json").write_text(json.dumps(meta))
+
+    return param_dir
+
+
 def open_runs(base: Path, expected: int | None = None) -> tuple[CubeExplorer, list[str]]:
     """Registers a runs root and returns the explorer and the run ids under it.
 
@@ -147,5 +212,34 @@ def loaded_run(base: Path, **kwargs) -> tuple[CubeExplorer, str]:
 
     assert run_ids == [str(run_dir)]
     load_cube(explorer, run_ids[0])
+
+    return explorer, run_ids[0]
+
+
+def loaded_param_run(base: Path, tag: str = "params_k2", k: int = 2, parameters: np.ndarray | None = None, **kwargs) -> tuple[CubeExplorer, str]:
+    """Builds a run with one parameter run and loads both into an explorer.
+
+    Args:
+        base: Parent directory for the generated run.
+        tag: Name of the parameter run written under the run.
+        k: Number of Gaussian slots of the generated parameters.
+        parameters: Optional explicit parameter cube of shape (3 * k, N_AZ, N_RG).
+        **kwargs: Forwarded to ``make_preproc_run``.
+
+    Returns:
+        Tuple of the explorer and the loaded cube id.
+    """
+    run_dir = make_preproc_run(base, **kwargs)
+    make_param_run(run_dir, tag, k=k, parameters=parameters)
+
+    explorer, run_ids = open_runs(base, expected=1)
+    assert explorer.start_load(run_ids[0], param_tag=tag)["ok"]
+
+    deadline = time.time() + 30.0
+    while explorer.load_status()["state"] == "loading" and time.time() < deadline:
+        time.sleep(0.05)
+
+    status = explorer.load_status()
+    assert status["state"] == "ready", status
 
     return explorer, run_ids[0]

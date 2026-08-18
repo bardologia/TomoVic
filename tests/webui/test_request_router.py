@@ -23,7 +23,7 @@ from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 53
+ROUTE_COUNT   = 57
 SECTION_COUNT = 17
 
 RESOLUTIONS = [

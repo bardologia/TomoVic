@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 
+from configuration.sar.gaussian_config   import DatasetParameterPairing, GaussianConfig
 from configuration.sar.processing_config import (
     TomogramConfig,
     ParallelConfig,
@@ -15,6 +18,48 @@ from configuration.sar.processing_config import (
 )
 
 from tests.configuration._helpers import make_crop
+def test_gaussian_config_instantiates():
+    """Verifies GaussianConfig exposes three parameters per Gaussian and an ordered height range."""
+    cfg = GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0)
+    assert cfg.params_per_gaussian == 3
+    assert cfg.x_max > cfg.x_min
+
+
+def test_gaussian_config_asdict_round_trips():
+    """Verifies GaussianConfig survives a dataclasses.asdict round trip."""
+    cfg     = GaussianConfig(n_default_gaussians=3, x_min=0.0, x_max=1.0)
+    payload = dataclasses.asdict(cfg)
+    assert GaussianConfig(**payload) == cfg
+
+
+def test_parameter_pairing_returns_the_relative_run_layout():
+    """Verifies the parameter template is returned relative to the dataset root."""
+    template = DatasetParameterPairing.relative_template(Path("/data/ds"), Path("/data/ds/params/run_a/parameters.npy"))
+    assert template == Path("params/run_a/parameters.npy")
+
+
+def test_parameter_pairing_rejects_a_foreign_parameter_run():
+    """Verifies a parameter run outside the dataset root is rejected."""
+    with pytest.raises(ValueError, match="must live inside"):
+        DatasetParameterPairing.relative_template(Path("/data/ds_b"), Path("/data/ds_a/params/run_a/parameters.npy"))
+
+
+def test_gaussian_from_dataset_rejects_a_foreign_parameter_run(tmp_path):
+    """Verifies GaussianConfig.from_dataset rejects parameters belonging to another dataset."""
+    dataset_a = tmp_path / "ds_a"
+    dataset_b = tmp_path / "ds_b"
+    params    = dataset_a / "params" / "run_a"
+
+    (dataset_b / "meta").mkdir(parents=True)
+    params.mkdir(parents=True)
+
+    (dataset_b / "meta" / "config_state.json").write_text(json.dumps({"tomogram_config": {"height_range": [-20.0, 80.0]}}))
+    (params / "param_extraction_meta.json").write_text(json.dumps({"k_max": 2}))
+
+    with pytest.raises(ValueError, match="must live inside"):
+        GaussianConfig.from_dataset(dataset_b, params / "parameters.npy")
+
+
 def test_tomogram_config_defaults():
     """Verifies TomogramConfig defaults carry an ordered height range and container-typed arguments."""
     cfg = TomogramConfig()

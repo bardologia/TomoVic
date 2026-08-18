@@ -2,7 +2,7 @@
 
 Each entry point config is flattened into leaves and fed to LaunchLayout, which
 refuses any field it does not claim exactly once. The remaining tests pin the
-widget declarations of the three pages and exercise the validation paths that
+widget declarations of the pages and exercise the validation paths that
 reject unknown fields, duplicate claims, unclaimed leaves, malformed gate
 conditions and unbounded number widgets.
 """
@@ -21,13 +21,16 @@ from script_config_resolver import ScriptConfigResolver
 from tools.runtime.config_cli import ConfigCli
 
 from configuration.comparison            import PreprocessingComparisonConfig
+from configuration.param_extraction      import ExtractParamsEntryConfig, ParamExtractionInferenceConfig
 from configuration.sar.processing_config import PreProcessEntryConfig, PreprocessInferenceConfig
 
 _DISPATCH_ONLY = {"generate_tomogram", "generate_interferograms"}
 
 _PAGES = [
     ("pre_process",                  PreProcessEntryConfig),
+    ("extract_params",               ExtractParamsEntryConfig),
     ("analyze_preprocessing",        PreprocessInferenceConfig),
+    ("analyze_param_extraction",     ParamExtractionInferenceConfig),
     ("compare_preprocessing_trials", PreprocessingComparisonConfig),
 ]
 
@@ -78,12 +81,26 @@ def test_every_page_renders_in_single_mode(key, entry_config):
 
 
 def test_the_run_pickers_read_their_runs_dir_field():
-    """Both analysis pages expose run_tags through a multi dataset picker rooted at runs_dir."""
+    """The analysis pages expose run_tags through a multi dataset picker rooted at their runs root."""
     analyze = LaunchLayout().build("analyze_preprocessing",        _leaves(PreprocessInferenceConfig))
     compare = LaunchLayout().build("compare_preprocessing_trials", _leaves(PreprocessingComparisonConfig))
+    params  = LaunchLayout().build("analyze_param_extraction",     _leaves(ParamExtractionInferenceConfig))
 
     assert analyze["widgets"]["run_tags"] == {"kind": "dataset", "mode": "runs",         "multi": True, "baseFrom": "runs_dir"}
     assert compare["widgets"]["run_tags"] == {"kind": "dataset", "mode": "runs_compare", "multi": True, "baseFrom": "runs_dir"}
+    assert params["widgets"]["run_tags"]  == {"kind": "dataset", "mode": "param_trials", "multi": True, "baseFrom": "params_dir"}
+
+
+def test_the_extraction_sweep_exposes_its_grid_widgets():
+    """The extraction page renders the dataset filter as a picker and the K, lambda and mode grids as multi fields."""
+    layout = LaunchLayout().build("extract_params", _leaves(ExtractParamsEntryConfig))
+
+    assert layout["widgets"]["dataset_filter"]    == LaunchLayout.PICK_DATASETS
+    assert layout["widgets"]["fit_k_values"]      == LaunchLayout.MULTI_K
+    assert layout["widgets"]["fit_lambda_values"] == LaunchLayout.MULTI_LAMBDA
+    assert layout["widgets"]["fit_modes"]         == LaunchLayout.MULTI_FIT_MODES
+    assert layout["widgets"]["gpu_device_ids"]    == LaunchLayout.MULTI_GPUS
+    assert layout["widgets"]["parameter_workers"] == LaunchLayout.NUM_WORKERS
 
 
 def test_the_workers_widget_is_a_bounded_number():

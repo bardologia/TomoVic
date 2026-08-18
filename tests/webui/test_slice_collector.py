@@ -15,7 +15,7 @@ from cube_explorer import SliceCollector
 from web_logger    import WebLogger
 
 from tests.webui.conftest         import N_AZ, N_RG
-from tests.webui.preproc_fixtures import make_preproc_run, open_runs
+from tests.webui.preproc_fixtures import make_param_run, make_preproc_run, open_runs
 
 
 def _collector(base: Path) -> tuple[SliceCollector, list]:
@@ -75,6 +75,35 @@ def test_a_refused_slice_explains_itself_in_the_log(tmp_path, capsys):
 
     logged = capsys.readouterr().out
     assert "unknown cube id" in logged
+
+
+def test_collector_serves_the_param_source_of_a_single_tag_run(tmp_path):
+    """A run with exactly one parameter run lists and renders the parametrized tomogram."""
+    run_dir = make_preproc_run(tmp_path, "group", "run_a")
+    make_param_run(run_dir, "params_k2")
+
+    collector, ids = _collector(tmp_path)
+
+    info = collector.info(ids[0])
+    assert info["ok"], info
+    assert info["sources"] == ["full", "param"]
+    assert set(info["intensity"]) == {"full", "param"}
+
+    png = collector.slice_png(ids[0], "param", "range", az=1, rg=1)
+    assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_collector_skips_param_when_several_tags_exist(tmp_path):
+    """A run with several parameter runs lists only the raw source, since no tag can be chosen here."""
+    run_dir = make_preproc_run(tmp_path, "group", "run_a")
+    make_param_run(run_dir, "params_a")
+    make_param_run(run_dir, "params_b")
+
+    collector, ids = _collector(tmp_path)
+
+    info = collector.info(ids[0])
+    assert info["ok"] and info["sources"] == ["full"]
+    assert collector.slice_png(ids[0], "param", "range", az=0, rg=0) is None
 
 
 def test_collect_refuses_an_existing_collection_name(tmp_path):

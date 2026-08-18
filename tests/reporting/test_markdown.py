@@ -343,3 +343,15 @@ def test_table_render_real_baselines(baselines_json):
         table.add_row(str(k), ScalarFormatter.format_scalar(v) if not isinstance(v, (dict, list)) else "...")
     lines = table.render()
     assert all(line.count("|") == 3 for line in lines)
+
+
+@pytest.mark.real_data
+def test_kv_table_with_real_extraction_meta(param_extraction_meta):
+    """Verifies a key-value table built from real extraction metadata renders every scalar key."""
+    scalars = {k: v for k, v in param_extraction_meta.items() if isinstance(v, (str, int, float))}
+    doc     = MarkdownDoc("Extraction")
+    doc.kv_table(scalars)
+    text = doc.render()
+
+    for key in list(scalars)[:5]:
+        assert f"`{key}`" in text

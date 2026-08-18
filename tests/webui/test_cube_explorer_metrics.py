@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 from tests.webui.conftest         import N_AZ, N_ELEV, N_RG
-from tests.webui.preproc_fixtures import loaded_run
+from tests.webui.preproc_fixtures import loaded_param_run, loaded_run
 
 
 def test_cbar_png_whitelist(tmp_path):
@@ -73,6 +73,23 @@ def test_points_bin_threshold_and_cap(tmp_path):
     capped_header = np.frombuffer(capped, dtype=np.float32)[:4]
     assert int(capped_header[0]) == 10
     assert int(capped_header[1]) == N_ELEV * N_AZ * N_RG
+
+
+def test_points_bin_serves_the_parametrized_tomogram(tmp_path):
+    """Checks the reconstructed point cloud counts every voxel and honours the subsampling cap."""
+    explorer, cube_id = loaded_param_run(tmp_path)
+
+    blob = explorer.points_bin(cube_id, "param", amp_min=0.0, max_points=0)
+    raw  = np.frombuffer(blob, dtype=np.float32)
+
+    header, rows = raw[:4], raw[4:].reshape(-1, 4)
+    total        = N_ELEV * N_AZ * N_RG
+    assert int(header[0]) == total and int(header[1]) == total
+    assert np.all((rows[:, 2] >= -10.0) & (rows[:, 2] <= 30.0))
+    assert np.all(rows[:, 3] >= 0.0)
+
+    capped = np.frombuffer(explorer.points_bin(cube_id, "param", amp_min=0.0, max_points=10), dtype=np.float32)[:4]
+    assert int(capped[0]) == 10 and int(capped[1]) == total
 
 
 def test_points_bin_rejects_unknown_source_and_unloaded_cube(tmp_path):
