@@ -21,15 +21,18 @@ conda create -n Dune python=3.11
 conda activate Dune
 
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install pytest==9.0.3 pyflakes==3.4.0
+python -m pip install -r requirements.txt
+python -m pip install pytest==9.0.3 pyflakes==3.4.0
 ```
 
-Install inside the activated environment, not with the system Python. The pins need
-Python 3.11 or newer and a current pip: `numpy==2.4.3` publishes no wheels for older
-Pythons, so an install attempt from Python 3.10 or below fails with "No matching
-distribution found for numpy". Check with `python -V` and `python -m pip -V` if pip
-reports that error.
+Use `python -m pip`, not the bare `pip` command: on shared machines `pip` can resolve to
+the system pip even inside an activated env, and the system Python then rejects the pins.
+The pins need Python 3.11 or newer: `numpy==2.4.3` publishes no wheels for older Pythons,
+so an install attempt from Python 3.10 or below fails with "No matching distribution
+found for numpy". Two symptoms identify that situation: pip printing "Defaulting to user
+installation because normal site-packages is not writeable", and `python -V` inside the
+env not reporting 3.11. In the second case the env lacks its own Python; recreate it with
+the version pinned as above.
 
 Keep the name `Dune` unless you have a reason not to: `webui/run.sh` and
 `ProjectPaths.PRIORITY` in `webui/project_paths.py` look for that environment first when
