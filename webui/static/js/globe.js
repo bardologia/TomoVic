@@ -16,6 +16,7 @@ class TomogramGlobe {
     this.clampEl = refs.clamp;
     this.pointsEl = refs.points;
     this.tracksEl = refs.tracks;
+    this.flyEl = refs.fly;
     this.reframeEl = refs.reframe;
     this.atEl = refs.at;
     this.container = refs.container;
@@ -34,6 +35,11 @@ class TomogramGlobe {
     this.trackLayer = null;
     this.debounceTimer = null;
     this.token = 0;
+    this.flightBasis = null;
+    this.flightGroup = null;
+    this.flightFrame = null;
+    this.flightT0 = null;
+    this.pointAlong = null;
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -46,6 +52,7 @@ class TomogramGlobe {
     this.clampEl.addEventListener("change", () => this._redraw());
     this.pointsEl.addEventListener("change", () => this._onPointsToggle());
     this.tracksEl.addEventListener("change", () => this._onTracksToggle());
+    this.flyEl.addEventListener("change", () => this._onFlyToggle());
     this.reframeEl.addEventListener("click", () => this._flyToScene(true));
   }
 
@@ -56,14 +63,20 @@ class TomogramGlobe {
     const hasTracks = !!(meta.globe && meta.globe.tracks);
     this.tracksEl.disabled = !hasTracks;
     this.tracksEl.title = hasTracks ? "" : (meta.globe && meta.globe.tracks_note) || "no track selection stored for this stamp";
+    this.flyEl.disabled = !hasTracks;
+    if (!hasTracks) this.flyEl.checked = false;
 
+    this._stopFlight();
     this.points = null;
     this.muRange = null;
     this.shown = 0;
     this.flown = false;
+    this.flightBasis = null;
+    this.pointAlong = null;
     if (this.collection) {
       this.collection.removeAll();
       this.trackLayer.removeAll();
+      this.flightGroup = null;
       this.viewer.scene.requestRender();
     }
     this._syncThresholdLabel();
@@ -165,10 +178,23 @@ class TomogramGlobe {
   }
 
   _onTracksToggle() {
+    if (!this.tracksEl.checked) this.flyEl.checked = false;
     if (!this.viewer) return;
     this._redrawTracks();
     this._syncStatus();
     this._flyToScene(true);
+    this.viewer.scene.requestRender();
+  }
+
+  _onFlyToggle() {
+    if (this.flyEl.checked && !this.tracksEl.checked) {
+      this.tracksEl.checked = true;
+      this._onTracksToggle();
+      return;
+    }
+    if (!this.viewer) return;
+    this._redrawTracks();
+    this._syncStatus();
     this.viewer.scene.requestRender();
   }
 
@@ -270,6 +296,8 @@ class TomogramGlobe {
     const [ampLo, ampHi] = meta.intensity[this.source];
 
     this.collection.removeAll();
+    this.flightBasis = globe.tracks ? this._flightBasis(globe, anchor, up, lift) : null;
+    this.pointAlong = this.flightBasis ? new Float32Array(rows.length / 5) : null;
 
     for (let i = 0; i < rows.length; i += 5) {
       const mu = rows[i + 3];
@@ -282,12 +310,21 @@ class TomogramGlobe {
       const upComp = rows[i] * up.x + rows[i + 1] * up.y + rows[i + 2] * up.z;
       const rise = upComp * (exagg - 1) + lift;
 
+      const position = new Cesium.Cartesian3(
+        anchor.x + rows[i] + up.x * rise,
+        anchor.y + rows[i + 1] + up.y * rise,
+        anchor.z + rows[i + 2] + up.z * rise,
+      );
+
+      if (this.pointAlong) {
+        const basis = this.flightBasis;
+        this.pointAlong[i / 5] = (position.x - basis.first.x) * basis.forward.x
+          + (position.y - basis.first.y) * basis.forward.y
+          + (position.z - basis.first.z) * basis.forward.z;
+      }
+
       this.collection.add({
-        position: new Cesium.Cartesian3(
-          anchor.x + rows[i] + up.x * rise,
-          anchor.y + rows[i + 1] + up.y * rise,
-          anchor.z + rows[i + 2] + up.z * rise,
-        ),
+        position,
         color: Cesium.Color.fromBytes(rgb[0], rgb[1], rgb[2], 255),
         pixelSize: 2.5,
       });
@@ -314,14 +351,17 @@ class TomogramGlobe {
     if (this.tracksEl.checked && globe.tracks) {
       const beam = globe.tracks.beam;
       trackNote = ` · ${globe.tracks.labels.length} tracks · look ${beam.look_near_deg.toFixed(1)}-${beam.look_far_deg.toFixed(1)}°`;
+      if (this.flyEl.checked) trackNote += " · flight loop";
     }
 
     this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
   }
 
   _redrawTracks() {
+    this._stopFlight();
     if (!this.trackLayer) return;
     this.trackLayer.removeAll();
+    this.flightGroup = null;
 
     const meta = this.host.meta;
     if (!meta || !meta.globe || !meta.globe.tracks || !this.tracksEl.checked) return;
@@ -350,13 +390,86 @@ class TomogramGlobe {
     const near = this._place(tracks.beam.near, anchor, up, lift);
     const far = this._place(tracks.beam.far, anchor, up, lift);
 
-    lines.add({ positions: [apex, near], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor }) });
-    lines.add({ positions: [apex, far], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor }) });
-    lines.add({ positions: [near, far], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor.withAlpha(0.5) }) });
+    const beamLines = this.trackLayer.add(new Cesium.PolylineCollection());
+    beamLines.add({ positions: [apex, near], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor }) });
+    beamLines.add({ positions: [apex, far], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor }) });
+    beamLines.add({ positions: [near, far], width: 2, material: Cesium.Material.fromType("Color", { color: beamColor.withAlpha(0.5) }) });
 
-    this.trackLayer.add(this._meshPrimitive([apex, near, far], Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.18)));
+    const swath = this.trackLayer.add(this._meshPrimitive([apex, near, far], Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.18)));
 
-    if (refLine) this._addPlaneGlyph(apex, refLine, up);
+    let glyph = null;
+    if (refLine) glyph = this._addPlaneGlyph(apex, refLine, up);
+
+    this.flightGroup = [beamLines, swath, glyph].filter(Boolean);
+
+    if (this.flyEl.checked && this.flightBasis) this._startFlight();
+  }
+
+  _flightBasis(globe, anchor, up, lift) {
+    const tracks = globe.tracks;
+    const refIdx = tracks.labels.indexOf(tracks.reference);
+    if (refIdx < 0) return null;
+
+    const line = tracks.lines[refIdx];
+    const first = this._place(line[0], anchor, up, lift);
+    const last = this._place(line[line.length - 1], anchor, up, lift);
+
+    const span = Cesium.Cartesian3.subtract(last, first, new Cesium.Cartesian3());
+    const length = Cesium.Cartesian3.magnitude(span);
+    if (length < 1.0) return null;
+    const forward = Cesium.Cartesian3.divideByScalar(span, length, new Cesium.Cartesian3());
+
+    const apex = this._place(tracks.beam.apex, anchor, up, lift);
+    const apexAlong = Cesium.Cartesian3.dot(Cesium.Cartesian3.subtract(apex, first, new Cesium.Cartesian3()), forward);
+
+    return { first, forward, length, apexAlong };
+  }
+
+  _startFlight() {
+    this.flightT0 = null;
+    this.flightFrame = requestAnimationFrame((now) => this._flightStep(now));
+  }
+
+  _stopFlight() {
+    if (this.flightFrame !== null) {
+      cancelAnimationFrame(this.flightFrame);
+      this.flightFrame = null;
+    }
+    this.flightT0 = null;
+
+    if (this.collection && this.pointAlong) {
+      for (let i = 0; i < this.collection.length; i += 1) this.collection.get(i).show = true;
+    }
+    if (this.flightGroup) {
+      this.flightGroup.forEach((item) => { item.modelMatrix = Cesium.Matrix4.clone(Cesium.Matrix4.IDENTITY); });
+    }
+    if (this.viewer) this.viewer.scene.requestRender();
+  }
+
+  _flightStep(now) {
+    if (this.host.view !== "globe" || !this.flightBasis || !this.flightGroup) {
+      this._stopFlight();
+      return;
+    }
+
+    if (this.flightT0 === null) this.flightT0 = now;
+    const period = 12000;
+    const frac = ((now - this.flightT0) % period) / period;
+    const t = Math.min(frac / 0.85, 1.0);
+    const s = this.flightBasis.length * t;
+
+    const shift = Cesium.Cartesian3.multiplyByScalar(this.flightBasis.forward, s - this.flightBasis.apexAlong, new Cesium.Cartesian3());
+    const matrix = Cesium.Matrix4.fromTranslation(shift);
+    this.flightGroup.forEach((item) => { item.modelMatrix = matrix; });
+
+    if (this.pointAlong) {
+      for (let i = 0; i < this.pointAlong.length; i += 1) {
+        this.collection.get(i).show = this.pointAlong[i] <= s;
+      }
+    }
+
+    this.viewer.scene.requestRender();
+    this.flightFrame = requestAnimationFrame((next) => this._flightStep(next));
   }
 
   _addPlaneGlyph(apex, refLine, up) {
@@ -380,7 +493,7 @@ class TomogramGlobe {
       apex.z + size * (f * forward.z + r * right.z + u * up.z),
     ));
 
-    this.trackLayer.add(this._meshPrimitive(vertices, Cesium.Color.fromCssColorString("#ffd166")));
+    return this.trackLayer.add(this._meshPrimitive(vertices, Cesium.Color.fromCssColorString("#ffd166")));
   }
 
   _meshPrimitive(vertices, color) {

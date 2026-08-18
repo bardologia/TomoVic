@@ -219,6 +219,7 @@ class App {
         clamp     : document.getElementById("cube-globe-clamp"),
         points    : document.getElementById("cube-globe-points"),
         tracks    : document.getElementById("cube-globe-tracks"),
+        fly       : document.getElementById("cube-globe-fly"),
         reframe   : document.getElementById("cube-globe-reframe"),
         at        : document.getElementById("cube-globe-at"),
         container : document.getElementById("cube-globe-container"),
