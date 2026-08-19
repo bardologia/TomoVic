@@ -1,7 +1,7 @@
 # TomoVic
 
-A visualization console and preprocessing pipeline for SAR tomography data. It was
-lifted out of a working research codebase and stripped of everything related to machine
+TomoVic, the Tomography Visualization Console, is a preprocessing pipeline and web
+console for SAR tomography data. It was lifted out of a working research codebase and stripped of everything related to machine
 learning: what is left is the tooling to turn an F-SAR stack into a tomographic cube via
 PyRAT, and a local web console to explore the result: cube slices, transects, the DEM,
 the SLC amplitude, the acquisition geometry on a 3D globe, and the figures and reports
