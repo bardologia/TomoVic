@@ -96,28 +96,29 @@ def test_transect_png_samples_line(tmp_path):
     assert explorer.transect_png("wrong", "full", 0, 0, 1, 1) is None
 
 
-def test_slice_png_dem_flag_burns_terrain_line(tmp_path):
-    """Checks the DEM flag paints median-referenced terrain pixels into the slice and changes nothing without it."""
+def test_slice_png_dem_flag_shifts_columns_onto_terrain(tmp_path):
+    """Checks the DEM flag extends the elevation axis and moves each column by its terrain height."""
+    explorer, cube_id = _loaded_sloped_dem_run(tmp_path)
+
+    plain   = _decode_png(explorer.slice_png(cube_id, "full", "range", az=0, rg=2))
+    shifted = _decode_png(explorer.slice_png(cube_id, "full", "range", az=0, rg=2, dem=True))
+
+    assert shifted.shape[0] > plain.shape[0]
+    assert shifted.shape[1] == plain.shape[1]
+    assert (shifted[:, :, 3] == 0).any()
+
+    first_data_row = [int(np.flatnonzero(shifted[:, col, 3] > 0)[0]) for col in range(shifted.shape[1])]
+    assert first_data_row[0] < first_data_row[-1]
+
+
+def test_slice_png_dem_flag_blanks_nan_terrain_columns(tmp_path):
+    """Checks columns whose DEM pixel is NaN come out fully transparent."""
     explorer, cube_id = loaded_run(tmp_path, with_dem=True)
 
-    plain   = explorer.slice_png(cube_id, "full", "range", az=0, rg=2)
-    overlay = explorer.slice_png(cube_id, "full", "range", az=0, rg=2, dem=True)
+    shifted = _decode_png(explorer.slice_png(cube_id, "full", "range", az=0, rg=3, dem=True))
 
-    assert plain and overlay and overlay[:4] == b"\x89PNG"
-    assert not _has_dem_pixels(plain)
-    assert _has_dem_pixels(overlay)
-
-
-def test_slice_png_dem_flag_skips_nan_terrain_columns(tmp_path):
-    """Checks columns whose DEM pixel is NaN stay free of the terrain line."""
-    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
-
-    overlay = explorer.slice_png(cube_id, "full", "range", az=0, rg=3, dem=True)
-    rgba    = _decode_png(overlay)
-    marks   = (rgba[:, :, 0] > 0.99) & (rgba[:, :, 1] < 0.01) & (rgba[:, :, 2] > 0.99)
-
-    assert marks.any()
-    assert not marks[:, 2].any()
+    assert (shifted[:, 2, 3] == 0).all()
+    assert (shifted[:, 0, 3] > 0).all()
 
 
 def test_slice_png_dem_flag_without_dem_matches_plain_render(tmp_path):
@@ -127,27 +128,34 @@ def test_slice_png_dem_flag_without_dem_matches_plain_render(tmp_path):
     assert explorer.slice_png(cube_id, "full", "range", az=0, rg=2, dem=True) == explorer.slice_png(cube_id, "full", "range", az=0, rg=2)
 
 
-def test_transect_png_dem_flag_burns_terrain_line(tmp_path):
-    """Checks the DEM flag paints the terrain line along a transect section."""
-    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
+def test_transect_png_dem_flag_shifts_samples_onto_terrain(tmp_path):
+    """Checks the DEM flag extends a transect section along the shifted elevation span."""
+    explorer, cube_id = _loaded_sloped_dem_run(tmp_path)
 
-    plain   = explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1)
-    overlay = explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1, dem=True)
+    plain   = _decode_png(explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1))
+    shifted = _decode_png(explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1, dem=True))
 
-    assert overlay and overlay[:4] == b"\x89PNG"
-    assert not _has_dem_pixels(plain)
-    assert _has_dem_pixels(overlay)
+    assert shifted.shape[0] > plain.shape[0]
+    assert shifted.shape[1] == plain.shape[1]
+    assert (shifted[:, :, 3] == 0).any()
+
+
+def _loaded_sloped_dem_run(tmp_path) -> tuple:
+    """Builds and loads a run whose DEM descends linearly along azimuth."""
+    run_dir = make_preproc_run(tmp_path, with_dem=True)
+    dem     = 680.0 - 15.0 * np.arange(N_AZ, dtype=np.float32)[:, None] + np.zeros((1, N_RG), dtype=np.float32)
+    np.save(run_dir / "data" / "dem_full.npy", dem)
+
+    explorer, run_ids = open_runs(tmp_path, expected=1)
+    load_cube(explorer, run_ids[0])
+
+    return explorer, run_ids[0]
 
 
 def _decode_png(png: bytes) -> np.ndarray:
     """Decodes PNG bytes into a float RGBA array of shape (rows, columns, 4)."""
+    assert png and png[:4] == b"\x89PNG"
     return plt.imread(io.BytesIO(png))
-
-
-def _has_dem_pixels(png: bytes) -> bool:
-    """Returns whether the decoded PNG holds any pixel of the DEM line colour."""
-    rgba = _decode_png(png)
-    return bool(((rgba[:, :, 0] > 0.99) & (rgba[:, :, 1] < 0.01) & (rgba[:, :, 2] > 0.99)).any())
 
 
 def test_transect_cut_geometry(tmp_path):
