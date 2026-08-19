@@ -471,6 +471,9 @@ class CubeExplorer:
     SOURCES             = ("full", "param")
     CLOUD_CURVE_SOURCES = ("full", "param")
     GLOBE_SOURCES       = ("full", "param")
+    GLOBE_CACHE_ENTRIES = 12
+    GLOBE_CACHE_BYTES   = 32 * 1024 * 1024
+    GLOBE_WARM_POINTS   = 60000
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
@@ -478,13 +481,14 @@ class CubeExplorer:
 
     def __init__(self, logger: WebLogger) -> None:
         """Builds the explorer with an idle load status and no cube loaded."""
-        self.logger   = logger
-        self.archiver = SliceFigureArchiver()
-        self.roots    = CatalogRoots()
-        self.scanner  = RunScanner(self.roots)
-        self.lock     = threading.Lock()
-        self.loaded   = None
-        self.status   = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
+        self.logger      = logger
+        self.archiver    = SliceFigureArchiver()
+        self.roots       = CatalogRoots()
+        self.scanner     = RunScanner(self.roots)
+        self.lock        = threading.Lock()
+        self.loaded      = None
+        self.globe_blobs = LruCache(self.GLOBE_CACHE_ENTRIES)
+        self.status      = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
 
     def list_cubes(self, base: str) -> dict:
         """Lists the preprocessing runs available under a runs root.
@@ -549,6 +553,7 @@ class CubeExplorer:
             self.loaded = None
             self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "error": ""}
 
+        self.globe_blobs.clear()
         threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
         return {"ok": True}
 
@@ -862,6 +867,11 @@ class CubeExplorer:
         if geo is None or source not in self.GLOBE_SOURCES:
             return None
 
+        key    = f"{cube_id}|{source}|{amp_min!r}|{max_points}"
+        cached = self.globe_blobs.get(key)
+        if cached is not None:
+            return cached
+
         resolved = self._point_rows(cube_id, source, amp_min, max_points)
         if resolved is None:
             return None
@@ -883,7 +893,34 @@ class CubeExplorer:
 
         globe_rows = np.concatenate([offsets, rows[:, 2:3], rows[:, 3:4]], axis=1)
         header     = np.array([globe_rows.shape[0], total, 0.0, 0.0], dtype=np.float32)
-        return header.tobytes() + np.ascontiguousarray(globe_rows).tobytes()
+        blob       = header.tobytes() + np.ascontiguousarray(globe_rows).tobytes()
+
+        if len(blob) <= self.GLOBE_CACHE_BYTES:
+            self.globe_blobs.put(key, blob)
+        return blob
+
+    def _warm_globe_blobs(self, cube_id: str) -> None:
+        """Precomputes the default-view globe blob of every source into the cache.
+
+        Runs after a cube load so the first globe render and subsequent source
+        swaps are served from cache instead of rescanning the memory-mapped
+        cubes. The amplitude floors mirror the front-end threshold slider at its
+        default position of zero.
+
+        Args:
+            cube_id: Id of the freshly loaded cube.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id or self.loaded["geo"] is None:
+                return
+            meta = self.loaded["meta"]
+
+        for source in self.GLOBE_SOURCES:
+            if source not in meta["sources"]:
+                continue
+
+            amp_min = float(meta["intensity"][source][0])
+            self.globe_points_bin(cube_id, source, amp_min, self.GLOBE_WARM_POINTS)
 
     def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
         """Renders an elevation section along an arbitrary line as a PNG.
@@ -1312,6 +1349,12 @@ class CubeExplorer:
                 self.status = {"state": "error", "id": cube_id, "progress": 0.0, "stage": "", "error": str(exc)}
 
             self.logger.error(f"cube load failed: {cube_id}: {exc}")
+            return
+
+        try:
+            self._warm_globe_blobs(cube_id)
+        except Exception as exc:
+            self.logger.error(f"globe warm failed: {cube_id}: {exc}")
 
     def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
