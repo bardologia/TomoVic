@@ -972,7 +972,7 @@ class CubeExplorer:
             entry = entries[source]
             data, heights, vmin, vmax = self._transect_cut(entry, az0, rg0, az1, rg1, space)
             if track is not None:
-                data, heights = self._terrain_shift(data, heights, track)
+                data, heights = self._terrain_shift(data, heights, track, fill=vmin)
             saved = self.archiver.render_transect(data, heights, vmin, vmax, source, (az0, rg0), (az1, rg1), space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap))
             files.append(saved.name)
 
@@ -1057,7 +1057,7 @@ class CubeExplorer:
                 data, heights, vmin, vmax = self._cut(entries[source], axis, az, rg, space)
                 track = self._slice_dem_track(cube_id, axis, az, rg) if dem else None
                 if track is not None:
-                    data, heights = self._terrain_shift(data, heights, track)
+                    data, heights = self._terrain_shift(data, heights, track, fill=vmin)
                 saved = self.archiver.render(data, heights, vmin, vmax, source, axis, az, rg, space, out_dir / f"{axis}_{source}_{space}.png", cmap=self._entry_cmap(entries[source], cmap))
                 files.append(saved.name)
 
@@ -1219,39 +1219,33 @@ class CubeExplorer:
                 for the plain cut.
 
         Returns:
-            PNG bytes of the cut, top row at the highest elevation. Plain cuts
-            are opaque; terrain-corrected cuts carry transparent pixels where the
-            shifted columns leave no data.
+            PNG bytes of the cut, top row at the highest elevation. Cells the
+            shifted columns leave uncovered carry the colormap's lower colour
+            limit, blending with the empty tomogram background.
         """
+        if track is not None:
+            data, _ = self._terrain_shift(data, heights, track, fill=vmin)
+
         buf = io.BytesIO()
-
-        if track is None:
-            plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
-            return buf.getvalue()
-
-        shifted, _ = self._terrain_shift(data, heights, track)
-
-        norm = plt.Normalize(vmin=vmin, vmax=vmax, clip=True)
-        rgba = (plt.get_cmap(self._entry_cmap(entry, cmap))(norm(np.nan_to_num(shifted, nan=vmin))) * 255).astype(np.uint8)
-        rgba[..., 3] = np.where(np.isfinite(shifted), 255, 0)
-
-        plt.imsave(buf, np.flipud(rgba), format="png")
+        plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
         return buf.getvalue()
 
     @staticmethod
-    def _terrain_shift(data: np.ndarray, heights: np.ndarray, track: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _terrain_shift(data: np.ndarray, heights: np.ndarray, track: np.ndarray, fill: float) -> tuple[np.ndarray, np.ndarray]:
         """Shifts every column of a cut vertically by its terrain height.
 
         Each column moves up by its median-referenced terrain height, rounded to
         whole elevation bins, and the elevation axis is extended to hold the
-        shifted span. Cells no column covers stay NaN, and columns whose terrain
-        height is NaN are blanked entirely.
+        shifted span. Cells no column covers take the fill value, and columns
+        whose terrain height is NaN are filled entirely.
 
         Args:
             data: Cut of shape (elevation bins, samples), ascending elevation.
             heights: Elevation axis in metres, ascending, one entry per row.
             track: Median-referenced DEM terrain heights in metres, one per
                 sample column.
+            fill: Value written into cells the shifted columns leave uncovered,
+                typically the cut's lower colour limit.
 
         Returns:
             Tuple of the float32 shifted cut of shape (extended bins, samples)
@@ -1272,7 +1266,7 @@ class CubeExplorer:
         lo = int(offsets[finite].min()) if finite.any() else 0
         hi = int(offsets[finite].max()) if finite.any() else 0
 
-        shifted = np.full((n_elev + hi - lo, data.shape[1]), np.nan, dtype=np.float32)
+        shifted = np.full((n_elev + hi - lo, data.shape[1]), np.float32(fill), dtype=np.float32)
 
         cols = np.flatnonzero(finite)
         rows = (offsets[cols] - lo)[None, :] + np.arange(n_elev)[:, None]
