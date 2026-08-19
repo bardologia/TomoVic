@@ -97,7 +97,7 @@ def test_transect_png_samples_line(tmp_path):
 
 
 def test_slice_png_dem_flag_shifts_columns_onto_terrain(tmp_path):
-    """Checks the DEM flag extends the elevation axis and moves each column by its terrain height."""
+    """Checks the DEM flag extends the elevation axis and fills the uncovered corners with the background colour."""
     explorer, cube_id = _loaded_sloped_dem_run(tmp_path)
 
     plain   = _decode_png(explorer.slice_png(cube_id, "full", "range", az=0, rg=2))
@@ -105,20 +105,19 @@ def test_slice_png_dem_flag_shifts_columns_onto_terrain(tmp_path):
 
     assert shifted.shape[0] > plain.shape[0]
     assert shifted.shape[1] == plain.shape[1]
-    assert (shifted[:, :, 3] == 0).any()
+    assert (shifted[:, :, 3] == 1.0).all()
 
-    first_data_row = [int(np.flatnonzero(shifted[:, col, 3] > 0)[0]) for col in range(shifted.shape[1])]
-    assert first_data_row[0] < first_data_row[-1]
+    assert _is_fill_colour(shifted[0, -1])
+    assert _is_fill_colour(shifted[-1, 0])
 
 
-def test_slice_png_dem_flag_blanks_nan_terrain_columns(tmp_path):
-    """Checks columns whose DEM pixel is NaN come out fully transparent."""
+def test_slice_png_dem_flag_fills_nan_terrain_columns(tmp_path):
+    """Checks columns whose DEM pixel is NaN come out entirely in the background colour."""
     explorer, cube_id = loaded_run(tmp_path, with_dem=True)
 
     shifted = _decode_png(explorer.slice_png(cube_id, "full", "range", az=0, rg=3, dem=True))
 
-    assert (shifted[:, 2, 3] == 0).all()
-    assert (shifted[:, 0, 3] > 0).all()
+    assert all(_is_fill_colour(shifted[row, 2]) for row in range(shifted.shape[0]))
 
 
 def test_slice_png_dem_flag_without_dem_matches_plain_render(tmp_path):
@@ -137,7 +136,8 @@ def test_transect_png_dem_flag_shifts_samples_onto_terrain(tmp_path):
 
     assert shifted.shape[0] > plain.shape[0]
     assert shifted.shape[1] == plain.shape[1]
-    assert (shifted[:, :, 3] == 0).any()
+    assert (shifted[:, :, 3] == 1.0).all()
+    assert _is_fill_colour(shifted[0, -1])
 
 
 def _loaded_sloped_dem_run(tmp_path) -> tuple:
@@ -156,6 +156,11 @@ def _decode_png(png: bytes) -> np.ndarray:
     """Decodes PNG bytes into a float RGBA array of shape (rows, columns, 4)."""
     assert png and png[:4] == b"\x89PNG"
     return plt.imread(io.BytesIO(png))
+
+
+def _is_fill_colour(pixel: np.ndarray) -> bool:
+    """Returns whether an RGBA pixel carries the jet colormap's lower-limit colour."""
+    return bool(np.allclose(pixel, plt.get_cmap("jet")(0.0), atol=2.0 / 255.0))
 
 
 def test_transect_cut_geometry(tmp_path):
