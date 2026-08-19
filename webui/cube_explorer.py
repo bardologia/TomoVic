@@ -972,7 +972,7 @@ class CubeExplorer:
             entry = entries[source]
             data, heights, vmin, vmax = self._transect_cut(entry, az0, rg0, az1, rg1, space)
             if track is not None:
-                data, heights = self._terrain_shift(data, heights, track, fill=vmin)
+                data, heights = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entry, vmin))
             saved = self.archiver.render_transect(data, heights, vmin, vmax, source, (az0, rg0), (az1, rg1), space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap))
             files.append(saved.name)
 
@@ -1057,7 +1057,7 @@ class CubeExplorer:
                 data, heights, vmin, vmax = self._cut(entries[source], axis, az, rg, space)
                 track = self._slice_dem_track(cube_id, axis, az, rg) if dem else None
                 if track is not None:
-                    data, heights = self._terrain_shift(data, heights, track, fill=vmin)
+                    data, heights = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entries[source], vmin))
                 saved = self.archiver.render(data, heights, vmin, vmax, source, axis, az, rg, space, out_dir / f"{axis}_{source}_{space}.png", cmap=self._entry_cmap(entries[source], cmap))
                 files.append(saved.name)
 
@@ -1220,15 +1220,31 @@ class CubeExplorer:
 
         Returns:
             PNG bytes of the cut, top row at the highest elevation. Cells the
-            shifted columns leave uncovered carry the colormap's lower colour
-            limit, blending with the empty tomogram background.
+            shifted columns leave uncovered carry the entry's background value,
+            blending with the empty tomogram background.
         """
         if track is not None:
-            data, _ = self._terrain_shift(data, heights, track, fill=vmin)
+            data, _ = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entry, vmin))
 
         buf = io.BytesIO()
         plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
         return buf.getvalue()
+
+    @staticmethod
+    def _terrain_fill(entry: dict, vmin: float) -> float:
+        """Returns the background value uncovered terrain-shift cells take.
+
+        Diverging sources centre on zero, so their empty background is 0; every
+        other source fills with the lower colour limit.
+
+        Args:
+            entry: Loaded cube entry, whose ``diverging`` flag selects the value.
+            vmin: Lower colour limit of the cut.
+
+        Returns:
+            The fill value in the cut's value space.
+        """
+        return 0.0 if entry.get("diverging") else float(vmin)
 
     @staticmethod
     def _terrain_shift(data: np.ndarray, heights: np.ndarray, track: np.ndarray, fill: float) -> tuple[np.ndarray, np.ndarray]:
@@ -1245,7 +1261,7 @@ class CubeExplorer:
             track: Median-referenced DEM terrain heights in metres, one per
                 sample column.
             fill: Value written into cells the shifted columns leave uncovered,
-                typically the cut's lower colour limit.
+                typically the cut's background value.
 
         Returns:
             Tuple of the float32 shifted cut of shape (extended bins, samples)
