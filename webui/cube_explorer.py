@@ -47,9 +47,7 @@ class SliceFigureArchiver(PlotBase):
         "param" : "Parametrized tomogram (Gaussian)",
     }
 
-    DEM_COLOR = "magenta"
-
-    def render(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, axis: str, az: int, rg: int, space: str, path: Path, cmap: str = "jet", label: str | None = None, dem_track: np.ndarray | None = None) -> Path:
+    def render(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, axis: str, az: int, rg: int, space: str, path: Path, cmap: str = "jet", label: str | None = None) -> Path:
         """Saves one elevation cut through the cube as a figure.
 
         Args:
@@ -65,8 +63,6 @@ class SliceFigureArchiver(PlotBase):
             path: Destination PNG path.
             cmap: Matplotlib colormap name.
             label: Optional run label prefixed to the title.
-            dem_track: Optional median-referenced DEM terrain heights in metres, one entry per
-                sample column, drawn as a line over the cut.
 
         Returns:
             The path the figure was written to.
@@ -93,12 +89,11 @@ class SliceFigureArchiver(PlotBase):
                 colorbar_label = cbar,
                 figsize        = self.figsize(self.FULL_WIDTH),
             )
-            self._draw_dem(fig, extent, dem_track)
             return self._save(fig, path)
         finally:
             PlotBase.use_style(previous)
 
-    def render_transect(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, start: tuple, end: tuple, space: str, path: Path, cmap: str = "jet", dem_track: np.ndarray | None = None) -> Path:
+    def render_transect(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, start: tuple, end: tuple, space: str, path: Path, cmap: str = "jet") -> Path:
         """Saves an elevation section sampled along an arbitrary azimuth-range line.
 
         Args:
@@ -112,8 +107,6 @@ class SliceFigureArchiver(PlotBase):
             space: "normalized" when columns were peak-normalised, else "physical".
             path: Destination PNG path.
             cmap: Matplotlib colormap name.
-            dem_track: Optional median-referenced DEM terrain heights in metres, one entry per
-                transect sample, drawn as a line over the section.
 
         Returns:
             The path the figure was written to.
@@ -137,27 +130,9 @@ class SliceFigureArchiver(PlotBase):
                 colorbar_label = cbar,
                 figsize        = self.figsize(self.FULL_WIDTH),
             )
-            self._draw_dem(fig, extent, dem_track)
             return self._save(fig, path)
         finally:
             PlotBase.use_style(previous)
-
-    def _draw_dem(self, fig, extent: list, dem_track: np.ndarray | None) -> None:
-        """Draws the DEM terrain line over a rendered cut, keeping the cut's extent.
-
-        Args:
-            fig: Open figure whose first axes hold the cut image.
-            extent: Data coordinates of the image edges, [x0, x1, y0, y1].
-            dem_track: Terrain heights in metres, one per sample column, or None
-                to draw nothing.
-        """
-        if dem_track is None:
-            return
-
-        ax = fig.axes[0]
-        ax.plot(np.arange(dem_track.size) + 0.5, dem_track, color=self.DEM_COLOR, linewidth=1.2)
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
 
 
 class StitchedRaw:
@@ -477,8 +452,6 @@ class CubeExplorer:
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
-    DEM_RGBA = (255, 0, 255, 255)
-
     def __init__(self, logger: WebLogger) -> None:
         """Builds the explorer with an idle load status and no cube loaded."""
         self.logger      = logger
@@ -654,8 +627,8 @@ class CubeExplorer:
             rg: Range pixel index, clipped into range.
             space: "normalized" to peak-normalise columns, else "physical".
             cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, the terrain line is burnt
-                into the slice.
+            dem: When True and the run carries a DEM, every column is shifted
+                vertically by its median-referenced terrain height.
 
         Returns:
             PNG bytes, or None when the cube is not loaded or the axis is unknown.
@@ -934,8 +907,8 @@ class CubeExplorer:
             rg1: Range pixel index of the end point.
             space: "normalized" to peak-normalise columns, else "physical".
             cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, the terrain line is burnt
-                into the section.
+            dem: When True and the run carries a DEM, every sample column is
+                shifted vertically by its median-referenced terrain height.
 
         Returns:
             PNG bytes, or None when the cube carries no such source.
@@ -966,8 +939,8 @@ class CubeExplorer:
             rg1: Range pixel index of the end point, clipped into range.
             space: "physical" or "normalized".
             cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, the terrain line is drawn
-                over every figure.
+            dem: When True and the run carries a DEM, every sample column is
+                shifted vertically by its median-referenced terrain height.
 
         Returns:
             Dict with ``ok``, the absolute output ``dir``, its path ``rel`` to the
@@ -998,7 +971,9 @@ class CubeExplorer:
         for source in meta["sources"]:
             entry = entries[source]
             data, heights, vmin, vmax = self._transect_cut(entry, az0, rg0, az1, rg1, space)
-            saved = self.archiver.render_transect(data, heights, vmin, vmax, source, (az0, rg0), (az1, rg1), space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap), dem_track=track)
+            if track is not None:
+                data, heights = self._terrain_shift(data, heights, track)
+            saved = self.archiver.render_transect(data, heights, vmin, vmax, source, (az0, rg0), (az1, rg1), space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap))
             files.append(saved.name)
 
         self.logger.ok(f"saved {len(files)} transect figures to {out_dir}")
@@ -1050,8 +1025,8 @@ class CubeExplorer:
             rg: Range pixel index, clipped into range.
             space: "physical" or "normalized".
             cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, the terrain line is drawn
-                over every figure.
+            dem: When True and the run carries a DEM, every column is shifted
+                vertically by its median-referenced terrain height.
 
         Returns:
             Dict with ``ok``, the absolute output ``dir``, its path ``rel`` to the
@@ -1081,7 +1056,9 @@ class CubeExplorer:
             for axis in ("range", "azimuth"):
                 data, heights, vmin, vmax = self._cut(entries[source], axis, az, rg, space)
                 track = self._slice_dem_track(cube_id, axis, az, rg) if dem else None
-                saved = self.archiver.render(data, heights, vmin, vmax, source, axis, az, rg, space, out_dir / f"{axis}_{source}_{space}.png", cmap=self._entry_cmap(entries[source], cmap), dem_track=track)
+                if track is not None:
+                    data, heights = self._terrain_shift(data, heights, track)
+                saved = self.archiver.render(data, heights, vmin, vmax, source, axis, az, rg, space, out_dir / f"{axis}_{source}_{space}.png", cmap=self._entry_cmap(entries[source], cmap))
                 files.append(saved.name)
 
         self.logger.ok(f"saved {len(files)} slice figures to {out_dir}")
@@ -1137,9 +1114,9 @@ class CubeExplorer:
     def _slice_dem_track(self, cube_id: str, axis: str, az: int, rg: int) -> np.ndarray | None:
         """Returns the median-referenced DEM terrain heights along one slice.
 
-        The heights are referenced to the median terrain height, placing the
-        line on the tomogram's elevation axis with the same convention as the
-        point-cloud drape grid.
+        The heights are referenced to the median terrain height, expressing the
+        column shifts on the tomogram's elevation axis with the same convention
+        as the point-cloud drape grid.
 
         Args:
             cube_id: Id of the loaded cube.
@@ -1228,7 +1205,7 @@ class CubeExplorer:
         return az_idx, rg_idx
 
     def _cut_png(self, entry: dict, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, cmap: str, track: np.ndarray | None) -> bytes:
-        """Encodes one vertical cut as PNG bytes, optionally burning the DEM line.
+        """Encodes one vertical cut as PNG bytes, optionally terrain-corrected.
 
         Args:
             entry: Loaded cube entry, selecting the effective colormap.
@@ -1237,60 +1214,72 @@ class CubeExplorer:
             vmin: Lower colour limit.
             vmax: Upper colour limit.
             cmap: Requested colormap name.
-            track: DEM terrain heights in metres, one per sample column, or None
+            track: Median-referenced DEM terrain heights in metres, one per
+                sample column, shifting each column onto the terrain, or None
                 for the plain cut.
 
         Returns:
-            PNG bytes of the cut, top row at the highest elevation.
+            PNG bytes of the cut, top row at the highest elevation. Plain cuts
+            are opaque; terrain-corrected cuts carry transparent pixels where the
+            shifted columns leave no data.
         """
         buf = io.BytesIO()
 
         if track is None:
             plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
-        else:
-            plt.imsave(buf, self._burn_dem(data, heights, vmin, vmax, self._entry_cmap(entry, cmap), track), format="png")
+            return buf.getvalue()
 
+        shifted, _ = self._terrain_shift(data, heights, track)
+
+        norm = plt.Normalize(vmin=vmin, vmax=vmax, clip=True)
+        rgba = (plt.get_cmap(self._entry_cmap(entry, cmap))(norm(np.nan_to_num(shifted, nan=vmin))) * 255).astype(np.uint8)
+        rgba[..., 3] = np.where(np.isfinite(shifted), 255, 0)
+
+        plt.imsave(buf, np.flipud(rgba), format="png")
         return buf.getvalue()
 
-    @classmethod
-    def _burn_dem(cls, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, cmap: str, track: np.ndarray) -> np.ndarray:
-        """Colormaps a vertical cut and burns the DEM terrain line into it.
+    @staticmethod
+    def _terrain_shift(data: np.ndarray, heights: np.ndarray, track: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Shifts every column of a cut vertically by its terrain height.
 
-        Each finite terrain height is mapped to its elevation row and painted as
-        a three-pixel-tall DEM_RGBA mark; heights outside the elevation axis or
-        NaN DEM pixels leave their column untouched.
+        Each column moves up by its median-referenced terrain height, rounded to
+        whole elevation bins, and the elevation axis is extended to hold the
+        shifted span. Cells no column covers stay NaN, and columns whose terrain
+        height is NaN are blanked entirely.
 
         Args:
             data: Cut of shape (elevation bins, samples), ascending elevation.
             heights: Elevation axis in metres, ascending, one entry per row.
-            vmin: Lower colour limit.
-            vmax: Upper colour limit.
-            cmap: Effective colormap name.
-            track: DEM terrain heights in metres, one per sample column.
+            track: Median-referenced DEM terrain heights in metres, one per
+                sample column.
 
         Returns:
-            Uint8 RGBA image of shape (elevation bins, samples, 4), top row at
-            the highest elevation.
+            Tuple of the float32 shifted cut of shape (extended bins, samples)
+            and its extended ascending elevation axis in metres, sharing the
+            original bin size.
         """
-        norm = plt.Normalize(vmin=vmin, vmax=vmax, clip=True)
-        rgba = (plt.get_cmap(cmap)(norm(np.nan_to_num(np.asarray(data, dtype=np.float64), nan=vmin))) * 255).astype(np.uint8)
-
         n_elev = int(data.shape[0])
-        span   = float(heights[-1] - heights[0])
-        if span <= 0:
-            return np.flipud(rgba)
+        if n_elev < 2:
+            return np.asarray(data, dtype=np.float32), np.asarray(heights, dtype=np.float64)
 
+        bin_m  = float(heights[-1] - heights[0]) / (n_elev - 1)
         track  = np.asarray(track, dtype=np.float64)
         finite = np.isfinite(track)
 
-        rows         = np.full(track.size, -1, dtype=int)
-        rows[finite] = np.round((track[finite] - float(heights[0])) / span * (n_elev - 1)).astype(int)
-        cols         = np.flatnonzero((rows >= 0) & (rows < n_elev))
+        offsets         = np.zeros(track.size, dtype=int)
+        offsets[finite] = np.round(track[finite] / bin_m).astype(int)
 
-        for offset in (-1, 0, 1):
-            rgba[np.clip(rows[cols] + offset, 0, n_elev - 1), cols] = cls.DEM_RGBA
+        lo = int(offsets[finite].min()) if finite.any() else 0
+        hi = int(offsets[finite].max()) if finite.any() else 0
 
-        return np.flipud(rgba)
+        shifted = np.full((n_elev + hi - lo, data.shape[1]), np.nan, dtype=np.float32)
+
+        cols = np.flatnonzero(finite)
+        rows = (offsets[cols] - lo)[None, :] + np.arange(n_elev)[:, None]
+        shifted[rows, cols[None, :]] = np.asarray(data, dtype=np.float32)[:, cols]
+
+        shifted_heights = float(heights[0]) + (np.arange(shifted.shape[0]) + lo) * bin_m
+        return shifted, shifted_heights
 
     @classmethod
     def _entry_cmap(cls, entry: dict, cmap: str = "jet") -> str:
