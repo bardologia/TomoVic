@@ -65,6 +65,11 @@ class LruCache:
             while len(self.entries) > self.capacity:
                 self.entries.popitem(last=False)
 
+    def clear(self) -> None:
+        """Drops every entry."""
+        with self.lock:
+            self.entries.clear()
+
     def size(self) -> int:
         """Returns the number of entries currently held."""
         with self.lock:
