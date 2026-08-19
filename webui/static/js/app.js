@@ -225,6 +225,8 @@ class App {
         container : document.getElementById("cube-globe-container"),
       },
       cmapSel       : document.getElementById("cube-cmap"),
+      demWrap       : document.getElementById("cube-dem-wrap"),
+      demChk        : document.getElementById("cube-dem"),
       jumpAz        : document.getElementById("cube-jump-az"),
       jumpRg        : document.getElementById("cube-jump-rg"),
       jumpGo        : document.getElementById("cube-jump-go"),

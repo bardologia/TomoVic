@@ -2723,6 +2723,8 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 .res-cfg__size { font-weight: 400; color: var(--ink-faint); margin-left: 8px; }
 .res-log { max-height: 460px; overflow: auto; }
 .res-log code { font-size: 11px; line-height: 1.55; white-space: pre; }
+.cube-modes__dem { margin-left: auto; }
+.cube-modes__dem:not([hidden]) + .cube-modes__cmap { margin-left: 0; }
 .cube-modes__cmap { margin-left: auto; }
 
 /* ---------- slice collector ---------- */

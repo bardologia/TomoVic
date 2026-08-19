@@ -9,8 +9,10 @@ lazy reconstruction, the per-pixel slot readout and error handling.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from cube_explorer import CubeExplorer
@@ -92,6 +94,60 @@ def test_transect_png_samples_line(tmp_path):
 
     assert explorer.transect_png(cube_id, "banana", 0, 0, 1, 1) is None
     assert explorer.transect_png("wrong", "full", 0, 0, 1, 1) is None
+
+
+def test_slice_png_dem_flag_burns_terrain_line(tmp_path):
+    """Checks the DEM flag paints median-referenced terrain pixels into the slice and changes nothing without it."""
+    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
+
+    plain   = explorer.slice_png(cube_id, "full", "range", az=0, rg=2)
+    overlay = explorer.slice_png(cube_id, "full", "range", az=0, rg=2, dem=True)
+
+    assert plain and overlay and overlay[:4] == b"\x89PNG"
+    assert not _has_dem_pixels(plain)
+    assert _has_dem_pixels(overlay)
+
+
+def test_slice_png_dem_flag_skips_nan_terrain_columns(tmp_path):
+    """Checks columns whose DEM pixel is NaN stay free of the terrain line."""
+    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
+
+    overlay = explorer.slice_png(cube_id, "full", "range", az=0, rg=3, dem=True)
+    rgba    = _decode_png(overlay)
+    marks   = (rgba[:, :, 0] > 0.99) & (rgba[:, :, 1] < 0.01) & (rgba[:, :, 2] > 0.99)
+
+    assert marks.any()
+    assert not marks[:, 2].any()
+
+
+def test_slice_png_dem_flag_without_dem_matches_plain_render(tmp_path):
+    """Checks a run without a DEM renders identically whether the flag is set or not."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    assert explorer.slice_png(cube_id, "full", "range", az=0, rg=2, dem=True) == explorer.slice_png(cube_id, "full", "range", az=0, rg=2)
+
+
+def test_transect_png_dem_flag_burns_terrain_line(tmp_path):
+    """Checks the DEM flag paints the terrain line along a transect section."""
+    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
+
+    plain   = explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1)
+    overlay = explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1, dem=True)
+
+    assert overlay and overlay[:4] == b"\x89PNG"
+    assert not _has_dem_pixels(plain)
+    assert _has_dem_pixels(overlay)
+
+
+def _decode_png(png: bytes) -> np.ndarray:
+    """Decodes PNG bytes into a float RGBA array of shape (rows, columns, 4)."""
+    return plt.imread(io.BytesIO(png))
+
+
+def _has_dem_pixels(png: bytes) -> bool:
+    """Returns whether the decoded PNG holds any pixel of the DEM line colour."""
+    rgba = _decode_png(png)
+    return bool(((rgba[:, :, 0] > 0.99) & (rgba[:, :, 1] < 0.01) & (rgba[:, :, 2] > 0.99)).any())
 
 
 def test_transect_cut_geometry(tmp_path):

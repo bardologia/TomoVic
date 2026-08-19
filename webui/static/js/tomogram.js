@@ -194,9 +194,9 @@ class TomogramSweep {
       return `/api/cubes/plane?id=${id}&source=${source}&frac=${frac}&space=${space}&cmap=${cmap}`;
     }
     if (this.axis === "azimuth") {
-      return `/api/cubes/slice?id=${id}&source=${source}&axis=azimuth&az=${idx}&rg=0&space=${space}&cmap=${cmap}`;
+      return `/api/cubes/slice?id=${id}&source=${source}&axis=azimuth&az=${idx}&rg=0&space=${space}&cmap=${cmap}&dem=${this.host.demOn()}`;
     }
-    return `/api/cubes/slice?id=${id}&source=${source}&axis=range&az=0&rg=${idx}&space=${space}&cmap=${cmap}`;
+    return `/api/cubes/slice?id=${id}&source=${source}&axis=range&az=0&rg=${idx}&space=${space}&cmap=${cmap}&dem=${this.host.demOn()}`;
   }
 
   _axisSteps(meta) {
@@ -346,7 +346,7 @@ class TomogramTransect {
 
   async _fetch(panel, token) {
     const url = `/api/cubes/transect?id=${encodeURIComponent(this.host.selectedId)}&source=${this.host.srcFor()}` +
-      `&az0=${this.start.az}&rg0=${this.start.rg}&az1=${this.end.az}&rg1=${this.end.rg}&space=${this.host.space}&cmap=${this.host.cmap}`;
+      `&az0=${this.start.az}&rg0=${this.start.rg}&az1=${this.end.az}&rg1=${this.end.rg}&space=${this.host.space}&cmap=${this.host.cmap}&dem=${this.host.demOn()}`;
 
     const skeletonTimer = setTimeout(() => panel.root.classList.add("is-loading"), 120);
     try {
@@ -383,6 +383,7 @@ class TomogramTransect {
       rg1: this.end.rg,
       space: this.host.space,
       cmap: this.host.cmap,
+      dem: this.host.demOn() === 1,
     });
 
     this.saving = false;
@@ -801,6 +802,7 @@ class TomogramView {
     this.paramTags = [];
     this.viewSource = "full";
     this.cmap = localStorage.getItem("cube-cmap") || "jet";
+    this.dem = localStorage.getItem("cube-dem") === "1";
     this.sweepSpeed = Number(localStorage.getItem("cube-sweep-speed")) || 1;
     this.lensZoom = Number(localStorage.getItem("cube-lens-zoom") || 3);
     this.bitmapCache = new Map();
@@ -856,6 +858,13 @@ class TomogramView {
     if (this.cmapSel) {
       this.cmapSel.value = this.cmap;
       this.cmapSel.addEventListener("change", () => this._setCmap(this.cmapSel.value));
+    }
+
+    this.demWrap = refs.demWrap || null;
+    this.demChk = refs.demChk || null;
+    if (this.demChk) {
+      this.demChk.checked = this.dem;
+      this.demChk.addEventListener("change", () => this._setDem(this.demChk.checked));
     }
 
     if (this.paramSel) this.paramSel.addEventListener("change", () => this._onParamPick());
@@ -1095,6 +1104,9 @@ class TomogramView {
     this._syncSpaceBtns();
     this._syncProfModeBtns();
 
+    if (this.demWrap) this.demWrap.hidden = !meta.dem;
+    if (this.demChk) this.demChk.checked = this.dem;
+
     this.visible = new Set(meta.sources);
     this._applyVisibility();
 
@@ -1159,6 +1171,24 @@ class TomogramView {
     if (cmap === this.cmap) return;
     this.cmap = cmap;
     localStorage.setItem("cube-cmap", cmap);
+
+    if (!this.meta) return;
+
+    this.panels.forEach((panel) => this._releasePanel(panel));
+
+    const sweep = this._sweepFor(this.view);
+    if (sweep) sweep.syncSpace();
+    if (this.transect) this.transect.syncSpace();
+    if (this.point) this._drawSlices(this.point.az, this.point.rg);
+  }
+
+  demOn() {
+    return this.dem && this.meta && this.meta.dem ? 1 : 0;
+  }
+
+  _setDem(on) {
+    this.dem = !!on;
+    localStorage.setItem("cube-dem", this.dem ? "1" : "0");
 
     if (!this.meta) return;
 
@@ -1450,7 +1480,7 @@ class TomogramView {
     this.saving = true;
     if (this.jumpPrint) this.jumpPrint.disabled = true;
 
-    const res = await Api.post("/api/cubes/save_slices", { id: this.selectedId, az, rg, space: this.space, cmap: this.cmap });
+    const res = await Api.post("/api/cubes/save_slices", { id: this.selectedId, az, rg, space: this.space, cmap: this.cmap, dem: this.demOn() === 1 });
 
     this.saving = false;
     if (this.jumpPrint) this.jumpPrint.disabled = false;
@@ -1603,7 +1633,7 @@ class TomogramView {
 
   async _fetchSlice(panel, job) {
     const space = this.space;
-    const url = `/api/cubes/slice?id=${encodeURIComponent(this.selectedId)}&source=${panel.source}&axis=${panel.axis}&az=${job.az}&rg=${job.rg}&space=${space}&cmap=${this.cmap}`;
+    const url = `/api/cubes/slice?id=${encodeURIComponent(this.selectedId)}&source=${panel.source}&axis=${panel.axis}&az=${job.az}&rg=${job.rg}&space=${space}&cmap=${this.cmap}&dem=${this.demOn()}`;
     const skeletonTimer = panel.bitmap ? null : setTimeout(() => panel.root.classList.add("is-loading"), 120);
 
     try {

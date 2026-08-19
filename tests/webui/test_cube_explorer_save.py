@@ -35,6 +35,18 @@ def test_save_slices_writes_paper_figures(tmp_path):
         assert target.is_file() and target.stat().st_size > 0
 
 
+def test_save_slices_dem_flag_draws_terrain_figures(tmp_path):
+    """Checks slices save with the DEM terrain line requested on a run that carries a DEM."""
+    explorer, cube_id = loaded_run(tmp_path, with_dem=True)
+
+    result = explorer.save_slices(cube_id, az=3, rg=2, space="physical", dem=True)
+    assert result["ok"], result
+
+    for name in result["files"]:
+        target = Path(result["dir"]) / name
+        assert target.is_file() and target.stat().st_size > 0
+
+
 def test_save_slices_normalized_space_clips_indices(tmp_path):
     """Checks out-of-range azimuth and range indices are clamped and the files are tagged normalized."""
     explorer, cube_id = loaded_run(tmp_path)
