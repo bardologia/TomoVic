@@ -129,6 +129,7 @@ class CubeRouter(SubRouter):
             rg1     = exchange.integer("rg1"),
             space   = exchange.text("space", "physical"),
             cmap    = exchange.text("cmap", "jet"),
+            dem     = exchange.integer("dem", "0") != 0,
         )
         exchange.send_png(png)
 
@@ -142,6 +143,7 @@ class CubeRouter(SubRouter):
             rg      = exchange.integer("rg"),
             space   = exchange.text("space", "physical"),
             cmap    = exchange.text("cmap", "jet"),
+            dem     = exchange.integer("dem", "0") != 0,
         )
         exchange.send_png(png)
 
@@ -160,6 +162,7 @@ class CubeRouter(SubRouter):
             rg1     = int(body.get("rg1", 0)),
             space   = body.get("space", "physical"),
             cmap    = body.get("cmap", "jet"),
+            dem     = bool(body.get("dem", False)),
         )
         exchange.send_result(result)
 
@@ -172,6 +175,7 @@ class CubeRouter(SubRouter):
             rg      = int(body.get("rg", 0)),
             space   = body.get("space", "physical"),
             cmap    = body.get("cmap", "jet"),
+            dem     = bool(body.get("dem", False)),
         )
         exchange.send_result(result)
 
