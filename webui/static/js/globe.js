@@ -4,6 +4,7 @@ class TomogramGlobe {
   static CESIUM_VERSION = "1.144.0";
   static IMAGERY_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
   static IMAGERY_CREDIT = "Esri, Maxar, Earthstar Geographics, and the GIS User Community";
+  static CACHE_LIMIT = 8;
 
   constructor(refs, host) {
     this.host = host;
@@ -20,6 +21,7 @@ class TomogramGlobe {
     this.reframeEl = refs.reframe;
     this.atEl = refs.at;
     this.container = refs.container;
+    this.stageEl = refs.container.parentElement;
 
     this.source = "full";
     this.colorBy = "mu";
@@ -34,6 +36,8 @@ class TomogramGlobe {
     this.collection = null;
     this.trackLayer = null;
     this.debounceTimer = null;
+    this.loadTimer = null;
+    this.cache = new Map();
     this.token = 0;
     this.flightBasis = null;
     this.flightGroup = null;
@@ -198,29 +202,83 @@ class TomogramGlobe {
     this.viewer.scene.requestRender();
   }
 
+  _url(source) {
+    const ampMin = TomogramCloud.ampFloor(this.host.meta, source, Number(this.thrEl.value) / 100);
+    return `/api/cubes/globe_points?id=${encodeURIComponent(this.host.selectedId)}&source=${source}` +
+      `&amp_min=${ampMin}&max=${this._maxPoints()}`;
+  }
+
+  _load(url) {
+    if (this.cache.has(url)) {
+      const entry = this.cache.get(url);
+      this.cache.delete(url);
+      this.cache.set(url, entry);
+      return entry;
+    }
+
+    const entry = fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`globe points request failed with status ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buffer) => new Float32Array(buffer))
+      .catch((err) => {
+        this.cache.delete(url);
+        throw err;
+      });
+
+    this.cache.set(url, entry);
+    while (this.cache.size > TomogramGlobe.CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value);
+    return entry;
+  }
+
+  _setLoading(on) {
+    clearTimeout(this.loadTimer);
+    this.loadTimer = null;
+
+    if (!on) {
+      this.stageEl.classList.remove("is-loading");
+      this.atEl.classList.remove("is-loading");
+      return;
+    }
+
+    this.loadTimer = setTimeout(() => {
+      this.stageEl.classList.add("is-loading");
+      this.atEl.classList.add("is-loading");
+      this.atEl.textContent = "loading scatterers…";
+    }, 120);
+  }
+
+  _prefetch() {
+    if (!this.host.paramActive) return;
+    const other = this.source === "param" ? "full" : "param";
+    this._load(this._url(other)).catch(() => {});
+  }
+
   async _fetch() {
     if (!this.available || !this.viewer) return;
 
-    const url = `/api/cubes/globe_points?id=${encodeURIComponent(this.host.selectedId)}&source=${this.source}` +
-      `&amp_min=${this._ampMin()}&max=${this._maxPoints()}`;
-
     this.token += 1;
     const token = this.token;
+    this._setLoading(true);
 
     let raw;
     try {
-      const res = await fetch(url);
-      if (!res.ok) return;
-      raw = new Float32Array(await res.arrayBuffer());
+      raw = await this._load(this._url(this.source));
     } catch (e) {
+      if (token !== this.token) return;
+      this._setLoading(false);
+      this.atEl.textContent = "the scatterers could not be loaded";
       return;
     }
     if (token !== this.token) return;
+    this._setLoading(false);
 
     this.points = raw.subarray(4);
     this.total = raw[1];
     this.muRange = TomogramCloud.sampleRange(this.points, 3, 5);
     this._redraw();
+    this._prefetch();
   }
 
   _sceneRadius(globe) {

@@ -2443,6 +2443,8 @@ main { margin-left: var(--navw); }
   .cube-eplane.is-loading .cube-eplane__media::after { animation: none; background: var(--surface-2); }
   .cube-progress__fill::after { display: none; }
   .cube-hint.is-loading { animation: none; }
+  .cube-globe__stage.is-loading::before { animation: none; background: rgba(255, 209, 102, 0.55); }
+  .cube-elev__at.is-loading { animation: none; }
 }
 
 /* ---------- Shared card treatment ---------- */
@@ -2705,7 +2707,14 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 .cube-cloud__stage canvas:active { cursor: grabbing; }
 #cube-cloud-dem-wrap[hidden] { display: none; }
 
-.cube-globe__stage { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: #10151a; }
+.cube-globe__stage { position: relative; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: #10151a; }
+.cube-globe__stage.is-loading::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 5; pointer-events: none;
+  background: linear-gradient(100deg, rgba(255, 209, 102, 0.1) 28%, rgba(255, 209, 102, 0.85) 50%, rgba(255, 209, 102, 0.1) 72%);
+  background-size: 200% 100%;
+  animation: cube-shimmer 1.3s linear infinite;
+}
+.cube-elev__at.is-loading { animation: cube-pulse 1.5s ease-in-out infinite; }
 #cube-globe-container { width: 100%; height: max(62vh, calc(100vh - 315px)); }
 .cube-stage.is-globe #cube-globe-container { height: max(70vh, calc(100vh - 175px)); }
 #cube-globe-container .cesium-viewer-bottom { font-size: 10px; }
