@@ -2,8 +2,8 @@
 
 Exposes preprocessing-run listing and loading, parameter-run listing and the
 per-pixel Gaussian readout of the parametrized tomogram, plane/slice/transect
-renderings, colour bars, point clouds for the 3D and globe views, the DEM grid
-and multi-run slice collection.
+renderings, colour bars, point clouds for the 3D and globe views, the DEM grid,
+the run's saved figures and multi-run slice collection.
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ class CubeRouter(SubRouter):
         table.add("GET", "/api/cubes/dem_grid",     self.dem_grid)
         table.add("GET", "/api/cubes/transect",     self.transect)
         table.add("GET", "/api/cubes/slice",        self.slice_view)
+        table.add("GET", "/api/cubes/figures",      self.figures)
+        table.add("GET", "/api/cubes/figure",       self.figure)
 
         table.add("POST", "/api/cubes/load",          self.load)
         table.add("POST", "/api/cubes/save_transect", self.save_transect)
@@ -146,6 +148,19 @@ class CubeRouter(SubRouter):
             dem     = exchange.integer("dem", "0") != 0,
         )
         exchange.send_png(png)
+
+    def figures(self, exchange: HttpExchange) -> None:
+        """Answers with the figure files saved under the loaded run."""
+        exchange.send_result(self.cubes.list_figures(exchange.text("id")))
+
+    def figure(self, exchange: HttpExchange) -> None:
+        """Serves one saved figure of the loaded run, or 404 outside its figure trees."""
+        target = self.cubes.figure_file(exchange.text("id"), exchange.text("rel"))
+        if target is None:
+            exchange.not_found()
+            return
+
+        exchange.send_file(target, "max-age=300")
 
     def load(self, exchange: HttpExchange) -> None:
         """Starts loading the cube named in the request body, with an optional parameter run."""

@@ -224,6 +224,7 @@
         <button type="button" class="cube-mode" data-view="transect">Transect</button>
         <button type="button" class="cube-mode" data-view="cloud">Point cloud</button>
         <button type="button" class="cube-mode" data-view="globe">Globe</button>
+        <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
         <label class="lb-check cube-modes__dem" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
         <select id="cube-cmap" class="cube-mselect cube-modes__cmap" aria-label="Tomogram colormap">
           <option value="jet" selected>jet</option>
@@ -544,6 +545,12 @@
         </div>
       </div>
 
+
+      <div class="cube-view" data-view="figures" hidden>
+        <div class="cube-figures" id="cube-figures">
+          <p class="cube-hint">Loading figures&hellip;</p>
+        </div>
+      </div>
 
       <div class="cube-view" data-view="range" hidden>
         <div class="cube-elev">

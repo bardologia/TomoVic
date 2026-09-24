@@ -931,6 +931,56 @@ class TomogramCloud {
   }
 }
 
+class TomogramFigures {
+  constructor(refs, host) {
+    this.host = host;
+    this.root = refs.root;
+    this.loadedFor = null;
+  }
+
+  configure() {
+    this.loadedFor = null;
+    this.root.innerHTML = `<p class="cube-hint">Loading figures…</p>`;
+  }
+
+  async render() {
+    if (this.loadedFor === this.host.selectedId) return;
+
+    const cubeId = this.host.selectedId;
+    const data = await Api.get(`/api/cubes/figures?id=${encodeURIComponent(cubeId)}`);
+    if (cubeId !== this.host.selectedId) return;
+
+    this.loadedFor = cubeId;
+
+    if (!data || !data.ok) {
+      this.root.innerHTML = `<p class="cube-hint">${SharedCharts.esc((data && data.error) || "Figure listing failed.")}</p>`;
+      return;
+    }
+    if (!data.groups.length) {
+      this.root.innerHTML = `<p class="cube-hint">This run holds no saved figures.</p>`;
+      return;
+    }
+
+    const total = data.groups.reduce((sum, group) => sum + group.files.length, 0);
+    let html = `<p class="cube-hint">${total.toLocaleString()} saved figures in ${data.groups.length} folders — click a thumbnail to open it full size.</p>`;
+
+    data.groups.forEach((group, index) => {
+      const items = group.files.map((file) => {
+        const rel = `${group.dir}/${file}`;
+        const url = `/api/cubes/figure?id=${encodeURIComponent(cubeId)}&rel=${encodeURIComponent(rel)}`;
+        return `<a class="cube-fig" href="${url}" target="_blank" rel="noopener" title="${SharedCharts.esc(rel)}">` +
+          `<img src="${url}" loading="lazy" alt="${SharedCharts.esc(file)}" /><span>${SharedCharts.esc(file)}</span></a>`;
+      }).join("");
+
+      html += `<details class="cube-figgroup"${index === 0 ? " open" : ""}>` +
+        `<summary>${SharedCharts.esc(group.dir)} <em>${group.files.length}</em></summary>` +
+        `<div class="cube-figgrid">${items}</div></details>`;
+    });
+
+    this.root.innerHTML = html;
+  }
+}
+
 class TomogramView {
   static LABELS = { full: "capon full", param: "parametrized" };
   static HOLD_SAVE_MS = 4000;
@@ -1014,6 +1064,7 @@ class TomogramView {
     this.transect = refs.transect ? new TomogramTransect(refs.transect, this) : null;
     this.cloud = refs.cloud ? new TomogramCloud(refs.cloud, this) : null;
     this.globe = refs.globe ? new TomogramGlobe(refs.globe, this) : null;
+    this.figures = refs.figures && refs.figures.root ? new TomogramFigures(refs.figures, this) : null;
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
 
@@ -1407,6 +1458,11 @@ class TomogramView {
       if (!this.globe.available && this.view === "globe") this._setView("explorer");
     }
 
+    if (this.figures) {
+      this.figures.configure();
+      if (this.view === "figures") this.figures.render();
+    }
+
     this._follow({ az: Math.floor(meta.n_az / 2), rg: Math.floor(meta.n_rg / 2), fx: 0.5, fy: 0.5 }, true);
     this._consumeFocus();
 
@@ -1476,7 +1532,7 @@ class TomogramView {
   }
 
   _setView(view) {
-    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "globe"].includes(view) || view === this.view) return;
+    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "globe", "figures"].includes(view) || view === this.view) return;
 
     this._stopSweeps();
     this.view = view;
@@ -1496,6 +1552,10 @@ class TomogramView {
     }
     if (view === "globe" && this.globe && this.meta) {
       this.globe.render();
+      return;
+    }
+    if (view === "figures" && this.figures && this.meta) {
+      this.figures.render();
       return;
     }
 

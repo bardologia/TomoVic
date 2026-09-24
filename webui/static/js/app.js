@@ -232,6 +232,7 @@ class App {
         container : document.getElementById("cube-globe-container"),
         stage     : document.getElementById("cube-globe-stage"),
       },
+      figures       : { root: document.getElementById("cube-figures") },
       cmapSel       : document.getElementById("cube-cmap"),
       demWrap       : document.getElementById("cube-dem-wrap"),
       demChk        : document.getElementById("cube-dem"),
