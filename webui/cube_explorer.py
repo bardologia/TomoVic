@@ -14,9 +14,11 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib  import Path
 
@@ -225,6 +227,127 @@ class ParametrizedTomogram:
         return float(vmin), float(vmax)
 
 
+class LoadProgress:
+    """Thread-safe byte counter a cube load reports its file reads through.
+
+    Attributes:
+        total    : Bytes the load plans to read.
+        done     : Bytes read so far.
+        listener : Callable receiving the fraction done after every advance, or None.
+    """
+
+    def __init__(self, listener=None) -> None:
+        """Starts an empty counter, optionally forwarding fractions to a listener."""
+        self.lock     = threading.Lock()
+        self.total    = 0
+        self.done     = 0
+        self.listener = listener
+
+    def plan(self, n_bytes: int) -> None:
+        """Adds bytes to the planned total."""
+        with self.lock:
+            self.total += int(n_bytes)
+
+    def advance(self, n_bytes: int) -> None:
+        """Books bytes as read and publishes the fraction done."""
+        with self.lock:
+            self.done += int(n_bytes)
+            fraction   = min(1.0, self.done / self.total) if self.total else 0.0
+
+        if self.listener is not None:
+            self.listener(fraction)
+
+
+class NpyReader:
+    """Reads ``.npy`` files whole through a shared pool of concurrent chunk reads.
+
+    Every file is split into fixed-size chunks that are pulled with ``pread``
+    by a process-wide thread pool, so a large file keeps several requests in
+    flight against the mount, and every chunk books its bytes on the load's
+    progress counter as it lands. Pool tasks are leaf reads only, so callers
+    may wait on them from any thread without deadlock.
+
+    Attributes:
+        progress : Counter receiving the byte count of every chunk read.
+    """
+
+    CHUNK_BYTES  = 16 * 1024 * 1024
+    READ_WORKERS = min(32, os.cpu_count() or 4)
+    POOL         = ThreadPoolExecutor(max_workers=READ_WORKERS, thread_name_prefix="npy-read")
+
+    def __init__(self, progress: LoadProgress) -> None:
+        """Stores the progress counter the reads report to."""
+        self.progress = progress
+
+    def header(self, path: Path) -> tuple[tuple, np.dtype]:
+        """Returns the shape and dtype recorded in a ``.npy`` header without reading the data."""
+        with open(path, "rb") as handle:
+            shape, _, dtype = self._parse_header(handle, path)
+
+        return shape, dtype
+
+    def read(self, path: Path) -> np.ndarray:
+        """Reads one whole ``.npy`` file into a fresh C-ordered array.
+
+        Args:
+            path : File written by ``np.save``.
+
+        Returns:
+            The array with the shape and dtype the header declares.
+
+        Raises:
+            ValueError : If the header version is unsupported, the array is Fortran-ordered or the file ends before its data does.
+        """
+        with open(path, "rb") as handle:
+            shape, dtype, offset = self._open_header(handle, path)
+            target               = self._target(path, handle, offset, shape, dtype)
+            size                 = target["buffer"].nbytes
+            chunks               = [(target, start, start, min(self.CHUNK_BYTES, size - start)) for start in range(0, size, self.CHUNK_BYTES)]
+            list(self.POOL.map(self._pull, chunks))
+
+        return target["array"]
+
+    def _open_header(self, handle, path: Path) -> tuple[tuple, np.dtype, int]:
+        """Parses an open file's header and returns its shape, dtype and data offset, refusing Fortran order."""
+        shape, fortran, dtype = self._parse_header(handle, path)
+        if fortran:
+            raise ValueError(f"{path} is Fortran-ordered; cube files are written C-ordered")
+
+        return shape, dtype, handle.tell()
+
+    def _target(self, path: Path, handle, offset: int, shape: tuple, dtype: np.dtype) -> dict:
+        """Allocates the array a file's chunks land in."""
+        array = np.empty(shape, dtype=dtype)
+        return {"path": path, "fd": handle.fileno(), "offset": offset, "array": array, "buffer": memoryview(array.reshape(-1).view(np.uint8))}
+
+    def _pull(self, chunk: tuple) -> None:
+        """Reads one chunk with pread into its place in the target buffer and books its bytes.
+
+        Args:
+            chunk : Tuple of (target, byte offset into the file's data, byte offset into the buffer, byte count).
+        """
+        target, src, dst, count = chunk
+        done                    = 0
+        while done < count:
+            got = os.preadv(target["fd"], [target["buffer"][dst + done:dst + count]], target["offset"] + src + done)
+            if not got:
+                raise ValueError(f"{target['path']} ends after {src + done} data bytes")
+
+            done += got
+            self.progress.advance(got)
+
+    @staticmethod
+    def _parse_header(handle, path: Path) -> tuple[tuple, bool, np.dtype]:
+        """Consumes the magic and header of an open ``.npy`` file and returns (shape, fortran, dtype)."""
+        version = np.lib.format.read_magic(handle)
+        if version == (1, 0):
+            return np.lib.format.read_array_header_1_0(handle)
+        if version == (2, 0):
+            return np.lib.format.read_array_header_2_0(handle)
+
+        raise ValueError(f"{path} uses .npy format version {version}; only 1.0 and 2.0 are read")
+
+
 class StampReader:
     """Reads the artifacts of one preprocessing run directory.
 
@@ -233,13 +356,15 @@ class StampReader:
     the run metadata under ``meta``.
 
     Attributes:
-        run_dir: Directory of the preprocessing run.
-        cached_layout: Parsed dataset layout, filled on first access.
+        run_dir       : Directory of the preprocessing run.
+        npy           : Chunked file reader booking every whole-file read on the load's progress counter.
+        cached_layout : Parsed dataset layout, filled on first access.
     """
 
-    def __init__(self, run_dir: Path) -> None:
-        """Stores the preprocessing run directory to read from."""
+    def __init__(self, run_dir: Path, progress: LoadProgress) -> None:
+        """Stores the preprocessing run directory and the load's progress counter."""
         self.run_dir       = run_dir
+        self.npy           = NpyReader(progress)
         self.cached_layout = None
 
     @property
@@ -293,6 +418,18 @@ class StampReader:
         path = self.run_dir / "data" / name
         return path if path.is_file() else None
 
+    def byte_plan(self, param_tag: str | None) -> int:
+        """Returns the bytes a load of this run reads whole: the tomogram, the primary SLC, the DEM and the chosen parameter block.
+
+        Args:
+            param_tag : Parameter run loaded alongside the raw cube, or None.
+        """
+        paths = [self.artifact_path(key) for key in ("tomogram_full", "primary", "dem_full")]
+        if param_tag is not None:
+            paths.append(self.run_dir / "params" / param_tag / "parameters.npy")
+
+        return sum(path.stat().st_size for path in paths if path is not None and path.is_file())
+
     def tomogram(self, view: bool = False) -> np.ndarray:
         """Reads the full tomogram cube of shape (elevation, azimuth, range).
 
@@ -310,7 +447,7 @@ class StampReader:
         if path is None:
             raise FileNotFoundError(f"tomogram_full missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
 
-        return np.load(path, mmap_mode="r" if view else None)
+        return np.load(path, mmap_mode="r") if view else self.npy.read(path)
 
     def dem(self) -> np.ndarray | None:
         """Reads the full DEM of shape (azimuth, range), or None when absent."""
@@ -318,7 +455,7 @@ class StampReader:
         if path is None:
             return None
 
-        return np.load(path)
+        return self.npy.read(path)
 
     def primary(self) -> np.ndarray:
         """Reads the primary SLC image of shape (azimuth, range).
@@ -330,7 +467,7 @@ class StampReader:
         if path is None:
             raise FileNotFoundError(f"primary SLC missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
 
-        return np.load(path)
+        return self.npy.read(path)
 
     def height_range(self) -> tuple[float, float]:
         """Returns the tomogram's elevation axis extent in metres.
@@ -399,7 +536,7 @@ class StampReader:
         if not path.is_file():
             raise FileNotFoundError(f"parameters.npy missing in {path.parent}; rerun the parameter extraction to regenerate it")
 
-        return np.asarray(np.load(path), dtype=np.float32)
+        return np.asarray(self.npy.read(path), dtype=np.float32)
 
 
 class LoadTimer:
@@ -524,7 +661,7 @@ class CubeExplorer:
             loaded with the same parameter run, otherwise ``ok`` False with the
             reason.
         """
-        reader = self._open_source(cube_id)
+        reader = self._open_source(cube_id, LoadProgress(self._publish_progress))
         if reader is None:
             return {"ok": False, "error": f"unknown cube id: {cube_id}"}
 
@@ -546,6 +683,12 @@ class CubeExplorer:
         self.globe_blobs.clear()
         threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
         return {"ok": True}
+
+    def _publish_progress(self, fraction: float) -> None:
+        """Writes the fraction of planned bytes read into the polled load status."""
+        with self.lock:
+            if self.status["state"] == "loading":
+                self.status["progress"] = fraction
 
     def load_status(self) -> dict:
         """Returns the current load state, with the cube metadata once ready."""
@@ -1549,11 +1692,12 @@ class CubeExplorer:
                 return None
             return self.loaded["entries"].get(source)
 
-    def _open_source(self, cube_id: str) -> StampReader | None:
+    def _open_source(self, cube_id: str, progress: LoadProgress | None = None) -> StampReader | None:
         """Resolves a cube id to a preprocessing run reader.
 
         Args:
-            cube_id: Preprocessing run directory path.
+            cube_id  : Preprocessing run directory path.
+            progress : Byte counter the reader's whole-file reads report to; a silent counter when None.
 
         Returns:
             A StampReader for run directories that hold ``data/dataset.json``, or
@@ -1567,7 +1711,7 @@ class CubeExplorer:
             return None
         if not (run_dir / "data" / "dataset.json").is_file():
             return None
-        return StampReader(run_dir)
+        return StampReader(run_dir, LoadProgress() if progress is None else progress)
 
     def _load_worker(self, cube_id: str, reader: StampReader, param_tag: str | None) -> None:
         """Loads a cube in the background and publishes the ready or error status.
@@ -1602,8 +1746,10 @@ class CubeExplorer:
     def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None, LoadTimer]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
 
-        Every stage books its wall time on a LoadTimer and advances the load
-        status the front end polls, so a slow load names the stage that cost it.
+        Every stage books its wall time on a LoadTimer and names itself in the
+        load status the front end polls, so a slow load names the stage that
+        cost it; the progress fraction itself follows the bytes the reader's
+        whole-file reads book against the plan made here.
 
         Args:
             reader: Preprocessing run reader to pull from.
@@ -1622,20 +1768,19 @@ class CubeExplorer:
                 disagrees with the recorded global crop.
         """
         timer = LoadTimer()
-        steps = [0]
-        total = 6 if param_tag is not None else 5
 
         def stage(name: str, load):
-            """Runs one load step, books its time and publishes the progress."""
-            result   = load()
-            steps[0] += 1
-            timer.lap(name)
+            """Names the running stage in the load status, runs it and books its time."""
             with self.lock:
-                self.status["progress"] = steps[0] / total
-                self.status["stage"]    = name
+                self.status["stage"] = name
+
+            result = load()
+            timer.lap(name)
             return result
 
-        full_raw = reader.tomogram()
+        reader.npy.progress.plan(reader.byte_plan(param_tag))
+
+        full_raw = stage("full", reader.tomogram)
         if full_raw.ndim != 3:
             raise ValueError(f"full tomogram is not a 3D cube: shape={full_raw.shape}")
 
