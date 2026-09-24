@@ -221,31 +221,37 @@
         <button type="button" class="cube-mode" data-view="elevation">Elevation sweep</button>
         <button type="button" class="cube-mode" data-view="azimuth">Azimuth sweep</button>
         <button type="button" class="cube-mode" data-view="range">Range sweep</button>
+        <i class="cube-modes__sep" aria-hidden="true"></i>
         <button type="button" class="cube-mode" data-view="transect">Transect</button>
+        <i class="cube-modes__sep" aria-hidden="true"></i>
         <button type="button" class="cube-mode" data-view="cloud">Point cloud</button>
         <button type="button" class="cube-mode" data-view="volume" title="Ray-marched volume rendering of the cube with an adjustable transfer function">Volume</button>
         <button type="button" class="cube-mode" data-view="globe">Globe</button>
+        <i class="cube-modes__sep" aria-hidden="true"></i>
         <button type="button" class="cube-mode" data-view="passes" title="Browse the raw acquisition stack: per-pass SLC amplitude and interferometric phase against the primary">Passes</button>
         <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
-        <label class="lb-check cube-modes__dem" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
-        <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view and locked pixel exactly as shown">Link</button>
-        <button type="button" class="btn btn--mini" id="cube-story-toggle" title="Record an ordered sequence of view states and replay or share them">Story</button>
-        <select id="cube-cmap" class="cube-mselect cube-modes__cmap" aria-label="Tomogram colormap">
-          <option value="jet" selected>jet</option>
-          <option value="viridis">viridis</option>
-          <option value="inferno">inferno</option>
-          <option value="turbo">turbo</option>
-          <option value="gray">gray</option>
-        </select>
+        <span class="cube-modes__tools">
+          <label class="lb-check" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
+          <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view and locked pixel exactly as shown">Link</button>
+          <button type="button" class="btn btn--mini" id="cube-story-toggle" title="Record an ordered sequence of view states and replay or share them">Story</button>
+          <select id="cube-cmap" class="cube-mselect" aria-label="Tomogram colormap">
+            <option value="jet" selected>jet</option>
+            <option value="viridis">viridis</option>
+            <option value="inferno">inferno</option>
+            <option value="turbo">turbo</option>
+            <option value="gray">gray</option>
+          </select>
+        </span>
       </div>
 
       <div class="cube-story" id="cube-story" hidden>
         <div class="cube-story__bar">
+          <h3 class="cube-panel-title">Story</h3>
           <input type="text" id="cube-story-name" class="sc-name" placeholder="step name (optional)" spellcheck="false" autocomplete="off" />
           <button type="button" class="btn btn--mini" id="cube-story-add" title="Capture the current cube, view, pixel and settings as one story step">Add step</button>
           <button type="button" class="btn btn--mini" id="cube-story-play" title="Replay the story step by step">Play</button>
           <button type="button" class="btn btn--mini" id="cube-story-export" title="Download the PNG snapshot taken when each step was added">Snapshots</button>
-          <button type="button" class="btn btn--mini" id="cube-story-clear">Clear</button>
+          <button type="button" class="btn btn--mini" id="cube-story-clear" title="Forget every recorded step">Clear</button>
           <span class="cube-hint" id="cube-story-hint"></span>
         </div>
         <ol class="cube-story__list" id="cube-story-list"></ol>
@@ -293,6 +299,8 @@
                 <span class="cube-jump__range" id="cube-jump-rg-range"></span>
               </span>
               <button type="button" class="btn btn--mini" id="cube-jump-go">Cut</button>
+            </div>
+            <div class="cube-mctl" role="group" aria-label="Cut actions">
               <button type="button" class="btn btn--mini" id="cube-jump-print" title="Save these cuts as paper-style figures under the run directory">Print</button>
               <button type="button" class="btn btn--mini" id="cube-jump-download" title="Download the visible cuts as PNG files">PNG</button>
               <button type="button" class="btn btn--mini" id="cube-jump-csv" title="Download the vertical profiles at the current position as CSV">CSV</button>
@@ -480,9 +488,9 @@
               <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
             </div>
             <div class="cube-mctl" role="group" aria-label="Transfer function window">
-              <label for="cube-volume-lo" title="Intensities below this fraction of the display range stay transparent">tf</label>
-              <input type="range" id="cube-volume-lo" min="0" max="99" value="35" />
-              <input type="range" id="cube-volume-hi" min="1" max="100" value="90" />
+              <label for="cube-volume-lo" title="Transfer function window: intensities below the lower bound stay transparent, opacity ramps up to the upper bound">tf window</label>
+              <input type="range" id="cube-volume-lo" min="0" max="99" value="35" title="Lower bound of the transfer function window" />
+              <input type="range" id="cube-volume-hi" min="1" max="100" value="90" title="Upper bound of the transfer function window" />
             </div>
             <div class="cube-mctl" role="group" aria-label="Opacity">
               <label for="cube-volume-opacity">opacity</label>
@@ -577,11 +585,12 @@
       <div class="cube-view" data-view="transect" hidden>
         <div class="cube-pview">
           <div class="cube-pview__bar">
-            <span class="cube-elev__at" id="cube-transect-at">Click points on the map to trace a polyline; every segment is cut through the tomograms.</span>
-            <button type="button" class="btn btn--mini" id="cube-transect-undo" hidden title="Remove the last polyline point">Undo</button>
-            <button type="button" class="btn btn--mini" id="cube-transect-clear" hidden>Clear line</button>
-            <button type="button" class="btn btn--mini" id="cube-transect-print" hidden title="Save the transect as paper-style figures under the run directory">Print</button>
-            <button type="button" class="btn btn--mini" id="cube-transect-download" hidden title="Download the visible transect panels as PNG files">PNG</button>
+            <div class="cube-mctl" role="group" aria-label="Line editing">
+              <button type="button" class="btn btn--mini" id="cube-transect-undo" hidden title="Remove the last polyline point">Undo</button>
+              <button type="button" class="btn btn--mini" id="cube-transect-clear" hidden>Clear line</button>
+              <button type="button" class="btn btn--mini" id="cube-transect-print" hidden title="Save the transect as paper-style figures under the run directory">Print</button>
+              <button type="button" class="btn btn--mini" id="cube-transect-download" hidden title="Download the visible transect panels as PNG files">PNG</button>
+            </div>
             <div class="cube-mctl" role="group" aria-label="Saved transects">
               <input type="text" id="cube-transect-name" class="sc-name" placeholder="line name" spellcheck="false" autocomplete="off" />
               <button type="button" class="btn btn--mini" id="cube-transect-save" title="Remember this polyline for every cube with the same footprint">Save line</button>
@@ -596,6 +605,7 @@
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
               <button type="button" class="cube-space" data-space="normalized">Normalized</button>
             </div>
+            <span class="cube-elev__at" id="cube-transect-at">Click points on the map to trace a polyline; every segment is cut through the tomograms.</span>
           </div>
           <div class="cube-tview">
             <figure class="cube-pmap cube-pmap--transect">
