@@ -38,6 +38,8 @@ class TomogramGlobe {
     this.debounceTimer = null;
     this.loadTimer = null;
     this.cache = new Map();
+    this.inFlight = new Set();
+    this.prefetchAborts = [];
     this.token = 0;
     this.flightBasis = null;
     this.flightGroup = null;
@@ -72,6 +74,9 @@ class TomogramGlobe {
     if (!hasTracks) this.flyEl.checked = false;
 
     this._stopFlight();
+    this._abortPrefetch();
+    this.cache.clear();
+    this.inFlight = new Set();
     this.points = null;
     this.muRange = null;
     this.shown = 0;
@@ -120,8 +125,14 @@ class TomogramGlobe {
 
   _onThreshold() {
     this._syncThresholdLabel();
+    this._abortPrefetch();
     clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => this._fetch(), 250);
+  }
+
+  _abortPrefetch() {
+    this.prefetchAborts.forEach((controller) => controller.abort());
+    this.prefetchAborts = [];
   }
 
   _ensureCesium() {
@@ -211,7 +222,7 @@ class TomogramGlobe {
       `&amp_min=${this._ampMin(source)}&max=${this._maxPoints()}`;
   }
 
-  _load(url) {
+  _load(url, signal = null) {
     if (this.cache.has(url)) {
       const entry = this.cache.get(url);
       this.cache.delete(url);
@@ -219,7 +230,8 @@ class TomogramGlobe {
       return entry;
     }
 
-    const entry = fetch(url)
+    this.inFlight.add(url);
+    const entry = fetch(url, signal ? { signal } : undefined)
       .then((res) => {
         if (!res.ok) throw new Error(`globe points request failed with status ${res.status}`);
         return res.arrayBuffer();
@@ -228,7 +240,8 @@ class TomogramGlobe {
       .catch((err) => {
         this.cache.delete(url);
         throw err;
-      });
+      })
+      .finally(() => this.inFlight.delete(url));
 
     this.cache.set(url, entry);
     while (this.cache.size > TomogramGlobe.CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value);
@@ -255,7 +268,12 @@ class TomogramGlobe {
   _prefetch() {
     if (!this.host.paramActive) return;
     const other = this.source === "param" ? "full" : "param";
-    this._load(this._url(other)).catch(() => {});
+    const url = this._url(other);
+    if (this.cache.has(url) || this.inFlight.has(url)) return;
+
+    const controller = new AbortController();
+    this.prefetchAborts.push(controller);
+    this._load(url, controller.signal).catch(() => {});
   }
 
   async _fetch() {
