@@ -16,8 +16,10 @@ import json
 import math
 import os
 import re
+import sys
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib  import Path
@@ -614,6 +616,8 @@ class CubeExplorer:
         scanner: Scanner listing preprocessing runs under a root.
         lock: Guards the loaded cube and the load status.
         loaded: Currently loaded cube state, or None.
+        load_thread: Background thread of the running load, or None.
+        status_at: Clock reading of the last change to the load status.
         cube_cache: Recently loaded cube states keyed by run directory and parameter run tag.
         globe_blobs: Cache of packed globe point blobs keyed by cube id, parameter run tag and request.
         status: Load state machine payload polled by the front end.
@@ -624,6 +628,7 @@ class CubeExplorer:
     GLOBE_SOURCES        = ("full", "param")
     GLOBE_CACHE_ENTRIES  = 12
     CUBE_CACHE_ENTRIES   = 8
+    STALL_FRAMES         = 4
     GLOBE_BLOB_MAX_BYTES = 32 * 1024 * 1024
     GLOBE_DEFAULT_POINTS = 60000
     GLOBE_TOUR_DIR       = Path("figures") / "globe_tours"
@@ -645,6 +650,8 @@ class CubeExplorer:
         self.scanner     = RunScanner(self.roots)
         self.lock        = threading.Lock()
         self.loaded      = None
+        self.load_thread = None
+        self.status_at   = time.perf_counter()
         self.cube_cache  = LruCache(self.CUBE_CACHE_ENTRIES)
         self.globe_blobs = LruCache(self.GLOBE_CACHE_ENTRIES)
         self.status      = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
@@ -727,7 +734,9 @@ class CubeExplorer:
             self.logger.info(f"cube served from memory: {cube_id}")
             return {"ok": True}
 
-        threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
+        self.status_at   = time.perf_counter()
+        self.load_thread = threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True)
+        self.load_thread.start()
         return {"ok": True}
 
     def _publish_progress(self, fraction: float, reading: list) -> None:
@@ -736,14 +745,33 @@ class CubeExplorer:
             if self.status["state"] == "loading":
                 self.status["progress"] = fraction
                 self.status["reading"]  = reading
+                self.status_at          = time.perf_counter()
 
     def load_status(self) -> dict:
-        """Returns the current load state, with the cube metadata once ready."""
+        """Returns the current load state, with the cube metadata once ready.
+
+        While a load runs the payload also carries ``stalled_for``, the seconds
+        since the status last changed, and ``where``, the innermost frames of
+        the load thread, so a load that stops moving names the code it sits in.
+        """
         with self.lock:
             payload = dict(self.status)
             if payload["state"] == "ready" and self.loaded is not None:
                 payload["cube"] = self.loaded["meta"]
+            if payload["state"] == "loading":
+                payload["stalled_for"] = round(time.perf_counter() - self.status_at, 1)
+                payload["where"]       = self._load_thread_frames()
+
         return payload
+
+    def _load_thread_frames(self) -> list:
+        """Returns the innermost STALL_FRAMES frames of the load thread as ``file:line function`` strings."""
+        thread = self.load_thread
+        frame  = sys._current_frames().get(thread.ident) if thread is not None else None
+        if frame is None:
+            return []
+
+        return [f"{Path(entry.filename).name}:{entry.lineno} {entry.name}" for entry in traceback.extract_stack(frame)[-self.STALL_FRAMES:]]
 
     def primary_png(self, cube_id: str) -> bytes | None:
         """Renders the primary SLC amplitude map in dB as a greyscale PNG.
@@ -1822,6 +1850,7 @@ class CubeExplorer:
             """Names the running stage in the load status, runs it and books its time."""
             with self.lock:
                 self.status["stage"] = name
+                self.status_at       = time.perf_counter()
 
             result = load()
             timer.lap(name)

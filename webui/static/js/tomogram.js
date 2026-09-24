@@ -1244,6 +1244,8 @@ class TomogramView {
   static LABELS = { full: "capon full", param: "parametrized" };
   static SLOT_COLORS = ["#e45756", "#4c78a8", "#54a24b", "#b279a2", "#eeca3b", "#72b7b2", "#f58518", "#9d755d"];
   static HOLD_SAVE_MS = 4000;
+  static STATUS_TIMEOUT_MS = 15000;
+  static STALL_AFTER_S = 5;
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
   static DEM_VIEWS = ["explorer", "azimuth", "range", "transect"];
@@ -1903,7 +1905,7 @@ class TomogramView {
     this.polling = true;
 
     while (true) {
-      const st = await Api.get("/api/cubes/status");
+      const st = await Api.get("/api/cubes/status", TomogramView.STATUS_TIMEOUT_MS);
       if (st.error) {
         this._failLoad(st.error);
         break;
@@ -1915,7 +1917,7 @@ class TomogramView {
       }
 
       if (st.state === "loading") {
-        this._setProgress(st.progress || 0, st.stage || "loading", st.reading || []);
+        this._setProgress(st.progress || 0, st.stage || "loading", st.reading || [], st.stalled_for || 0, st.where || []);
         await new Promise((r) => setTimeout(r, 400));
         continue;
       }
@@ -1944,14 +1946,15 @@ class TomogramView {
     this.hint.hidden = false;
   }
 
-  _setProgress(frac, stage, reading = []) {
+  _setProgress(frac, stage, reading = [], stalledFor = 0, where = []) {
     const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
     this.progressFill.style.width = `${pct}%`;
     const label = TomogramView.LABELS[stage] || stage;
     const mb = (bytes) => (bytes / 1048576).toFixed(0);
     const inFlight = reading.slice(0, 2).map((row) => `${row.file} ${mb(row.done)}/${mb(row.total)} MB`).join(", ");
     const tail = reading.length ? ` · ${reading.length} file${reading.length === 1 ? "" : "s"} in flight: ${inFlight}` : "";
-    this.progressLabel.textContent = `${label} — ${pct}%${tail}`;
+    const stall = stalledFor >= TomogramView.STALL_AFTER_S ? ` · no progress for ${Math.round(stalledFor)} s, worker at ${where.slice(-2).join(" < ") || "unknown"}` : "";
+    this.progressLabel.textContent = `${label} — ${pct}%${tail}${stall}`;
   }
 
   _display(meta) {

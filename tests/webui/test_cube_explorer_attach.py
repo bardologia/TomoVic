@@ -10,6 +10,8 @@ lazy reconstruction, the per-pixel slot readout and error handling.
 from __future__ import annotations
 
 import io
+import threading
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -396,3 +398,34 @@ def test_save_slices_include_the_param_source(tmp_path):
 
     expected = {"range_full_physical.png", "azimuth_full_physical.png", "range_param_physical.png", "azimuth_param_physical.png"}
     assert set(result["files"]) == expected
+
+
+def test_a_running_load_reports_its_silence_and_thread_frames(tmp_path):
+    """Checks a loading status carries the seconds since its last change and the innermost frames of the load thread."""
+    explorer = CubeExplorer(WebLogger())
+    release  = threading.Event()
+
+    def blocked_load():
+        """Stands in for a load stuck on a read."""
+        release.wait(10.0)
+
+    explorer.load_thread = threading.Thread(target=blocked_load, daemon=True)
+    explorer.load_thread.start()
+    explorer.status      = {"state": "loading", "id": "run", "progress": 0.3, "stage": "full", "reading": [], "error": ""}
+    explorer.status_at   = time.perf_counter() - 7.0
+
+    status = explorer.load_status()
+    release.set()
+
+    assert status["stalled_for"] >= 7.0
+    assert 0 < len(status["where"]) <= explorer.STALL_FRAMES
+    assert any("blocked_load" in frame for frame in status["where"])
+
+
+def test_a_ready_status_carries_no_stall_report(tmp_path):
+    """Checks the silence and frame fields are reported only while a load runs."""
+    explorer, _ = loaded_run(tmp_path)
+
+    status = explorer.load_status()
+
+    assert "stalled_for" not in status and "where" not in status

@@ -2,18 +2,23 @@
 
 class Api {
 
-  static async probe(url) {
+  static async probe(url, timeoutMs = 0) {
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-      const res  = await fetch(url);
+      const res  = await fetch(url, controller ? { signal: controller.signal } : {});
       const data = await res.json().catch(() => null);
       return { status: res.status, data };
     } catch (e) {
-      return { status: 0, data: null };
+      return { status: 0, data: null, timedOut: Boolean(controller && controller.signal.aborted) };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
-  static async get(url) {
-    const probe = await Api.probe(url);
+  static async get(url, timeoutMs = 0) {
+    const probe = await Api.probe(url, timeoutMs);
+    if (probe.timedOut) return { error: `no answer from the console within ${Math.round(timeoutMs / 1000)} s` };
     if (!probe.status) return { error: "backend unreachable" };
     if (probe.status >= 500) return { error: `server ${probe.status}` };
     return probe.data || { error: `malformed response from ${url}` };
