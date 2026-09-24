@@ -31,6 +31,19 @@ class Api {
       return { ok: false, error: "backend unreachable" };
     }
   }
+
+  static async postBlob(url, blob) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "application/octet-stream" },
+        body: blob,
+      });
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: "backend unreachable" };
+    }
+  }
 }
 
 

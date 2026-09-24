@@ -248,6 +248,12 @@ class App {
         at        : document.getElementById("cube-globe-at"),
         container : document.getElementById("cube-globe-container"),
         stage     : document.getElementById("cube-globe-stage"),
+        tour      : {
+          move   : document.getElementById("cube-globe-move"),
+          secs   : document.getElementById("cube-globe-secs"),
+          play   : document.getElementById("cube-globe-play"),
+          record : document.getElementById("cube-globe-record"),
+        },
       },
       figures       : { root: document.getElementById("cube-figures") },
       passes        : {

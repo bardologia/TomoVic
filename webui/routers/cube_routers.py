@@ -46,9 +46,10 @@ class CubeRouter(SubRouter):
         table.add("GET", "/api/cubes/pass_map",     self.pass_map)
         table.add("GET", "/api/cubes/figure",       self.figure)
 
-        table.add("POST", "/api/cubes/load",          self.load)
-        table.add("POST", "/api/cubes/save_transect", self.save_transect)
-        table.add("POST", "/api/cubes/save_slices",   self.save_slices)
+        table.add("POST", "/api/cubes/load",            self.load)
+        table.add("POST", "/api/cubes/save_transect",   self.save_transect)
+        table.add("POST", "/api/cubes/save_slices",     self.save_slices)
+        table.add("POST", "/api/cubes/save_globe_tour", self.save_globe_tour)
 
     def listing(self, exchange: HttpExchange) -> None:
         """Answers with the preprocessing runs under the requested base."""
@@ -221,6 +222,15 @@ class CubeRouter(SubRouter):
             space   = body.get("space", "physical"),
             cmap    = body.get("cmap", "jet"),
             dem     = bool(body.get("dem", False)),
+        )
+        exchange.send_result(result)
+
+    def save_globe_tour(self, exchange: HttpExchange) -> None:
+        """Saves the recorded globe camera tour carried as the raw request body."""
+        result = self.cubes.save_globe_tour(
+            cube_id = exchange.text("id"),
+            move    = exchange.text("move"),
+            clip    = exchange.blob,
         )
         exchange.send_result(result)
 

@@ -23,7 +23,7 @@ from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 61
+ROUTE_COUNT   = 62
 SECTION_COUNT = 17
 
 RESOLUTIONS = [
@@ -34,6 +34,7 @@ RESOLUTIONS = [
     ("GET",  "/api/fs/runs",                     DatasetRouter),
     ("GET",  "/api/cubes/plane",                 CubeRouter),
     ("POST", "/api/cubes/save_slices",           CubeRouter),
+    ("POST", "/api/cubes/save_globe_tour",       CubeRouter),
     ("GET",  "/api/cubes/figures",               CubeRouter),
     ("GET",  "/api/cubes/figure",                CubeRouter),
     ("GET",  "/api/cubes/pass_map",              CubeRouter),
@@ -88,12 +89,14 @@ class EchoRouter(SubRouter):
     Attributes:
         seen: One entry per served GET, holding the wildcard key or None.
         bodies: Parsed request bodies of served POSTs.
+        blobs: Raw request bodies of served POSTs.
     """
 
     def __init__(self, sections: tuple) -> None:
         """Initialises the request logs, then declares the routes for `sections`."""
         self.seen   = []
         self.bodies = []
+        self.blobs  = []
         super().__init__(sections)
 
     def declare(self, table: RouteTable) -> None:
@@ -108,8 +111,9 @@ class EchoRouter(SubRouter):
         exchange.send_json({"ok": True})
 
     def posted(self, exchange: HttpExchange) -> None:
-        """Records the parsed request body and answers with an ok payload."""
+        """Records the parsed and raw request bodies and answers with an ok payload."""
         self.bodies.append(exchange.body)
+        self.blobs.append(exchange.blob)
         exchange.send_json({"ok": True})
 
     def tail(self, exchange: HttpExchange, key: str) -> None:
@@ -366,6 +370,20 @@ def test_a_well_formed_post_body_reaches_the_handler():
 
     assert handler.status == 200
     assert echo.bodies == [{"script_key": "pre_process"}]
+
+
+def test_a_binary_post_body_reaches_the_handler_undecoded():
+    """A media content type is handed to the handler as raw bytes instead of being parsed as JSON."""
+    echo   = EchoRouter(("/api/echo",))
+    router = RequestRouter(RecordingLogger(), [echo])
+
+    clip    = b"\x1aE\xdf\xa3 not json at all"
+    handler = FakeHandler("POST", "/api/echo", clip, headers={"Content-Type": "video/webm;codecs=vp9"})
+    router.route(handler)
+
+    assert handler.status == 200
+    assert echo.blobs  == [clip]
+    assert echo.bodies == [{}]
 
 
 def test_an_unhandled_handler_error_answers_500_and_logs_the_traceback():

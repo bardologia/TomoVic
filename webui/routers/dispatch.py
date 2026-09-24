@@ -24,9 +24,12 @@ class HttpExchange:
         path: Normalised path with the trailing slash stripped, used for routing.
         query: Parsed query string as name to list-of-values.
         body: Decoded JSON request body, empty until read_body runs.
+        blob: Raw bytes of a binary request body, empty for JSON requests.
         status: HTTP status of the response once sent, 0 before that.
         error: Error message carried by a JSON response, empty when there is none.
     """
+
+    BINARY_TYPES = ("video/", "image/", "application/octet-stream")
 
     def __init__(self, handler, method: str, raw_path: str, path: str, query: dict) -> None:
         """Stores the handler and the parsed request line for the response helpers."""
@@ -36,6 +39,7 @@ class HttpExchange:
         self.path     = path
         self.query    = query
         self.body     = {}
+        self.blob     = b""
         self.status   = 0
         self.error    = ""
 
@@ -82,13 +86,18 @@ class HttpExchange:
         return self.handler.headers.get(name) or default
 
     def read_body(self) -> None:
-        """Reads Content-Length bytes from the request and decodes them as the JSON body."""
+        """Reads Content-Length bytes, keeping a binary content type as raw bytes and decoding anything else as JSON."""
         length = int(self.handler.headers.get("Content-Length", 0) or 0)
         if length <= 0:
-            self.body = {}
             return
 
-        self.body = json.loads(self.handler.rfile.read(length).decode("utf-8"))
+        data = self.handler.rfile.read(length)
+
+        if self.header("Content-Type").startswith(self.BINARY_TYPES):
+            self.blob = data
+            return
+
+        self.body = json.loads(data.decode("utf-8"))
 
     def send_json(self, payload: dict, status: int = 200) -> None:
         """Sends `payload` as a JSON response under `status`, recording status and error."""

@@ -574,6 +574,13 @@
             <label class="lb-check" id="cube-globe-tracks-wrap" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
             <label class="lb-check" id="cube-globe-fly-wrap" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
             <button type="button" class="btn btn--mini" id="cube-globe-reframe" title="Fly the camera back to the scene">Reframe</button>
+            <div class="cube-mctl" role="group" aria-label="Camera tour">
+              <label for="cube-globe-move" title="Preset camera move played from wherever the camera stands: a full orbit, a spiral descent, a straight approach or retreat, a pass along the flight direction, or a tilt from the horizon down to nadir">tour</label>
+              <select id="cube-globe-move" class="cube-mselect"></select>
+              <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="60" step="1" inputmode="numeric" title="Length of the move in seconds" />
+              <button type="button" class="btn btn--mini" id="cube-globe-play" title="Play the move once, without recording">Play</button>
+              <button type="button" class="btn btn--mini" id="cube-globe-record" title="Play the move while capturing the globe, then write the clip as WebM under figures/globe_tours of the run">Record</button>
+            </div>
             <span class="cube-elev__at" id="cube-globe-at"></span>
           </div>
           <div class="cube-globe__stage" id="cube-globe-stage">
@@ -871,6 +878,7 @@
 <script src="/static/js/run_strip.js"></script>
 <script src="/static/js/tomogram.js"></script>
 <script src="/static/js/volume.js"></script>
+<script src="/static/js/globe_tour.js"></script>
 <script src="/static/js/globe.js"></script>
 <script src="/static/js/slice_collector.js"></script>
 <script src="/static/js/app.js"></script>
