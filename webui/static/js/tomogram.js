@@ -471,6 +471,7 @@ class TomogramCloud {
     this.colorBy = "mu";
     this.points = null;
     this.total = 0;
+    this.muBounds = null;
     this.demGrid = null;
     this.debounceTimer = null;
     this.token = 0;
@@ -506,6 +507,7 @@ class TomogramCloud {
     this.available = meta.sources.includes("full");
     this.source = this.host.srcFor();
     this.points = null;
+    this.muBounds = null;
     this.demGrid = null;
     this.demWrap.hidden = !meta.dem;
     this.demEl.checked = false;
@@ -591,14 +593,14 @@ class TomogramCloud {
     this.sweepFrame = requestAnimationFrame((next) => this._sweepStep(next));
   }
 
-  _cutSpec(muLo, muHi) {
+  _cutSpec() {
     const axis = this.cutAxisEl.value;
-    if (axis === "off" || !this.host.meta) return null;
+    if (axis === "off" || !this.host.meta || !this.muBounds) return null;
 
     const meta = this.host.meta;
     const frac = Number(this.cutPosEl.value) / 100;
-    const lo = axis === "mu" ? muLo : 0;
-    const hi = axis === "az" ? meta.n_az : axis === "rg" ? meta.n_rg : muHi;
+    const lo = axis === "mu" ? this.muBounds[0] : 0;
+    const hi = axis === "az" ? meta.n_az : axis === "rg" ? meta.n_rg : this.muBounds[1];
     return { axis, frac, threshold: lo + frac * (hi - lo) };
   }
 
@@ -617,6 +619,17 @@ class TomogramCloud {
     const lo = values[Math.floor(values.length * 0.02)];
     const hi = values[Math.floor(values.length * 0.98)];
     return hi > lo ? [lo, hi] : [lo, lo + 1];
+  }
+
+  static valueBounds(rows, offset, width) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = offset; i < rows.length; i += width) {
+      const v = rows[i];
+      if (!Number.isFinite(v)) continue;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return hi >= lo ? [lo, hi] : null;
   }
 
   _ampMin() {
@@ -660,6 +673,7 @@ class TomogramCloud {
     this.points = data.rows;
     this.total = data.header[1];
     this.muRange = this._sampleRange(data.rows, 2);
+    this.muBounds = TomogramCloud.valueBounds(data.rows, 2, 4);
     this._draw();
   }
 
@@ -742,7 +756,7 @@ class TomogramCloud {
     const sinP = Math.sin(this.pitch), cosP = Math.cos(this.pitch);
     const fit = (Math.min(W, H) / (extent * 1.9)) * this.zoom;
 
-    const cut = this._cutSpec(muLo, muHi);
+    const cut = this._cutSpec();
     let zPlotLo = Infinity, zPlotHi = -Infinity;
 
     const plot = (x, y, z, rgb) => {
