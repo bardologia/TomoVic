@@ -1146,6 +1146,7 @@ class TomogramFigures {
 
 class TomogramView {
   static LABELS = { full: "capon full", param: "parametrized" };
+  static SLOT_COLORS = ["#e45756", "#4c78a8", "#54a24b", "#b279a2", "#eeca3b", "#72b7b2", "#f58518", "#9d755d"];
   static HOLD_SAVE_MS = 4000;
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
@@ -1209,6 +1210,8 @@ class TomogramView {
     this.polling = false;
     this.profMode = "raw";
     this.profData = null;
+    this.profSlots = null;
+    this.profMix = false;
     this.profQueued = null;
     this.profFetching = false;
     this.view = "explorer";
@@ -1267,6 +1270,9 @@ class TomogramView {
     this.profModeBtns.forEach((btn) => {
       btn.addEventListener("click", () => this._setProfMode(btn.dataset.mode));
     });
+    this.profMixWrap = refs.profMixWrap || null;
+    this.profMixChk = refs.profMix || null;
+    if (this.profMixChk) this.profMixChk.addEventListener("change", () => this._setProfMix(this.profMixChk.checked));
     this.modeBtns.forEach((btn) => {
       btn.addEventListener("click", () => this._setView(btn.dataset.view));
     });
@@ -1449,6 +1455,7 @@ class TomogramView {
     });
     this.profQueued = null;
     this.profData = null;
+    this.profSlots = null;
     this.deck.dataset.mode = "map";
     this.back.hidden = true;
     this.cross.hidden = true;
@@ -1589,6 +1596,7 @@ class TomogramView {
 
     if (!this.paramActive) this.viewSource = "full";
     this._syncSrcBtns();
+    if (this.profMixWrap) this.profMixWrap.hidden = !this.paramActive;
 
     this._syncSpaceBtns();
     this._syncProfModeBtns();
@@ -2226,9 +2234,15 @@ class TomogramView {
     this.profPanels.forEach((panel) => panel.root.classList.remove("is-stale"));
 
     this._renderSlots(slots);
+    this.profSlots = this.paramActive && slots && slots.ok ? slots : null;
 
     if (!data.ok) return;
     this.profData = data;
+    this._drawProfiles();
+  }
+
+  _setProfMix(on) {
+    this.profMix = !!on;
     this._drawProfiles();
   }
 
@@ -2370,6 +2384,43 @@ class TomogramView {
         x += 20 + ctx.measureText(entry.label).width;
       });
     }
+
+    if (panel.source === "full") this._drawSlotStems(ctx, xAt, yAt);
+  }
+
+  _drawSlotStems(ctx, xAt, yAt) {
+    if (!this.profMix || !this.profSlots || !this.profData) return;
+    if (this.profSlots.az !== this.profData.az || this.profSlots.rg !== this.profData.rg) return;
+
+    const slots = this.profSlots.slots.filter((slot) => slot.amplitude > 0 && Number.isFinite(slot.mean) && Number.isFinite(slot.amplitude));
+    if (!slots.length) return;
+
+    let factor = 1;
+    const mixture = this.profData.sources.param;
+    if (this.profMode === "unit" && mixture) {
+      const values = mixture.values.map((v) => (Number.isFinite(v) ? Math.max(v, 0) : 0));
+      let area = 0;
+      for (let i = 1; i < values.length; i++) area += 0.5 * (values[i] + values[i - 1]) * Math.abs(mixture.heights[i] - mixture.heights[i - 1]);
+      factor = area > 0 ? 1 / area : 0;
+    }
+
+    slots.forEach((slot, index) => {
+      const y = yAt(slot.mean);
+      const x = xAt(slot.amplitude * factor);
+      const color = TomogramView.SLOT_COLORS[index % TomogramView.SLOT_COLORS.length];
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(xAt(0), y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
   }
 
   _scaledValues(series) {
