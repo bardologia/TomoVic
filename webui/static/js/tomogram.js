@@ -448,6 +448,8 @@ class TomogramLens {
 
 class TomogramCloud {
   static VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+  static SWEEP_MS = 9000;
+  static CUT_NAMES = { az: "azimuth", rg: "range", mu: "elevation" };
 
   constructor(refs, host) {
     this.host = host;
@@ -455,6 +457,9 @@ class TomogramCloud {
     this.thrEl = refs.thr;
     this.thrValEl = refs.thrVal;
     this.maxEl = refs.max;
+    this.cutAxisEl = refs.cutAxis;
+    this.cutPosEl = refs.cutPos;
+    this.cutSweepEl = refs.cutSweep;
     this.demWrap = refs.demWrap;
     this.demEl = refs.dem;
     this.scaleWrap = refs.scaleWrap;
@@ -469,6 +474,8 @@ class TomogramCloud {
     this.demGrid = null;
     this.debounceTimer = null;
     this.token = 0;
+    this.sweepFrame = null;
+    this.sweepT0 = null;
 
     this.yaw = 0.7;
     this.pitch = 0.9;
@@ -484,6 +491,9 @@ class TomogramCloud {
     this.maxEl.addEventListener("change", () => this._fetch());
     this.demEl.addEventListener("change", () => this._onDem());
     this.scaleEl.addEventListener("change", () => this._onScale());
+    this.cutAxisEl.addEventListener("change", () => this._onCutAxis());
+    this.cutPosEl.addEventListener("input", () => this._onCutPos());
+    this.cutSweepEl.addEventListener("change", () => this._onCutSweep());
 
     this.canvas.addEventListener("mousedown", (ev) => { this.dragging = { x: ev.clientX, y: ev.clientY }; });
     window.addEventListener("mousemove", (ev) => this._onDrag(ev));
@@ -500,6 +510,7 @@ class TomogramCloud {
     this.demWrap.hidden = !meta.dem;
     this.demEl.checked = false;
     this.scaleWrap.hidden = !meta.spacing;
+    this._stopSweep();
     this._resetView(false);
     this._syncThresholdLabel();
   }
@@ -508,6 +519,7 @@ class TomogramCloud {
     this._syncBtns();
     if (!this.points) this._fetch();
     else this._draw();
+    if (this.cutSweepEl.checked && this.sweepFrame === null) this._startSweep();
   }
 
   _setColor(colorBy) {
@@ -533,6 +545,61 @@ class TomogramCloud {
   _onScale() {
     localStorage.setItem("cube-cloud-scale", this.scaleEl.checked ? "1" : "0");
     this._draw();
+  }
+
+  _onCutAxis() {
+    if (this.cutAxisEl.value === "off") {
+      this.cutSweepEl.checked = false;
+      this._stopSweep();
+    }
+    this._draw();
+  }
+
+  _onCutPos() {
+    this._draw();
+  }
+
+  _onCutSweep() {
+    if (this.cutSweepEl.checked && this.cutAxisEl.value === "off") this.cutAxisEl.value = "az";
+    if (this.cutSweepEl.checked) this._startSweep();
+    else this._stopSweep();
+  }
+
+  _startSweep() {
+    this._stopSweep();
+    this.sweepFrame = requestAnimationFrame((now) => this._sweepStep(now));
+  }
+
+  _stopSweep() {
+    if (this.sweepFrame !== null) cancelAnimationFrame(this.sweepFrame);
+    this.sweepFrame = null;
+    this.sweepT0 = null;
+  }
+
+  _sweepStep(now) {
+    if (this.host.view !== "cloud" || !this.cutSweepEl.checked || this.cutAxisEl.value === "off") {
+      this._stopSweep();
+      return;
+    }
+
+    if (this.sweepT0 === null) this.sweepT0 = now - (Number(this.cutPosEl.value) / 100) * (TomogramCloud.SWEEP_MS / 2);
+    const phase = ((now - this.sweepT0) % TomogramCloud.SWEEP_MS) / TomogramCloud.SWEEP_MS;
+    const tri = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+
+    this.cutPosEl.value = String(Math.round(tri * 100));
+    this._draw();
+    this.sweepFrame = requestAnimationFrame((next) => this._sweepStep(next));
+  }
+
+  _cutSpec(muLo, muHi) {
+    const axis = this.cutAxisEl.value;
+    if (axis === "off" || !this.host.meta) return null;
+
+    const meta = this.host.meta;
+    const frac = Number(this.cutPosEl.value) / 100;
+    const lo = axis === "mu" ? muLo : 0;
+    const hi = axis === "az" ? meta.n_az : axis === "rg" ? meta.n_rg : muHi;
+    return { axis, frac, threshold: lo + frac * (hi - lo) };
   }
 
   static ampFloor(meta, source, frac) {
@@ -675,7 +742,12 @@ class TomogramCloud {
     const sinP = Math.sin(this.pitch), cosP = Math.cos(this.pitch);
     const fit = (Math.min(W, H) / (extent * 1.9)) * this.zoom;
 
+    const cut = this._cutSpec(muLo, muHi);
+    let zPlotLo = Infinity, zPlotHi = -Infinity;
+
     const plot = (x, y, z, rgb) => {
+      if (z < zPlotLo) zPlotLo = z;
+      if (z > zPlotHi) zPlotHi = z;
       const rx = x * cosY - y * sinY;
       const ry = x * sinY + y * cosY;
       const sx = Math.round(W / 2 + rx * fit);
@@ -692,7 +764,9 @@ class TomogramCloud {
 
     if (grid) {
       for (let az = 0; az < meta.n_az; az += 4) {
+        if (cut && cut.axis === "az" && az > cut.threshold) continue;
         for (let rg = 0; rg < meta.n_rg; rg += 4) {
+          if (cut && cut.axis === "rg" && rg > cut.threshold) continue;
           const g = grid[az * meta.n_rg + rg];
           if (!Number.isFinite(g)) continue;
           plot((rg - cx) * rgStep, (az - cy) * azStep, (g - zMid) * zScale, [110, 116, 122]);
@@ -703,7 +777,13 @@ class TomogramCloud {
     const rows = this.points;
     const [ampLo, ampHi] = meta.intensity[this.source];
 
+    const cutOffset = cut ? { az: 0, rg: 1, mu: 2 }[cut.axis] : 0;
+    let drawn = 0;
+
     for (let i = 0; i < rows.length; i += 4) {
+      if (cut && rows[i + cutOffset] > cut.threshold) continue;
+      drawn += 1;
+
       const mu = rows[i + 2];
       const amp = rows[i + 3];
 
@@ -721,12 +801,49 @@ class TomogramCloud {
     }
 
     ctx.putImageData(image, 0, 0);
+    if (cut) this._drawCutPlane(ctx, cut, { meta, cx, cy, azStep, rgStep, zMid, zScale, muLo, muHi, zLo: zPlotLo, zHi: zPlotHi, W, H, fit, sinY, cosY, sinP, cosP });
 
-    const shown = rows.length / 4;
+    const shown = cut ? drawn : rows.length / 4;
     const scaleNote = spacing
       ? ` · 1:1 in metres · az ${Math.round(meta.n_az * azStep)} m × rg ${Math.round(meta.n_rg * rgStep)} m`
       : "";
-    this.atEl.textContent = `${shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${scaleNote} · drag to orbit · wheel to zoom · double-click to reset`;
+    const cutNote = cut ? ` · cut ${TomogramCloud.CUT_NAMES[cut.axis]} @ ${Math.round(cut.frac * 100)}%` : "";
+    this.atEl.textContent = `${shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${scaleNote}${cutNote} · drag to orbit · wheel to zoom · double-click to reset`;
+  }
+
+  _drawCutPlane(ctx, cut, g) {
+    const zLo = Number.isFinite(g.zLo) ? g.zLo : (g.muLo - g.zMid) * g.zScale;
+    const zHi = Number.isFinite(g.zHi) ? g.zHi : (g.muHi - g.zMid) * g.zScale;
+    const x0 = (0 - g.cx) * g.rgStep, x1 = (g.meta.n_rg - g.cx) * g.rgStep;
+    const y0 = (0 - g.cy) * g.azStep, y1 = (g.meta.n_az - g.cy) * g.azStep;
+
+    let corners;
+    if (cut.axis === "az") {
+      const y = (cut.threshold - g.cy) * g.azStep;
+      corners = [[x0, y, zLo], [x1, y, zLo], [x1, y, zHi], [x0, y, zHi]];
+    } else if (cut.axis === "rg") {
+      const x = (cut.threshold - g.cx) * g.rgStep;
+      corners = [[x, y0, zLo], [x, y1, zLo], [x, y1, zHi], [x, y0, zHi]];
+    } else {
+      const z = (cut.threshold - g.zMid) * g.zScale;
+      corners = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+    }
+
+    const pts = corners.map(([x, y, z]) => {
+      const rx = x * g.cosY - y * g.sinY;
+      const ry = x * g.sinY + y * g.cosY;
+      return [g.W / 2 + rx * g.fit, g.H / 2 + (ry * g.cosP - z * g.sinP) * g.fit];
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255, 209, 102, 0.10)";
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.55)";
+    ctx.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+    ctx.fill();
+    ctx.stroke();
   }
 }
 
