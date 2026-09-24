@@ -1398,6 +1398,27 @@ class TomogramView {
     if (this.jumpGo) this.jumpGo.addEventListener("click", () => this._setManualCut());
     if (this.jumpPrint) this.jumpPrint.addEventListener("click", () => this._printSlices());
 
+    this.pendingState = null;
+    this.storySnapshots = {};
+    this.storyTimer = null;
+
+    this.linkBtn = refs.linkBtn || null;
+    if (this.linkBtn) this.linkBtn.addEventListener("click", () => this._copyLink());
+
+    const story = refs.story || {};
+    this.storyPanel = story.panel || null;
+    this.storyName = story.name || null;
+    this.storyPlayBtn = story.play || null;
+    this.storyHint = story.hint || null;
+    this.storyList = story.list || null;
+    if (this.storyPanel) {
+      if (story.toggle) story.toggle.addEventListener("click", () => this._toggleStoryPanel());
+      if (story.add) story.add.addEventListener("click", () => this._storyAdd());
+      if (this.storyPlayBtn) this.storyPlayBtn.addEventListener("click", () => this._storyTogglePlay());
+      if (story.export) story.export.addEventListener("click", () => this._storyExport());
+      if (story.clear) story.clear.addEventListener("click", () => this._storyClear());
+    }
+
     this.jumpDownload = refs.jumpDownload || null;
     this.jumpCsv = refs.jumpCsv || null;
     if (this.jumpDownload) this.jumpDownload.addEventListener("click", () => this._downloadCuts());
@@ -1470,18 +1491,282 @@ class TomogramView {
 
   leave() {
     this._stopSweeps();
+    this._storyStopPlay();
     if (this.cloud) this.cloud.leave();
     if (this.globe) this.globe.leave();
     if (this.passes) this.passes.leave();
   }
 
-  async enter() {
+  async enter(param = null) {
+    const state = this._parseState(param);
+    if (state) this.pendingState = state;
+
     if (this.entered) {
       await this._refreshStrip();
+      this._applyPendingState();
       return;
     }
     this.entered = true;
     await this.refresh();
+    this._applyPendingState();
+  }
+
+  _parseState(param) {
+    if (!param) return null;
+
+    try {
+      const query = new URLSearchParams(decodeURIComponent(param));
+      if (!query.get("id")) return null;
+      return {
+        id     : query.get("id"),
+        view   : query.get("view"),
+        az     : query.has("az") ? Number(query.get("az")) : null,
+        rg     : query.has("rg") ? Number(query.get("rg")) : null,
+        source : query.get("source"),
+        space  : query.get("space"),
+        cmap   : query.get("cmap"),
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  stateParam() {
+    const query = new URLSearchParams();
+    query.set("id", this.selectedId);
+    query.set("view", this.view);
+    query.set("source", this.srcFor());
+    query.set("space", this.space);
+    query.set("cmap", this.cmap);
+
+    const point = this.locked || this.point;
+    if (point) {
+      query.set("az", String(point.az));
+      query.set("rg", String(point.rg));
+    }
+
+    return encodeURIComponent(query.toString());
+  }
+
+  _applyPendingState() {
+    const state = this.pendingState;
+    if (!state) return;
+
+    if (state.id !== this.selectedId || !this.meta) {
+      if (this.cubes.some((cube) => cube.id === state.id)) {
+        this.select(state.id);
+      } else if (this.cubes.length) {
+        Toast.show("The linked cube is not in the current runs root.", "warn");
+        this.pendingState = null;
+      }
+      return;
+    }
+
+    this.pendingState = null;
+    this._applyState(state);
+  }
+
+  _applyState(state) {
+    if (state.cmap && this.cmapSel && [...this.cmapSel.options].some((option) => option.value === state.cmap)) {
+      this.cmapSel.value = state.cmap;
+      this._setCmap(state.cmap);
+    }
+    if (state.space) this._setSpace(state.space);
+    if (state.source) this._setViewSource(state.source);
+
+    if (Number.isFinite(state.az) && Number.isFinite(state.rg)) {
+      const az = Math.max(0, Math.min(this.meta.n_az - 1, state.az));
+      const rg = Math.max(0, Math.min(this.meta.n_rg - 1, state.rg));
+      const point = { az, rg, fx: (rg + 0.5) / this.meta.n_rg, fy: (az + 0.5) / this.meta.n_az };
+      if (this.view !== "explorer") this._setView("explorer");
+      this._follow(point, true);
+      this._enterSlices(point);
+    }
+
+    if (state.view) this._setView(state.view);
+  }
+
+  _copyLink() {
+    if (!this.selectedId || !this.meta) {
+      Toast.show("Load a cube first.", "warn");
+      return;
+    }
+
+    const url = `${location.origin}${location.pathname}#/cube/${this.stateParam()}`;
+    navigator.clipboard.writeText(url)
+      .then(() => Toast.show("View link copied to the clipboard.", "ok"))
+      .catch(() => Toast.show(url, "ok"));
+  }
+
+  _storyStore() {
+    try {
+      return JSON.parse(localStorage.getItem("cube-story") || "[]");
+    } catch (e) {
+      return [];
+    }
+  }
+
+  _storySave(steps) {
+    localStorage.setItem("cube-story", JSON.stringify(steps));
+  }
+
+  _toggleStoryPanel() {
+    this.storyPanel.hidden = !this.storyPanel.hidden;
+    if (!this.storyPanel.hidden) this._storyRender();
+  }
+
+  _snapshotDataUrl() {
+    const active = this.viewEls.find((el) => !el.hidden);
+    if (!active) return null;
+
+    const canvas = [...active.querySelectorAll("canvas")].find((c) => c.width > 0);
+    if (canvas) {
+      try { return canvas.toDataURL("image/png"); } catch (e) { return null; }
+    }
+
+    const img = active.querySelector("img");
+    if (img && img.naturalWidth) {
+      const copy = document.createElement("canvas");
+      copy.width = img.naturalWidth;
+      copy.height = img.naturalHeight;
+      try {
+        copy.getContext("2d").drawImage(img, 0, 0);
+        return copy.toDataURL("image/png");
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  _storyAdd() {
+    if (!this.selectedId || !this.meta) {
+      Toast.show("Load a cube first.", "warn");
+      return;
+    }
+
+    const steps = this._storyStore();
+    const step = {
+      id    : `${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
+      name  : (this.storyName.value || "").trim() || `step ${steps.length + 1}`,
+      param : this.stateParam(),
+    };
+
+    const snapshot = this._snapshotDataUrl();
+    if (snapshot) this.storySnapshots[step.id] = snapshot;
+
+    steps.push(step);
+    this._storySave(steps);
+    this.storyName.value = "";
+    this._storyRender();
+    Toast.show(`Story step '${step.name}' recorded.`, "ok");
+  }
+
+  _storyRender() {
+    const steps = this._storyStore();
+    this.storyHint.textContent = steps.length ? `${steps.length} steps · snapshots live only until the page reloads` : "No steps yet — set up a view and press Add step.";
+
+    this.storyList.innerHTML = "";
+    steps.forEach((step, index) => {
+      const item = document.createElement("li");
+
+      const label = document.createElement("span");
+      label.className = "cube-story__name";
+      label.textContent = `${index + 1}. ${step.name}`;
+      item.appendChild(label);
+
+      const go = document.createElement("button");
+      go.type = "button";
+      go.className = "btn btn--mini";
+      go.textContent = "Go";
+      go.addEventListener("click", () => this._storyGo(step));
+      item.appendChild(go);
+
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "btn btn--mini";
+      copy.textContent = "Copy link";
+      copy.addEventListener("click", () => {
+        const url = `${location.origin}${location.pathname}#/cube/${step.param}`;
+        navigator.clipboard.writeText(url).then(() => Toast.show("Step link copied.", "ok")).catch(() => Toast.show(url, "ok"));
+      });
+      item.appendChild(copy);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn btn--mini";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        this._storySave(this._storyStore().filter((entry) => entry.id !== step.id));
+        delete this.storySnapshots[step.id];
+        this._storyRender();
+      });
+      item.appendChild(remove);
+
+      this.storyList.appendChild(item);
+    });
+  }
+
+  _storyGo(step) {
+    const state = this._parseState(step.param);
+    if (!state) return;
+    this.pendingState = state;
+    this._applyPendingState();
+  }
+
+  _storyTogglePlay() {
+    if (this.storyTimer !== null) {
+      this._storyStopPlay();
+      return;
+    }
+
+    const steps = this._storyStore();
+    if (!steps.length) {
+      Toast.show("The story has no steps yet.", "warn");
+      return;
+    }
+
+    let index = 0;
+    this.storyPlayBtn.textContent = "Stop";
+    const advance = () => {
+      this._storyGo(steps[index]);
+      index += 1;
+      if (index >= steps.length) {
+        this._storyStopPlay();
+        return;
+      }
+      this.storyTimer = setTimeout(advance, 2600);
+    };
+    this.storyTimer = setTimeout(advance, 10);
+  }
+
+  _storyStopPlay() {
+    if (this.storyTimer !== null) clearTimeout(this.storyTimer);
+    this.storyTimer = null;
+    if (this.storyPlayBtn) this.storyPlayBtn.textContent = "Play";
+  }
+
+  _storyExport() {
+    const steps = this._storyStore();
+    let count = 0;
+
+    steps.forEach((step, index) => {
+      const snapshot = this.storySnapshots[step.id];
+      if (!snapshot) return;
+      const link = document.createElement("a");
+      link.href = snapshot;
+      link.download = `story_${String(index + 1).padStart(2, "0")}_${step.name.replace(/[^A-Za-z0-9._-]+/g, "_")}.png`;
+      link.click();
+      count += 1;
+    });
+
+    if (!count) Toast.show("No snapshots in memory — snapshots are taken when a step is added and last until reload.", "warn");
+  }
+
+  _storyClear() {
+    this._storySave([]);
+    this.storySnapshots = {};
+    this._storyRender();
   }
 
   async _refreshStrip() {
@@ -1750,6 +2035,7 @@ class TomogramView {
 
     this._follow({ az: Math.floor(meta.n_az / 2), rg: Math.floor(meta.n_rg / 2), fx: 0.5, fy: 0.5 }, true);
     this._consumeFocus();
+    this._applyPendingState();
 
     const sweep = this._sweepFor(this.view);
     if (sweep) sweep.play();
