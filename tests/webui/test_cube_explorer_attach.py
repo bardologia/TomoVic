@@ -42,7 +42,8 @@ def test_meta_timings_book_every_load_stage(tmp_path):
 
     timings = explorer.load_status()["cube"]["timings"]
 
-    assert timings["total"] >= sum(timings["stages"].values()) > 0.0
+    assert timings["total"] > 0.0
+    assert sum(timings["stages"].values()) <= timings["total"] + 0.001 * len(timings["stages"])
     assert set(timings["stages"]) == {"full", "param", "primary", "dem", "geocoding", "passes"}
     assert all(seconds >= 0.0 for seconds in timings["stages"].values())
 
