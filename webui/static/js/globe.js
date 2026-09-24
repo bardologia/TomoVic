@@ -63,6 +63,7 @@ class TomogramGlobe {
   configure(meta) {
     this.available = !!meta.globe && meta.sources.includes("full");
     this.source = this.host.srcFor();
+    if (meta.globe_defaults) this.maxEl.value = meta.globe_defaults.max_points;
 
     const hasTracks = !!(meta.globe && meta.globe.tracks);
     this.tracksEl.disabled = !hasTracks;
@@ -86,13 +87,16 @@ class TomogramGlobe {
     this._syncThresholdLabel();
   }
 
-  _ampMin() {
-    return TomogramCloud.ampFloor(this.host.meta, this.source, Number(this.thrEl.value) / 100);
+  _ampMin(source = this.source) {
+    const frac = Number(this.thrEl.value) / 100;
+    const defaults = this.host.meta.globe_defaults;
+    if (frac === 0 && defaults && defaults.amp_min[source] !== undefined) return defaults.amp_min[source];
+    return TomogramCloud.ampFloor(this.host.meta, source, frac);
   }
 
   _maxPoints() {
     const value = Math.floor(Number(this.maxEl.value));
-    if (!Number.isFinite(value) || value < 0) return 60000;
+    if (!Number.isFinite(value) || value < 0) return this.host.meta.globe_defaults.max_points;
     return value;
   }
 
@@ -203,9 +207,8 @@ class TomogramGlobe {
   }
 
   _url(source) {
-    const ampMin = TomogramCloud.ampFloor(this.host.meta, source, Number(this.thrEl.value) / 100);
     return `/api/cubes/globe_points?id=${encodeURIComponent(this.host.selectedId)}&source=${source}` +
-      `&amp_min=${ampMin}&max=${this._maxPoints()}`;
+      `&amp_min=${this._ampMin(source)}&max=${this._maxPoints()}`;
   }
 
   _load(url) {
