@@ -25,6 +25,7 @@ class TomogramGlobe {
     this.tracksEl = refs.tracks;
     this.flyEl = refs.fly;
     this.reframeEl = refs.reframe;
+    this.fullEl = refs.full;
     this.atEl = refs.at;
     this.container = refs.container;
     this.stageEl = refs.stage;
@@ -80,6 +81,8 @@ class TomogramGlobe {
     this.tracksEl.addEventListener("change", () => this._onTracksToggle());
     this.flyEl.addEventListener("change", () => this._onFlyToggle());
     this.reframeEl.addEventListener("click", () => this._flyToScene(true));
+    this.fullEl.addEventListener("click", () => this._onFullscreen());
+    document.addEventListener("fullscreenchange", () => this._syncFullscreen());
     this.cutAxisEl.addEventListener("change", () => this._onCutAxis());
     this.cutPosEl.addEventListener("input", () => this._onCutPos());
     this.cutSweepEl.addEventListener("change", () => this._onCutSweep());
@@ -232,6 +235,15 @@ class TomogramGlobe {
     if (!this.collection) return;
     this.collection.show = this.pointsEl.checked;
     this.viewer.scene.requestRender();
+  }
+
+  _onFullscreen() {
+    if (document.fullscreenElement === this.stageEl) document.exitFullscreen();
+    else this.stageEl.requestFullscreen();
+  }
+
+  _syncFullscreen() {
+    this.fullEl.textContent = document.fullscreenElement === this.stageEl ? "Windowed" : "Full screen";
   }
 
   _onTracksToggle() {
