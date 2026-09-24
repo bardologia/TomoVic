@@ -46,6 +46,8 @@ class TomogramGlobe {
     this.flightFrame = null;
     this.flightT0 = null;
     this.pointAlong = null;
+    this.alongOrder = null;
+    this.shownUpTo = -1;
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -83,6 +85,8 @@ class TomogramGlobe {
     this.flown = false;
     this.flightBasis = null;
     this.pointAlong = null;
+    this.alongOrder = null;
+    this.shownUpTo = -1;
     if (this.collection) {
       this.collection.removeAll();
       this.trackLayer.removeAll();
@@ -409,6 +413,9 @@ class TomogramGlobe {
       });
     }
 
+    this.alongOrder = this.pointAlong ? this._alongOrder(this.pointAlong) : null;
+    this.shownUpTo = this.pointAlong ? this.collection.length - 1 : -1;
+
     if (!this.flown) {
       this._flyToScene(false);
       this.flown = true;
@@ -418,6 +425,12 @@ class TomogramGlobe {
     this._redrawTracks();
     this._syncStatus();
     this.viewer.scene.requestRender();
+  }
+
+  _alongOrder(along) {
+    const order = new Int32Array(along.length);
+    for (let i = 0; i < order.length; i += 1) order[i] = i;
+    return order.sort((a, b) => along[a] - along[b]);
   }
 
   _syncStatus() {
@@ -506,7 +519,14 @@ class TomogramGlobe {
 
   _startFlight() {
     this.flightT0 = null;
+    this._setAllPoints(false);
     this.flightFrame = requestAnimationFrame((now) => this._flightStep(now));
+  }
+
+  _setAllPoints(show) {
+    if (!this.collection || !this.pointAlong) return;
+    for (let i = 0; i < this.collection.length; i += 1) this.collection.get(i).show = show;
+    this.shownUpTo = show ? this.collection.length - 1 : -1;
   }
 
   _stopFlight() {
@@ -516,9 +536,7 @@ class TomogramGlobe {
     }
     this.flightT0 = null;
 
-    if (this.collection && this.pointAlong) {
-      for (let i = 0; i < this.collection.length; i += 1) this.collection.get(i).show = true;
-    }
+    this._setAllPoints(true);
     if (this.flightGroup) {
       this.flightGroup.forEach((item) => { item.modelMatrix = Cesium.Matrix4.clone(Cesium.Matrix4.IDENTITY); });
     }
@@ -541,14 +559,24 @@ class TomogramGlobe {
     const matrix = Cesium.Matrix4.fromTranslation(shift);
     this.flightGroup.forEach((item) => { item.modelMatrix = matrix; });
 
-    if (this.pointAlong) {
-      for (let i = 0; i < this.pointAlong.length; i += 1) {
-        this.collection.get(i).show = this.pointAlong[i] <= s;
-      }
-    }
+    if (this.pointAlong && this.collection.show) this._advanceCurtain(s);
 
     this.viewer.scene.requestRender();
     this.flightFrame = requestAnimationFrame((next) => this._flightStep(next));
+  }
+
+  _advanceCurtain(s) {
+    const order = this.alongOrder;
+
+    if (this.shownUpTo >= 0 && this.pointAlong[order[this.shownUpTo]] > s) {
+      for (let i = 0; i <= this.shownUpTo; i += 1) this.collection.get(order[i]).show = false;
+      this.shownUpTo = -1;
+    }
+
+    while (this.shownUpTo + 1 < order.length && this.pointAlong[order[this.shownUpTo + 1]] <= s) {
+      this.shownUpTo += 1;
+      this.collection.get(order[this.shownUpTo]).show = true;
+    }
   }
 
   _addPlaneGlyph(apex, refLine, up) {
