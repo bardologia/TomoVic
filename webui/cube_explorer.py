@@ -1052,11 +1052,13 @@ class CubeExplorer:
         rel     = Path("figures") / "cube_slices" / f"az{az:04d}_rg{rg:04d}"
         out_dir = reader.save_dir / rel
 
+        tracks = {axis: self._slice_dem_track(cube_id, axis, az, rg) for axis in ("range", "azimuth")} if dem else {}
+
         files = []
         for source in meta["sources"]:
             for axis in ("range", "azimuth"):
+                track = tracks.get(axis)
                 data, heights, vmin, vmax = self._cut(entries[source], axis, az, rg, space)
-                track = self._slice_dem_track(cube_id, axis, az, rg) if dem else None
                 if track is not None:
                     data, heights = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entries[source], vmin))
                 saved = self.archiver.render(data, heights, vmin, vmax, source, axis, az, rg, space, out_dir / f"{axis}_{source}_{space}.png", cmap=self._entry_cmap(entries[source], cmap))
@@ -1161,6 +1163,9 @@ class CubeExplorer:
     def _dem_relative(self, cube_id: str) -> np.ndarray | None:
         """Returns the loaded cube's DEM referenced to its median terrain height.
 
+        The grid is built once at load time, so slice and transect tracks index
+        into it instead of rebuilding it per request.
+
         Args:
             cube_id: Id of the loaded cube.
 
@@ -1171,12 +1176,14 @@ class CubeExplorer:
         with self.lock:
             if self.loaded is None or self.loaded["id"] != cube_id:
                 return None
-            dem = self.loaded["dem"]
+            return self.loaded["dem_relative"]
 
+    @classmethod
+    def _dem_relative_grid(cls, dem: np.ndarray | None) -> np.ndarray | None:
+        """Returns a DEM as float64 heights relative to its median, or None for no DEM."""
         if dem is None:
             return None
-
-        return np.asarray(dem, dtype=np.float64) - self._dem_median(dem)
+        return np.asarray(dem, dtype=np.float64) - cls._dem_median(dem)
 
     @staticmethod
     def _dem_median(dem: np.ndarray) -> float:
@@ -1339,7 +1346,7 @@ class CubeExplorer:
             clim = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
 
             with self.lock:
-                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "geo": geo}
+                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
 
             self.logger.muted(f"cube ready: {cube_id} sources={meta['sources']}")
