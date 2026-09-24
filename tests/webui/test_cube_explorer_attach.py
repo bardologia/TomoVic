@@ -86,14 +86,19 @@ def test_transect_png_samples_line(tmp_path):
     """Checks transects render in both colour spaces and return None for unknown sources or cubes."""
     explorer, cube_id = loaded_run(tmp_path)
 
-    png = explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1)
+    png = explorer.transect_png(cube_id, "full", [(0, 0), (N_AZ - 1, N_RG - 1)])
     assert png and png[:4] == b"\x89PNG"
 
-    normalized = explorer.transect_png(cube_id, "full", az0=2, rg0=1, az1=2, rg1=4, space="normalized")
+    normalized = explorer.transect_png(cube_id, "full", [(2, 1), (2, 4)], space="normalized")
     assert normalized and normalized[:4] == b"\x89PNG"
 
-    assert explorer.transect_png(cube_id, "banana", 0, 0, 1, 1) is None
-    assert explorer.transect_png("wrong", "full", 0, 0, 1, 1) is None
+    bent = explorer.transect_png(cube_id, "full", [(0, 0), (N_AZ - 1, 0), (N_AZ - 1, N_RG - 1)])
+    assert bent and bent[:4] == b"\x89PNG"
+
+    assert explorer.transect_png(cube_id, "full", [(1, 1)]) is None
+    assert explorer.transect_png(cube_id, "full", [(1, 1), (1, 1)]) is None
+    assert explorer.transect_png(cube_id, "banana", [(0, 0), (1, 1)]) is None
+    assert explorer.transect_png("wrong", "full", [(0, 0), (1, 1)]) is None
 
 
 def test_slice_png_dem_flag_shifts_columns_onto_terrain(tmp_path):
@@ -131,8 +136,8 @@ def test_transect_png_dem_flag_shifts_samples_onto_terrain(tmp_path):
     """Checks the DEM flag extends a transect section along the shifted elevation span."""
     explorer, cube_id = _loaded_sloped_dem_run(tmp_path)
 
-    plain   = _decode_png(explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1))
-    shifted = _decode_png(explorer.transect_png(cube_id, "full", az0=0, rg0=0, az1=N_AZ - 1, rg1=N_RG - 1, dem=True))
+    plain   = _decode_png(explorer.transect_png(cube_id, "full", [(0, 0), (N_AZ - 1, N_RG - 1)]))
+    shifted = _decode_png(explorer.transect_png(cube_id, "full", [(0, 0), (N_AZ - 1, N_RG - 1)], dem=True))
 
     assert shifted.shape[0] > plain.shape[0]
     assert shifted.shape[1] == plain.shape[1]
@@ -168,7 +173,8 @@ def test_transect_cut_geometry(tmp_path):
     explorer, cube_id = loaded_run(tmp_path)
 
     entry = explorer._entry(cube_id, "full")
-    data, heights, vmin, vmax = explorer._transect_cut(entry, 0, 0, N_AZ - 1, N_RG - 1, "physical")
+    az_idx, rg_idx = explorer._path_indices([(0, 0), (N_AZ - 1, N_RG - 1)])
+    data, heights, vmin, vmax = explorer._transect_cut(entry, az_idx, rg_idx, "physical")
 
     assert data.shape == (N_ELEV, max(N_AZ, N_RG))
     assert heights[0] == -10.0 and heights[-1] == 30.0
@@ -182,7 +188,7 @@ def test_save_transect_writes_figures(tmp_path):
     """Checks saving a transect writes one non-empty figure per source under a coordinate-named directory."""
     explorer, cube_id = loaded_run(tmp_path)
 
-    result = explorer.save_transect(cube_id, az0=0, rg0=0, az1=4, rg1=5)
+    result = explorer.save_transect(cube_id, [(0, 0), (4, 5)])
     assert result["ok"], result
 
     out_dir = Path(result["dir"])
@@ -194,12 +200,33 @@ def test_save_transect_writes_figures(tmp_path):
     assert all((out_dir / name).stat().st_size > 0 for name in expected)
 
 
+def test_path_indices_trace_a_bent_polyline(tmp_path):
+    """Checks a bent polyline samples every segment once and shares its interior vertex."""
+    az_idx, rg_idx = CubeExplorer._path_indices([(0, 0), (0, 3), (2, 3)])
+
+    assert az_idx.tolist() == [0, 0, 0, 0, 1, 2]
+    assert rg_idx.tolist() == [0, 1, 2, 3, 3, 3]
+
+    assert CubeExplorer._clip_points([(-4, 99), (-4, 99), (1, 1)], N_AZ, N_RG) == [(0, N_RG - 1), (1, 1)]
+    assert CubeExplorer._clip_points([(1, 1), (1, 1)], N_AZ, N_RG) is None
+
+
+def test_save_transect_names_the_bent_polyline(tmp_path):
+    """Checks a polyline with interior vertices saves under a directory naming the vertex count."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    result = explorer.save_transect(cube_id, [(0, 0), (4, 0), (4, 5)])
+    assert result["ok"], result
+    assert result["rel"] == "figures/cube_transects/az0000_rg0000_to_az0004_rg0005_via1"
+
+
 def test_save_transect_rejects_bad_space_and_unloaded(tmp_path):
     """Checks an unknown colour space and an unloaded cube are both refused."""
     explorer, cube_id = loaded_run(tmp_path)
 
-    assert not explorer.save_transect(cube_id, 0, 0, 1, 1, space="banana")["ok"]
-    assert not explorer.save_transect(str(tmp_path / "nowhere"), 0, 0, 1, 1)["ok"]
+    assert not explorer.save_transect(cube_id, [(0, 0), (1, 1)], space="banana")["ok"]
+    assert not explorer.save_transect(cube_id, [(1, 1)])["ok"]
+    assert not explorer.save_transect(str(tmp_path / "nowhere"), [(0, 0), (1, 1)])["ok"]
 
 
 def test_reload_of_the_same_run_is_a_no_op(tmp_path):
@@ -220,7 +247,7 @@ def test_cmap_selection(tmp_path):
 
     assert explorer.slice_png(cube_id, "full", "range", az=0, rg=0, cmap="viridis")[:4] == b"\x89PNG"
     assert explorer.plane_png(cube_id, "full", frac=0.5, cmap="gray")[:4] == b"\x89PNG"
-    assert explorer.transect_png(cube_id, "full", 0, 0, 2, 2, cmap="inferno")[:4] == b"\x89PNG"
+    assert explorer.transect_png(cube_id, "full", [(0, 0), (2, 2)], cmap="inferno")[:4] == b"\x89PNG"
 
 
 def test_second_explorer_requires_its_own_load(tmp_path):
@@ -345,7 +372,7 @@ def test_param_slice_plane_and_transect_render(tmp_path):
     assert explorer.slice_png(cube_id, "param", "range", az=1, rg=2)[:4] == b"\x89PNG"
     assert explorer.slice_png(cube_id, "param", "azimuth", az=1, rg=2, space="normalized")[:4] == b"\x89PNG"
     assert explorer.plane_png(cube_id, "param", frac=0.5)[:4] == b"\x89PNG"
-    assert explorer.transect_png(cube_id, "param", 0, 0, N_AZ - 1, N_RG - 1)[:4] == b"\x89PNG"
+    assert explorer.transect_png(cube_id, "param", [(0, 0), (N_AZ - 1, N_RG - 1)])[:4] == b"\x89PNG"
 
 
 def test_save_slices_include_the_param_source(tmp_path):

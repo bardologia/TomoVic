@@ -122,15 +122,26 @@ class CubeRouter(SubRouter):
         """Answers with the binary DEM grid of the requested cube."""
         exchange.send_bytes(self.cubes.dem_grid_bin(cube_id=exchange.text("id")))
 
+    @staticmethod
+    def _parse_points(text: str) -> list:
+        """Parses a `pts` query value of the form ``az,rg;az,rg;...`` into vertex pairs."""
+        points = []
+        for token in text.split(";"):
+            parts = token.split(",")
+            if len(parts) != 2:
+                continue
+            try:
+                points.append((int(parts[0]), int(parts[1])))
+            except ValueError:
+                continue
+        return points
+
     def transect(self, exchange: HttpExchange) -> None:
-        """Answers with the PNG vertical transect between two azimuth/range pixels."""
+        """Answers with the PNG vertical transect along the polyline in `pts`."""
         png = self.cubes.transect_png(
             cube_id = exchange.text("id"),
             source  = exchange.text("source", "full"),
-            az0     = exchange.integer("az0"),
-            rg0     = exchange.integer("rg0"),
-            az1     = exchange.integer("az1"),
-            rg1     = exchange.integer("rg1"),
+            points  = self._parse_points(exchange.text("pts")),
             space   = exchange.text("space", "physical"),
             cmap    = exchange.text("cmap", "jet"),
             dem     = exchange.integer("dem", "0") != 0,
@@ -179,14 +190,11 @@ class CubeRouter(SubRouter):
         exchange.send_result(self.cubes.start_load(exchange.body.get("id", ""), exchange.body.get("param_tag")))
 
     def save_transect(self, exchange: HttpExchange) -> None:
-        """Saves the transect described in the request body as a figure on disk."""
+        """Saves the transect polyline described in the request body as figures on disk."""
         body   = exchange.body
         result = self.cubes.save_transect(
             cube_id = body.get("id", ""),
-            az0     = int(body.get("az0", 0)),
-            rg0     = int(body.get("rg0", 0)),
-            az1     = int(body.get("az1", 0)),
-            rg1     = int(body.get("rg1", 0)),
+            points  = [(int(pair[0]), int(pair[1])) for pair in body.get("pts") or [] if len(pair) == 2],
             space   = body.get("space", "physical"),
             cmap    = body.get("cmap", "jet"),
             dem     = bool(body.get("dem", False)),

@@ -232,55 +232,51 @@ class TomogramSweep {
 }
 
 class TomogramTransect {
+  static PROMPT = "Click points on the map to trace a polyline; every segment is cut through the tomograms.";
+
   constructor(refs, host) {
     this.host = host;
     this.atEl = refs.at;
+    this.undoBtn = refs.undo;
     this.clearBtn = refs.clear;
     this.printBtn = refs.print;
+    this.downloadBtn = refs.download || null;
+    this.nameEl = refs.name;
+    this.saveBtn = refs.save;
+    this.savedSel = refs.saved;
+    this.removeBtn = refs.remove;
     this.map = refs.map;
     this.overlay = refs.overlay;
     this.grid = refs.grid;
     this.panels = refs.panels || [];
 
-    this.start = null;
-    this.end = null;
+    this.points = [];
     this.token = 0;
     this.saving = false;
 
     this.map.addEventListener("click", (ev) => this._onClick(ev));
+    if (this.undoBtn) this.undoBtn.addEventListener("click", () => this._undo());
     this.clearBtn.addEventListener("click", () => this._reset());
     this.printBtn.addEventListener("click", () => this._print());
-    this.downloadBtn = refs.download || null;
     if (this.downloadBtn) this.downloadBtn.addEventListener("click", () => this._download());
-  }
-
-  _download() {
-    if (!this.start || !this.end) return;
-
-    const tag = `${this.host.fileTag()}_transect_az${this.start.az}_rg${this.start.rg}_to_az${this.end.az}_rg${this.end.rg}`;
-    let count = 0;
-
-    this.panels.forEach((panel) => {
-      if (panel.root.hidden || !panel.canvas.width) return;
-      this.host.downloadCanvas(panel.canvas, `${tag}_${this.host.srcFor()}_${this.host.space}.png`);
-      count += 1;
-    });
-
-    if (!count) Toast.show("No rendered transect panel to download.", "warn");
+    if (this.saveBtn) this.saveBtn.addEventListener("click", () => this._saveLine());
+    if (this.savedSel) this.savedSel.addEventListener("change", () => this._loadLine());
+    if (this.removeBtn) this.removeBtn.addEventListener("click", () => this._deleteLine());
   }
 
   configure() {
     this._reset();
     this.map.src = `/api/cubes/primary?id=${encodeURIComponent(this.host.selectedId)}`;
+    this._renderSaved();
   }
 
   render() {
     this._applyVisibility();
-    if (this.start && this.end) this._fetchAll();
+    if (this.points.length >= 2) this._fetchAll();
   }
 
   syncSpace() {
-    if (this.host.view === "transect" && this.start && this.end) this._fetchAll();
+    if (this.host.view === "transect" && this.points.length >= 2) this._fetchAll();
   }
 
   _applyVisibility() {
@@ -291,14 +287,20 @@ class TomogramTransect {
   }
 
   _reset() {
-    this.start = null;
-    this.end = null;
+    this.points = [];
     this.overlay.innerHTML = "";
     this.grid.hidden = true;
-    this.clearBtn.hidden = true;
-    this.printBtn.hidden = true;
-    if (this.downloadBtn) this.downloadBtn.hidden = true;
-    this.atEl.textContent = "Click a start point on the map, then an end point, to cut every tomogram along that line.";
+    this._syncButtons();
+    this.atEl.textContent = TomogramTransect.PROMPT;
+  }
+
+  _syncButtons() {
+    const some = this.points.length >= 1;
+    const line = this.points.length >= 2;
+    if (this.undoBtn) this.undoBtn.hidden = !some;
+    this.clearBtn.hidden = !some;
+    this.printBtn.hidden = !line;
+    if (this.downloadBtn) this.downloadBtn.hidden = !line;
   }
 
   _pointFromEvent(ev) {
@@ -317,37 +319,49 @@ class TomogramTransect {
     if (!this.host.meta) return;
     const point = this._pointFromEvent(ev);
 
-    if (!this.start || this.end) {
-      this.start = point;
-      this.end = null;
+    const last = this.points[this.points.length - 1];
+    if (last && last.az === point.az && last.rg === point.rg) return;
+
+    this.points.push(point);
+    this._afterChange();
+  }
+
+  _undo() {
+    if (!this.points.length) return;
+    this.points.pop();
+    this._afterChange();
+  }
+
+  _afterChange() {
+    this._drawOverlay();
+    this._syncButtons();
+
+    if (this.points.length < 2) {
       this.grid.hidden = true;
-      this.printBtn.hidden = true;
-      if (this.downloadBtn) this.downloadBtn.hidden = true;
-      this.clearBtn.hidden = false;
-      this.atEl.textContent = `start az = ${point.az} · rg = ${point.rg} · click the end point`;
-      this._drawOverlay();
+      const tail = this.points[this.points.length - 1];
+      this.atEl.textContent = tail ? `start az = ${tail.az} · rg = ${tail.rg} · click the next point` : TomogramTransect.PROMPT;
       return;
     }
 
-    if (point.az === this.start.az && point.rg === this.start.rg) return;
-
-    this.end = point;
-    this.printBtn.hidden = false;
-    if (this.downloadBtn) this.downloadBtn.hidden = false;
-    this.atEl.textContent = `transect az ${this.start.az},${this.start.rg} to az ${point.az},${point.rg}`;
-    this._drawOverlay();
+    const head = this.points[0];
+    const tail = this.points[this.points.length - 1];
+    this.atEl.textContent = `transect az ${head.az},${head.rg} to az ${tail.az},${tail.rg} · ${this.points.length} points · click to extend`;
     this._fetchAll();
+  }
+
+  _pts() {
+    return this.points.map((p) => `${p.az},${p.rg}`).join(";");
   }
 
   _drawOverlay() {
     let svg = "";
-    if (this.start) {
-      svg += `<circle cx="${this.start.fx * 100}" cy="${this.start.fy * 100}" r="0.8" class="cube-tdot" />`;
-    }
-    if (this.start && this.end) {
-      svg += `<line x1="${this.start.fx * 100}" y1="${this.start.fy * 100}" x2="${this.end.fx * 100}" y2="${this.end.fy * 100}" class="cube-tline" />`;
-      svg += `<circle cx="${this.end.fx * 100}" cy="${this.end.fy * 100}" r="0.8" class="cube-tdot" />`;
-    }
+    this.points.forEach((point, index) => {
+      if (index > 0) {
+        const prev = this.points[index - 1];
+        svg += `<line x1="${prev.fx * 100}" y1="${prev.fy * 100}" x2="${point.fx * 100}" y2="${point.fy * 100}" class="cube-tline" />`;
+      }
+      svg += `<circle cx="${point.fx * 100}" cy="${point.fy * 100}" r="0.8" class="cube-tdot" />`;
+    });
     this.overlay.innerHTML = svg;
   }
 
@@ -366,7 +380,7 @@ class TomogramTransect {
 
   async _fetch(panel, token) {
     const url = `/api/cubes/transect?id=${encodeURIComponent(this.host.selectedId)}&source=${this.host.srcFor()}` +
-      `&az0=${this.start.az}&rg0=${this.start.rg}&az1=${this.end.az}&rg1=${this.end.rg}&space=${this.host.space}&cmap=${this.host.cmap}&dem=${this.host.demOn()}`;
+      `&pts=${encodeURIComponent(this._pts())}&space=${this.host.space}&cmap=${this.host.cmap}&dem=${this.host.demOn()}`;
 
     const skeletonTimer = setTimeout(() => panel.root.classList.add("is-loading"), 120);
     try {
@@ -389,18 +403,99 @@ class TomogramTransect {
     }
   }
 
+  _storeKey() {
+    const meta = this.host.meta;
+    return `cube-transects:${meta.n_az}x${meta.n_rg}`;
+  }
+
+  _stored() {
+    try {
+      return JSON.parse(localStorage.getItem(this._storeKey()) || "[]");
+    } catch (e) {
+      return [];
+    }
+  }
+
+  _renderSaved() {
+    if (!this.savedSel || !this.host.meta) return;
+
+    const stored = this._stored();
+    this.savedSel.innerHTML = `<option value="">saved lines…</option>` +
+      stored.map((entry) => `<option value="${SharedCharts.esc(entry.name)}">${SharedCharts.esc(entry.name)} (${entry.points.length} pts)</option>`).join("");
+    if (this.removeBtn) this.removeBtn.hidden = true;
+  }
+
+  _saveLine() {
+    if (this.points.length < 2) {
+      Toast.show("Trace a line with at least two points first.", "warn");
+      return;
+    }
+
+    const name = (this.nameEl && this.nameEl.value.trim()) || `line ${this._stored().length + 1}`;
+    const stored = this._stored().filter((entry) => entry.name !== name);
+    stored.push({ name, points: this.points.map((p) => [p.az, p.rg]) });
+
+    localStorage.setItem(this._storeKey(), JSON.stringify(stored));
+    if (this.nameEl) this.nameEl.value = "";
+    this._renderSaved();
+    this.savedSel.value = name;
+    if (this.removeBtn) this.removeBtn.hidden = false;
+    Toast.show(`Saved transect '${name}' for every cube with this footprint.`, "ok");
+  }
+
+  _loadLine() {
+    const name = this.savedSel.value;
+    if (this.removeBtn) this.removeBtn.hidden = !name;
+    if (!name) return;
+
+    const entry = this._stored().find((candidate) => candidate.name === name);
+    if (!entry || !this.host.meta) return;
+
+    const meta = this.host.meta;
+    this.points = entry.points.map(([az, rg]) => ({
+      az: Math.min(meta.n_az - 1, Math.max(0, az)),
+      rg: Math.min(meta.n_rg - 1, Math.max(0, rg)),
+      fx: (Math.min(meta.n_rg - 1, Math.max(0, rg)) + 0.5) / meta.n_rg,
+      fy: (Math.min(meta.n_az - 1, Math.max(0, az)) + 0.5) / meta.n_az,
+    }));
+    this._afterChange();
+  }
+
+  _deleteLine() {
+    const name = this.savedSel.value;
+    if (!name) return;
+
+    localStorage.setItem(this._storeKey(), JSON.stringify(this._stored().filter((entry) => entry.name !== name)));
+    this._renderSaved();
+    Toast.show(`Deleted saved transect '${name}'.`, "ok");
+  }
+
+  _download() {
+    if (this.points.length < 2) return;
+
+    const head = this.points[0];
+    const tail = this.points[this.points.length - 1];
+    const tag = `${this.host.fileTag()}_transect_az${head.az}_rg${head.rg}_to_az${tail.az}_rg${tail.rg}`;
+    let count = 0;
+
+    this.panels.forEach((panel) => {
+      if (panel.root.hidden || !panel.canvas.width) return;
+      this.host.downloadCanvas(panel.canvas, `${tag}_${this.host.srcFor()}_${this.host.space}.png`);
+      count += 1;
+    });
+
+    if (!count) Toast.show("No rendered transect panel to download.", "warn");
+  }
+
   async _print() {
-    if (!this.start || !this.end || this.saving) return;
+    if (this.points.length < 2 || this.saving) return;
 
     this.saving = true;
     this.printBtn.disabled = true;
 
     const res = await Api.post("/api/cubes/save_transect", {
       id: this.host.selectedId,
-      az0: this.start.az,
-      rg0: this.start.rg,
-      az1: this.end.az,
-      rg1: this.end.rg,
+      pts: this.points.map((p) => [p.az, p.rg]),
       space: this.host.space,
       cmap: this.host.cmap,
       dem: this.host.demOn() === 1,
