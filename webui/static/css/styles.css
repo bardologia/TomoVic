@@ -2690,6 +2690,7 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 
 /* ==== Cube view shared controls ==== */
 .cube-mctl { display: flex; align-items: center; gap: 8px; font: 500 0.7rem/1 var(--mono); color: var(--ink-dim); }
+.cube-mctl[hidden] { display: none; }
 .cube-mctl label { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.62rem; }
 .cube-mctl input[type="range"] { width: 130px; accent-color: var(--accent); }
 .cube-mctl__val { min-width: 90px; }
