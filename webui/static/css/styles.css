@@ -2657,6 +2657,7 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 }
 
 .lb-check { display: flex; align-items: center; gap: 7px; font: 500 0.72rem/1 var(--mono); color: var(--ink-dim); cursor: pointer; white-space: nowrap; }
+.lb-check[hidden] { display: none; }
 
 /* ==== Cube view shared: maps, bars, selects ==== */
 .cube-pview { display: flex; flex-direction: column; gap: 14px; }

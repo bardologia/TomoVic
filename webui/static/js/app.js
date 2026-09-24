@@ -166,6 +166,8 @@ class App {
       sources       : document.getElementById("cube-sources"),
       profiles      : document.getElementById("cube-profiles"),
       profAt        : document.getElementById("cube-prof-at"),
+      profMixWrap   : document.getElementById("cube-prof-mix-wrap"),
+      profMix       : document.getElementById("cube-prof-mix"),
       profMetrics   : document.getElementById("cube-prof-metrics"),
       progress      : document.getElementById("cube-progress"),
       progressFill  : document.getElementById("cube-progress-fill"),
