@@ -795,6 +795,49 @@ class CubeExplorer:
         header = np.array([rows.shape[0], total, 0.0, 0.0], dtype=np.float32)
         return header.tobytes() + np.ascontiguousarray(rows).tobytes()
 
+    VOLUME_MAX_DIM = 192
+
+    def volume_bin(self, cube_id: str, source: str, max_dim: int | None = None) -> bytes | None:
+        """Packs a downsampled cube as a quantised volume for the WebGL renderer.
+
+        The cube is strided down until every axis fits max_dim, then mapped to
+        uint8 over the entry's display colour range (symmetric for diverging
+        sources) with NaN quantised to zero. The parametrized tomogram is
+        evaluated only on the strided pixel grid.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            source  : Cube key to pack.
+            max_dim : Largest allowed axis length after striding; VOLUME_MAX_DIM when None, clamped to [2, 256].
+
+        Returns:
+            An eight-float32 header (elevation, azimuth and range extents after
+            striding, a diverging flag, vmin, vmax, 0, 0) followed by the uint8
+            voxels in (elevation, azimuth, range) C order, or None when the
+            cube carries no such source.
+        """
+        entry = self._entry(cube_id, source)
+        if entry is None:
+            return None
+
+        max_dim = self.VOLUME_MAX_DIM if max_dim is None else int(np.clip(max_dim, 2, 256))
+        cube    = entry["cube"]
+
+        strides = tuple(max(1, int(np.ceil(extent / max_dim))) for extent in cube.shape)
+        block   = np.asarray(cube[:, ::strides[1], ::strides[2]], dtype=np.float32)[::strides[0]]
+
+        if entry.get("diverging"):
+            peak = max(abs(entry["vmin"]), abs(entry["vmax"]), 1e-12)
+            vmin, vmax = -peak, peak
+        else:
+            vmin, vmax = float(entry["vmin"]), float(entry["vmax"])
+
+        norm   = np.clip((np.nan_to_num(block, nan=vmin) - vmin) / max(vmax - vmin, 1e-12), 0.0, 1.0)
+        voxels = np.round(norm * 255.0).astype(np.uint8)
+
+        header = np.array([*voxels.shape, 1.0 if entry.get("diverging") else 0.0, vmin, vmax, 0.0, 0.0], dtype=np.float32)
+        return header.tobytes() + np.ascontiguousarray(voxels).tobytes()
+
     def dem_grid_bin(self, cube_id: str) -> bytes | None:
         """Packs the DEM as a median-referenced height grid.
 

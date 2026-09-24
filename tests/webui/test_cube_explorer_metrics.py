@@ -2,7 +2,8 @@
 
 Covers the colormap whitelist behind the colour bar, the median-referenced DEM
 grid blob, the radar-coordinate point cloud with its amplitude threshold and
-subsampling cap, index clamping in point queries and the primary amplitude map.
+subsampling cap, index clamping in point queries, the primary amplitude map and
+the quantised volume blob of the WebGL renderer.
 """
 
 from __future__ import annotations
@@ -106,3 +107,37 @@ def test_profiles_clip_out_of_range_indices(tmp_path):
 
     result = explorer.profiles(cube_id, az=99, rg=-1)
     assert result["ok"] and result["az"] == N_AZ - 1 and result["rg"] == 0
+
+
+def test_volume_bin_quantises_and_strides(tmp_path):
+    """Checks the volume blob header matches the strided dims and voxels span the byte range."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    blob   = explorer.volume_bin(cube_id, "full")
+    header = np.frombuffer(blob[:32], dtype=np.float32)
+    voxels = np.frombuffer(blob[32:], dtype=np.uint8)
+
+    assert tuple(int(v) for v in header[:3]) == (N_ELEV, N_AZ, N_RG)
+    assert header[3] == 0.0 and header[5] > header[4]
+    assert voxels.size == N_ELEV * N_AZ * N_RG
+
+    small        = explorer.volume_bin(cube_id, "full", max_dim=4)
+    small_header = np.frombuffer(small[:32], dtype=np.float32)
+    assert all(int(v) <= 4 for v in small_header[:3])
+    assert np.frombuffer(small[32:], dtype=np.uint8).size == int(np.prod(small_header[:3]))
+
+    assert explorer.volume_bin(cube_id, "banana") is None
+    assert explorer.volume_bin("wrong", "full") is None
+
+
+def test_volume_bin_serves_the_parametrized_tomogram(tmp_path):
+    """Checks the parametrized tomogram packs on the strided grid without materialising the whole cube."""
+    explorer, cube_id = loaded_param_run(tmp_path)
+
+    blob   = explorer.volume_bin(cube_id, "param", max_dim=4)
+    header = np.frombuffer(blob[:32], dtype=np.float32)
+    voxels = np.frombuffer(blob[32:], dtype=np.uint8)
+
+    assert all(int(v) <= 4 for v in header[:3])
+    assert voxels.size == int(np.prod(header[:3]))
+    assert voxels.max() > 0
