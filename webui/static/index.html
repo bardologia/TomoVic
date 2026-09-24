@@ -277,6 +277,8 @@
               </span>
               <button type="button" class="btn btn--mini" id="cube-jump-go">Cut</button>
               <button type="button" class="btn btn--mini" id="cube-jump-print" title="Save these cuts as paper-style figures under the run directory">Print</button>
+              <button type="button" class="btn btn--mini" id="cube-jump-download" title="Download the visible cuts as PNG files">PNG</button>
+              <button type="button" class="btn btn--mini" id="cube-jump-csv" title="Download the vertical profiles at the current position as CSV">CSV</button>
             </div>
             <div class="cube-spaces" role="group" aria-label="Value space">
               <button type="button" class="cube-space is-active" data-space="physical">Physical</button>
@@ -518,6 +520,7 @@
             <span class="cube-elev__at" id="cube-transect-at">Click a start point on the map, then an end point, to cut every tomogram along that line.</span>
             <button type="button" class="btn btn--mini" id="cube-transect-clear" hidden>Clear line</button>
             <button type="button" class="btn btn--mini" id="cube-transect-print" hidden title="Save the transect as paper-style figures under the run directory">Print</button>
+            <button type="button" class="btn btn--mini" id="cube-transect-download" hidden title="Download the visible transect panels as PNG files">PNG</button>
             <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
               <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
               <button type="button" class="cube-space" data-ssource="param">Parametrized</button>

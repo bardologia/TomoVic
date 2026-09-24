@@ -184,6 +184,7 @@ class App {
         at      : document.getElementById("cube-transect-at"),
         clear   : document.getElementById("cube-transect-clear"),
         print   : document.getElementById("cube-transect-print"),
+        download: document.getElementById("cube-transect-download"),
         map     : document.getElementById("cube-transect-map"),
         overlay : document.getElementById("cube-transect-overlay"),
         grid    : document.getElementById("cube-transect-grid"),
@@ -238,6 +239,8 @@ class App {
       jumpRg        : document.getElementById("cube-jump-rg"),
       jumpGo        : document.getElementById("cube-jump-go"),
       jumpPrint     : document.getElementById("cube-jump-print"),
+      jumpDownload  : document.getElementById("cube-jump-download"),
+      jumpCsv       : document.getElementById("cube-jump-csv"),
       jumpAzRange   : document.getElementById("cube-jump-az-range"),
       jumpRgRange   : document.getElementById("cube-jump-rg-range"),
       sweeps        : ["elevation", "azimuth", "range"].map((axis) => {
