@@ -36,6 +36,17 @@ def test_load_reports_run_metadata(tmp_path):
     assert vmax > vmin
 
 
+def test_meta_timings_book_every_load_stage(tmp_path):
+    """Checks the ready payload reports the total load time and one non-negative lap per source and stage."""
+    explorer, _ = loaded_param_run(tmp_path)
+
+    timings = explorer.load_status()["cube"]["timings"]
+
+    assert timings["total"] >= sum(timings["stages"].values()) > 0.0
+    assert set(timings["stages"]) == {"full", "param", "primary", "dem", "geocoding", "passes"}
+    assert all(seconds >= 0.0 for seconds in timings["stages"].values())
+
+
 def test_open_rejects_unknown_and_uncatalogued_runs(tmp_path):
     """Checks paths without a dataset layout or outside the catalogued roots are refused."""
     make_preproc_run(tmp_path / "runs")

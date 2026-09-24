@@ -16,6 +16,7 @@ import json
 import math
 import re
 import threading
+import time
 from datetime import datetime
 from pathlib  import Path
 
@@ -135,38 +136,6 @@ class SliceFigureArchiver(PlotBase):
             return self._save(fig, path)
         finally:
             PlotBase.use_style(previous)
-
-
-class StitchedRaw:
-    """Lazy elevation-plane view over azimuth blocks belonging to different runs.
-
-    Presents several per-block cubes as one array of shape (elevation, azimuth,
-    range); a plane is materialised only when indexed, and azimuth rows no block
-    covers stay NaN.
-
-    Attributes:
-        blocks: Pairs of (azimuth offset into the mosaic, per-block cube).
-        shape: Shape of the stitched cube, (elevation, azimuth, range).
-        dtype: Element type of the assembled planes.
-    """
-
-    def __init__(self, blocks: list, shape: tuple, dtype: np.dtype) -> None:
-        """Stores the blocks and the shape of the mosaic they compose."""
-        self.blocks = blocks
-        self.shape  = shape
-        self.dtype  = dtype
-
-    @property
-    def ndim(self) -> int:
-        """Number of axes of the stitched cube."""
-        return len(self.shape)
-
-    def __getitem__(self, index: int) -> np.ndarray:
-        """Returns elevation plane `index` of shape (azimuth, range), NaN in gaps."""
-        plane = np.full(self.shape[1:], np.nan, dtype=self.dtype)
-        for offset, raw in self.blocks:
-            plane[offset:offset + raw.shape[1]] = np.asarray(raw[index])
-        return plane
 
 
 class ParametrizedTomogram:
@@ -324,8 +293,15 @@ class StampReader:
         path = self.run_dir / "data" / name
         return path if path.is_file() else None
 
-    def tomogram(self) -> np.ndarray:
-        """Memory-maps the full tomogram cube of shape (elevation, azimuth, range).
+    def tomogram(self, view: bool = False) -> np.ndarray:
+        """Reads the full tomogram cube of shape (elevation, azimuth, range).
+
+        The whole file is read into memory in one sequential pass, which is the
+        fastest access pattern on the network mounts the runs live on. Callers
+        that only touch a few lines of the cube ask for a memory-mapped view.
+
+        Args:
+            view : When True the file is memory-mapped instead of read into RAM.
 
         Raises:
             FileNotFoundError: If the run stores no full tomogram.
@@ -334,18 +310,18 @@ class StampReader:
         if path is None:
             raise FileNotFoundError(f"tomogram_full missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
 
-        return np.load(path, mmap_mode="r")
+        return np.load(path, mmap_mode="r" if view else None)
 
     def dem(self) -> np.ndarray | None:
-        """Memory-maps the full DEM of shape (azimuth, range), or None when absent."""
+        """Reads the full DEM of shape (azimuth, range), or None when absent."""
         path = self.artifact_path("dem_full")
         if path is None:
             return None
 
-        return np.load(path, mmap_mode="r")
+        return np.load(path)
 
     def primary(self) -> np.ndarray:
-        """Memory-maps the primary SLC image of shape (azimuth, range).
+        """Reads the primary SLC image of shape (azimuth, range).
 
         Raises:
             FileNotFoundError: If the run stores no primary SLC.
@@ -354,7 +330,7 @@ class StampReader:
         if path is None:
             raise FileNotFoundError(f"primary SLC missing in {self.run_dir / 'data'}; rerun preprocessing to regenerate it")
 
-        return np.load(path, mmap_mode="r")
+        return np.load(path)
 
     def height_range(self) -> tuple[float, float]:
         """Returns the tomogram's elevation axis extent in metres.
@@ -426,6 +402,36 @@ class StampReader:
         return np.asarray(np.load(path), dtype=np.float32)
 
 
+class LoadTimer:
+    """Books the wall time of the named stages of one cube load.
+
+    Attributes:
+        stages  : Seconds spent per stage, in completion order.
+        started : Clock reading when the load began.
+        last    : Clock reading at the end of the previous stage.
+    """
+
+    def __init__(self) -> None:
+        """Starts the clock."""
+        self.stages  = {}
+        self.started = time.perf_counter()
+        self.last    = self.started
+
+    def lap(self, stage: str) -> None:
+        """Books the time elapsed since the previous lap under ``stage``."""
+        now                = time.perf_counter()
+        self.stages[stage] = round(self.stages.get(stage, 0.0) + now - self.last, 3)
+        self.last          = now
+
+    def total(self) -> float:
+        """Seconds elapsed since the clock started."""
+        return time.perf_counter() - self.started
+
+    def summary(self) -> str:
+        """Renders the stage times as comma-separated ``stage 1.23 s`` items."""
+        return ", ".join(f"{stage} {seconds:.2f} s" for stage, seconds in self.stages.items())
+
+
 class CubeExplorer:
     """Loads one preprocessing run at a time and serves views of it to the web UI.
 
@@ -455,6 +461,8 @@ class CubeExplorer:
     GLOBE_TOUR_DIR       = Path("figures") / "globe_tours"
     GLOBE_TOUR_MAX_BYTES = 768 * 1024 * 1024
     GLOBE_TOUR_NAME_RE   = re.compile(r"[^a-z0-9]+")
+    LIMIT_SAMPLE         = 1_000_000
+    PNG_ENCODE           = {"format": "png", "pil_kwargs": {"compress_level": 1}}
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
@@ -564,7 +572,7 @@ class CubeExplorer:
             vmin, vmax = self.loaded["primary_clim"]
 
         buf = io.BytesIO()
-        plt.imsave(buf, primary, cmap="gray", vmin=float(vmin), vmax=float(vmax), format="png")
+        plt.imsave(buf, primary, cmap="gray", vmin=float(vmin), vmax=float(vmax), **self.PNG_ENCODE)
         return buf.getvalue()
 
     def profiles(self, cube_id: str, az: int, rg: int) -> dict:
@@ -695,7 +703,7 @@ class CubeExplorer:
             vmin, vmax = entry["vmin"], entry["vmax"]
 
         buf = io.BytesIO()
-        plt.imsave(buf, np.nan_to_num(data, nan=vmin), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
+        plt.imsave(buf, np.nan_to_num(data, nan=vmin), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, **self.PNG_ENCODE)
         return buf.getvalue()
 
     def cbar_png(self, cmap: str) -> bytes | None:
@@ -713,7 +721,7 @@ class CubeExplorer:
         ramp = np.tile(np.linspace(0.0, 1.0, 256), (12, 1))
 
         buf = io.BytesIO()
-        plt.imsave(buf, ramp, cmap=cmap, vmin=0.0, vmax=1.0, format="png")
+        plt.imsave(buf, ramp, cmap=cmap, vmin=0.0, vmax=1.0, **self.PNG_ENCODE)
         return buf.getvalue()
 
     def points_bin(self, cube_id: str, source: str, amp_min: float, max_points: int) -> bytes | None:
@@ -1097,7 +1105,7 @@ class CubeExplorer:
             return None
 
         buf = io.BytesIO()
-        plt.imsave(buf, data, cmap=palette, vmin=float(vmin), vmax=float(vmax), format="png")
+        plt.imsave(buf, data, cmap=palette, vmin=float(vmin), vmax=float(vmax), **self.PNG_ENCODE)
         return buf.getvalue()
 
     def transect_png(self, cube_id: str, source: str, points: list, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
@@ -1463,7 +1471,7 @@ class CubeExplorer:
             data, _ = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entry, vmin))
 
         buf = io.BytesIO()
-        plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, format="png")
+        plt.imsave(buf, np.flipud(data), cmap=self._entry_cmap(entry, cmap), vmin=vmin, vmax=vmax, **self.PNG_ENCODE)
         return buf.getvalue()
 
     @staticmethod
@@ -1570,14 +1578,15 @@ class CubeExplorer:
             param_tag: Parameter run loaded alongside the raw cube, or None.
         """
         try:
-            entries, meta, primary, dem, geo, passes = self._load_all(reader, param_tag)
-            clim = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
+            entries, meta, primary, dem, geo, passes, timer = self._load_all(reader, param_tag)
+            clim            = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
+            meta["timings"] = {"total": round(timer.total(), 3), "stages": timer.stages}
 
             with self.lock:
                 self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo, "passes": passes}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
 
-            self.logger.muted(f"cube ready: {cube_id} sources={meta['sources']}")
+            self.logger.info(f"cube ready in {timer.total():.1f} s: {cube_id} sources={meta['sources']} ({timer.summary()})")
         except Exception as exc:
             with self.lock:
                 self.loaded = None
@@ -1586,10 +1595,15 @@ class CubeExplorer:
             self.logger.error(f"cube load failed: {cube_id}: {exc}")
             return
 
+        warm = LoadTimer()
         self._warm_globe_blobs(cube_id)
+        self.logger.muted(f"globe point cache warmed in {warm.total():.1f} s: {cube_id}")
 
-    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None]:
+    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None, LoadTimer]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
+
+        Every stage books its wall time on a LoadTimer and advances the load
+        status the front end polls, so a slow load names the stage that cost it.
 
         Args:
             reader: Preprocessing run reader to pull from.
@@ -1599,14 +1613,28 @@ class CubeExplorer:
         Returns:
             Tuple of the per-source entries, the front-end metadata payload, the
             primary amplitude map in dB of shape (azimuth, range), the DEM in
-            metres, the geocoding context and the raw pass-stack context; DEM
-            and geocoding are None when the scene cannot be geolocated, the pass
-            context when the run stores no secondary stack.
+            metres, the geocoding context, the raw pass-stack context and the
+            stage timer; DEM and geocoding are None when the scene cannot be
+            geolocated, the pass context when the run stores no secondary stack.
 
         Raises:
             ValueError: If the tomogram is not three-dimensional or its footprint
                 disagrees with the recorded global crop.
         """
+        timer = LoadTimer()
+        steps = [0]
+        total = 6 if param_tag is not None else 5
+
+        def stage(name: str, load):
+            """Runs one load step, books its time and publishes the progress."""
+            result   = load()
+            steps[0] += 1
+            timer.lap(name)
+            with self.lock:
+                self.status["progress"] = steps[0] / total
+                self.status["stage"]    = name
+            return result
+
         full_raw = reader.tomogram()
         if full_raw.ndim != 3:
             raise ValueError(f"full tomogram is not a 3D cube: shape={full_raw.shape}")
@@ -1617,27 +1645,16 @@ class CubeExplorer:
         if (az_hi - az_lo, rg_hi - rg_lo) != (n_az, n_rg):
             raise ValueError(f"global_crop {[az_lo, az_hi, rg_lo, rg_hi]} does not match the {n_az}x{n_rg} tomogram footprint")
 
-        x_axis = self._elevation_axis(reader, n_elev)
-
-        total = n_elev
-        done  = [0]
-
-        def advance(source: str) -> None:
-            """Records one more ingested elevation plane in the load status."""
-            done[0] += 1
-            with self.lock:
-                self.status["progress"] = done[0] / total
-                self.status["stage"]    = source
-
-        entries = {"full": self._ingest(full_raw, x_axis, lambda: advance("full"))}
+        x_axis  = self._elevation_axis(reader, n_elev)
+        entries = {"full": stage("full", lambda: self._ingest(full_raw, x_axis))}
 
         if param_tag is not None:
-            entries["param"] = self._param_entry(reader, param_tag, n_az, n_rg, x_axis)
+            entries["param"] = stage("param", lambda: self._param_entry(reader, param_tag, n_az, n_rg, x_axis))
 
-        primary = self._primary_db(reader, n_az, n_rg)
-        dem     = self._load_dem(reader, n_az, n_rg)
-        geo     = self._load_geo(reader, dem, n_az, n_rg)
-        passes  = self._load_passes(reader, n_az, n_rg)
+        primary = stage("primary",   lambda: self._primary_db(reader, n_az, n_rg))
+        dem     = stage("dem",       lambda: self._load_dem(reader, n_az, n_rg))
+        geo     = stage("geocoding", lambda: self._load_geo(reader, dem, n_az, n_rg))
+        passes  = stage("passes",    lambda: self._load_passes(reader, n_az, n_rg))
 
         meta = {
             "sources"   : [s for s in self.SOURCES if s in entries],
@@ -1655,7 +1672,7 @@ class CubeExplorer:
         }
         meta["globe_defaults"] = self._globe_defaults(meta)
 
-        return entries, meta, primary, dem, geo, passes
+        return entries, meta, primary, dem, geo, passes, timer
 
     def _globe_defaults(self, meta: dict) -> dict | None:
         """Returns the globe request every source is first served with.
@@ -2057,36 +2074,52 @@ class CubeExplorer:
             return None
         return {"labels": ctx["labels"], "n_passes": len(ctx["labels"]), "phase": ctx["interferograms"] is not None}
 
-    def _ingest(self, raw: np.ndarray, x_axis: np.ndarray, advance) -> dict:
-        """Materialises a cube plane by plane and derives its display colour limits.
+    def _ingest(self, raw: np.ndarray, x_axis: np.ndarray) -> dict:
+        """Wraps an in-memory cube as a float32 entry with display colour limits.
 
         Args:
-            raw: Lazy or memory-mapped cube of shape (elevation, azimuth, range);
-                complex planes are reduced to their magnitude.
-            x_axis: Elevation axis in metres.
-            advance: Callback invoked once per ingested elevation plane.
+            raw    : Cube of shape (elevation, azimuth, range); complex cubes are reduced to their magnitude.
+            x_axis : Elevation axis in metres.
 
         Returns:
             Entry with the float32 ``cube``, its ``x_axis`` and the 1st and 99th
-            percentile colour limits estimated on a decimated subsample.
+            percentile colour limits estimated on a bounded subsample.
         """
-        cube = np.empty(raw.shape, dtype=np.float32)
-
-        for i in range(raw.shape[0]):
-            plane   = np.asarray(raw[i])
-            cube[i] = np.abs(plane) if np.iscomplexobj(plane) else plane
-            advance()
-
-        sample = cube[:, :: max(1, cube.shape[1] // 256), :: max(1, cube.shape[2] // 256)]
-        sample = sample[np.isfinite(sample)]
-        vmin, vmax = (np.percentile(sample, [1.0, 99.0]) if sample.size else (0.0, 1.0))
+        cube       = np.abs(raw) if np.iscomplexobj(raw) else np.asarray(raw, dtype=np.float32)
+        vmin, vmax = self._colour_limits(cube)
 
         return {
             "cube"   : cube,
             "x_axis" : x_axis,
-            "vmin"   : float(vmin),
-            "vmax"   : float(vmax),
+            "vmin"   : vmin,
+            "vmax"   : vmax,
         }
+
+    @classmethod
+    def _colour_limits(cls, raw: np.ndarray) -> tuple[float, float]:
+        """Estimates 1st and 99th percentile colour limits on a bounded subsample.
+
+        Args:
+            raw : Cube of any shape; complex values are reduced to their magnitude.
+
+        Returns:
+            Tuple (vmin, vmax), or (0, 1) when the cube holds no finite value.
+        """
+        sample = cls._limit_sample(raw)
+        sample = np.abs(sample) if np.iscomplexobj(sample) else sample
+        if not sample.size:
+            return 0.0, 1.0
+
+        vmin, vmax = np.percentile(sample, [1.0, 99.0])
+        return float(vmin), float(vmax)
+
+    @classmethod
+    def _limit_sample(cls, raw: np.ndarray) -> np.ndarray:
+        """Returns at most LIMIT_SAMPLE finite values taken at a fixed stride over the flattened cube."""
+        flat   = raw.reshape(-1)
+        sample = np.asarray(flat[:: max(1, flat.size // cls.LIMIT_SAMPLE)])
+
+        return sample[np.isfinite(sample)]
 
     def _elevation_axis(self, reader: StampReader, n_elev: int) -> np.ndarray:
         """Returns the n_elev evenly spaced elevation bin centres in metres."""
@@ -2220,7 +2253,7 @@ class SliceCollector:
             lo, hi = float(vmin), float(vmax)
 
         buf = io.BytesIO()
-        plt.imsave(buf, np.flipud(data), cmap=CubeExplorer._entry_cmap(entry, cmap), vmin=lo, vmax=hi, format="png")
+        plt.imsave(buf, np.flipud(data), cmap=CubeExplorer._entry_cmap(entry, cmap), vmin=lo, vmax=hi, **CubeExplorer.PNG_ENCODE)
         return buf.getvalue()
 
     def collect(self, ids: list, points: list, sources: list, axes: list, space: str = "physical", cmap: str = "jet", shared: bool = True, name: str = "") -> dict:
@@ -2489,7 +2522,7 @@ class SliceCollector:
         if root is None:
             raise ValueError(f"{run_dir} is outside every catalogued runs root")
 
-        full_raw = reader.tomogram()
+        full_raw = reader.tomogram(view=True)
         if full_raw.ndim != 3:
             raise ValueError(f"full tomogram is not a 3D cube: shape={full_raw.shape}")
 
@@ -2525,18 +2558,15 @@ class SliceCollector:
 
         Returns:
             Entry with the untouched ``cube``, its ``x_axis`` and the 1st and 99th
-            percentile colour limits estimated on a decimated subsample.
+            percentile colour limits estimated on a bounded subsample.
         """
-        sample = np.asarray(raw[:, :: max(1, raw.shape[1] // 256), :: max(1, raw.shape[2] // 256)])
-        sample = np.abs(sample) if np.iscomplexobj(sample) else sample
-        sample = sample[np.isfinite(sample)]
-        vmin, vmax = (np.percentile(sample, [1.0, 99.0]) if sample.size else (0.0, 1.0))
+        vmin, vmax = CubeExplorer._colour_limits(raw)
 
         return {
             "cube"   : raw,
             "x_axis" : x_axis,
-            "vmin"   : float(vmin),
-            "vmax"   : float(vmax),
+            "vmin"   : vmin,
+            "vmax"   : vmax,
         }
 
     def _root_for(self, run_dir: Path) -> Path | None:

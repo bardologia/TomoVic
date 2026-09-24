@@ -1933,6 +1933,11 @@ class TomogramView {
     this.polling = false;
   }
 
+  _slowestStage(timings) {
+    const [stage, seconds] = Object.entries(timings.stages).sort((a, b) => b[1] - a[1])[0];
+    return `${stage} ${seconds.toFixed(1)} s`;
+  }
+
   _failLoad(message) {
     this.progress.hidden = true;
     this.hint.textContent = message;
@@ -1949,6 +1954,7 @@ class TomogramView {
   _display(meta) {
     this.meta = meta;
     this.progress.hidden = true;
+    this.coords.textContent = `loaded in ${meta.timings.total.toFixed(1)} s (${this._slowestStage(meta.timings)}) · hover the image to cut every tomogram · click to lock the slices`;
     this._clearBitmapCache();
 
     const css = getComputedStyle(this.stage);
