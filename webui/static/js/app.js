@@ -245,6 +245,7 @@ class App {
         tracks    : document.getElementById("cube-globe-tracks"),
         fly       : document.getElementById("cube-globe-fly"),
         reframe   : document.getElementById("cube-globe-reframe"),
+        full      : document.getElementById("cube-globe-full"),
         at        : document.getElementById("cube-globe-at"),
         container : document.getElementById("cube-globe-container"),
         stage     : document.getElementById("cube-globe-stage"),

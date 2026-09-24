@@ -524,66 +524,67 @@
 
       <div class="cube-view" data-view="globe" hidden>
         <div class="cube-pview">
-          <div class="cube-pview__bar">
-            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
-              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
-              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
-            </div>
-            <div class="cube-spaces" id="cube-globe-color" role="group" aria-label="Colour by">
-              <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
-              <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Intensity threshold">
-              <label for="cube-globe-thr" id="cube-globe-thr-label">int &ge;</label>
-              <input type="range" id="cube-globe-thr" min="0" max="100" value="0" />
-              <span class="cube-mctl__val" id="cube-globe-thr-val"></span>
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Point budget">
-              <label for="cube-globe-max" title="How many scatterers to stream onto the globe &mdash; type any budget, 0 draws every point above the amplitude cut">points</label>
-              <input type="number" id="cube-globe-max" class="cube-jump__input cube-jump__input--wide" min="0" step="10000" inputmode="numeric" />
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Height exaggeration">
-              <label for="cube-globe-exagg" title="Scale heights above the scene base so subtle relief becomes visible">height</label>
-              <select id="cube-globe-exagg" class="cube-mselect">
-                <option value="1">1&times;</option>
-                <option value="3" selected>3&times;</option>
-                <option value="5">5&times;</option>
-                <option value="10">10&times;</option>
-                <option value="20">20&times;</option>
-              </select>
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Vertical lift">
-              <label for="cube-globe-lift" title="Extra vertical offset applied to every point, in metres">lift [m]</label>
-              <input type="number" id="cube-globe-lift" class="cube-jump__input" step="10" value="0" />
-            </div>
-            <div class="cube-mctl" role="group" aria-label="Section cut">
-              <label for="cube-globe-cut-axis" title="Slide a cutting plane through the scene; scatterers beyond the plane are hidden so the interior section is exposed">cut</label>
-              <select id="cube-globe-cut-axis" class="cube-mselect">
-                <option value="off" selected>off</option>
-                <option value="east">east</option>
-                <option value="north">north</option>
-                <option value="height">height</option>
-                <option value="azimuth">azimuth</option>
-                <option value="range">range</option>
-              </select>
-              <input type="range" id="cube-globe-cut-pos" min="0" max="100" value="50" title="Position of the cutting plane along the chosen axis" />
-            </div>
-            <label class="lb-check" id="cube-globe-cut-sweep-wrap" title="Animate the cutting plane back and forth through the scene"><input type="checkbox" id="cube-globe-cut-sweep" /> sweep</label>
-            <label class="lb-check" id="cube-globe-clamp-wrap" title="Subtract the median DEM height so the terrain rests on the imagery; untick to place points at their absolute heights above the ellipsoid"><input type="checkbox" id="cube-globe-clamp" checked /> rest on imagery</label>
-            <label class="lb-check" id="cube-globe-points-wrap" title="Hide the scatterers to inspect the imagery underneath"><input type="checkbox" id="cube-globe-points" checked /> points</label>
-            <label class="lb-check" id="cube-globe-tracks-wrap" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
-            <label class="lb-check" id="cube-globe-fly-wrap" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
-            <button type="button" class="btn btn--mini" id="cube-globe-reframe" title="Fly the camera back to the scene">Reframe</button>
-            <div class="cube-mctl" role="group" aria-label="Camera tour">
-              <label for="cube-globe-move" title="A single camera move played from wherever the camera stands, or a sequence that chains several moves and drives the section cut in step with them">tour</label>
-              <select id="cube-globe-move" class="cube-mselect"></select>
-              <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="120" step="1" inputmode="numeric" title="Total length of the move or sequence in seconds" />
-              <button type="button" class="btn btn--mini" id="cube-globe-play" title="Play the move once, without recording">Play</button>
-              <button type="button" class="btn btn--mini" id="cube-globe-record" title="Play the move while capturing the globe, then write the clip as WebM under figures/globe_tours of the run">Record</button>
-            </div>
-            <span class="cube-elev__at" id="cube-globe-at"></span>
-          </div>
           <div class="cube-globe__stage" id="cube-globe-stage">
+            <div class="cube-pview__bar">
+              <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+                <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+                <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+              </div>
+              <div class="cube-spaces" id="cube-globe-color" role="group" aria-label="Colour by">
+                <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
+                <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
+              </div>
+              <div class="cube-mctl" role="group" aria-label="Intensity threshold">
+                <label for="cube-globe-thr" id="cube-globe-thr-label">int &ge;</label>
+                <input type="range" id="cube-globe-thr" min="0" max="100" value="0" />
+                <span class="cube-mctl__val" id="cube-globe-thr-val"></span>
+              </div>
+              <div class="cube-mctl" role="group" aria-label="Point budget">
+                <label for="cube-globe-max" title="How many scatterers to stream onto the globe &mdash; type any budget, 0 draws every point above the amplitude cut">points</label>
+                <input type="number" id="cube-globe-max" class="cube-jump__input cube-jump__input--wide" min="0" step="10000" inputmode="numeric" />
+              </div>
+              <div class="cube-mctl" role="group" aria-label="Height exaggeration">
+                <label for="cube-globe-exagg" title="Scale heights above the scene base so subtle relief becomes visible">height</label>
+                <select id="cube-globe-exagg" class="cube-mselect">
+                  <option value="1">1&times;</option>
+                  <option value="3" selected>3&times;</option>
+                  <option value="5">5&times;</option>
+                  <option value="10">10&times;</option>
+                  <option value="20">20&times;</option>
+                </select>
+              </div>
+              <div class="cube-mctl" role="group" aria-label="Vertical lift">
+                <label for="cube-globe-lift" title="Extra vertical offset applied to every point, in metres">lift [m]</label>
+                <input type="number" id="cube-globe-lift" class="cube-jump__input" step="10" value="0" />
+              </div>
+              <div class="cube-mctl" role="group" aria-label="Section cut">
+                <label for="cube-globe-cut-axis" title="Slide a cutting plane through the scene; scatterers beyond the plane are hidden so the interior section is exposed">cut</label>
+                <select id="cube-globe-cut-axis" class="cube-mselect">
+                  <option value="off" selected>off</option>
+                  <option value="east">east</option>
+                  <option value="north">north</option>
+                  <option value="height">height</option>
+                  <option value="azimuth">azimuth</option>
+                  <option value="range">range</option>
+                </select>
+                <input type="range" id="cube-globe-cut-pos" min="0" max="100" value="50" title="Position of the cutting plane along the chosen axis" />
+              </div>
+              <label class="lb-check" id="cube-globe-cut-sweep-wrap" title="Animate the cutting plane back and forth through the scene"><input type="checkbox" id="cube-globe-cut-sweep" /> sweep</label>
+              <label class="lb-check" id="cube-globe-clamp-wrap" title="Subtract the median DEM height so the terrain rests on the imagery; untick to place points at their absolute heights above the ellipsoid"><input type="checkbox" id="cube-globe-clamp" checked /> rest on imagery</label>
+              <label class="lb-check" id="cube-globe-points-wrap" title="Hide the scatterers to inspect the imagery underneath"><input type="checkbox" id="cube-globe-points" checked /> points</label>
+              <label class="lb-check" id="cube-globe-tracks-wrap" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
+              <label class="lb-check" id="cube-globe-fly-wrap" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
+              <button type="button" class="btn btn--mini" id="cube-globe-reframe" title="Fly the camera back to the scene">Reframe</button>
+              <button type="button" class="btn btn--mini" id="cube-globe-full" title="Grow the globe to the whole screen; press Esc or the button again to come back">Full screen</button>
+              <div class="cube-mctl" role="group" aria-label="Camera tour">
+                <label for="cube-globe-move" title="A single camera move played from wherever the camera stands, or a sequence that chains several moves and drives the section cut in step with them">tour</label>
+                <select id="cube-globe-move" class="cube-mselect"></select>
+                <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="120" step="1" inputmode="numeric" title="Total length of the move or sequence in seconds" />
+                <button type="button" class="btn btn--mini" id="cube-globe-play" title="Play the move once, without recording">Play</button>
+                <button type="button" class="btn btn--mini" id="cube-globe-record" title="Play the move while capturing the globe, then write the clip as WebM under figures/globe_tours of the run">Record</button>
+              </div>
+              <span class="cube-elev__at" id="cube-globe-at"></span>
+            </div>
             <div id="cube-globe-container"></div>
           </div>
         </div>

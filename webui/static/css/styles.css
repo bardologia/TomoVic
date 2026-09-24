@@ -2738,7 +2738,12 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 .cube-cloud__stage canvas:active { cursor: grabbing; }
 #cube-cloud-dem-wrap[hidden] { display: none; }
 
-.cube-globe__stage { position: relative; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: #10151a; }
+.cube-globe__stage { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: #10151a; }
+.cube-globe__stage > .cube-pview__bar {
+  flex: none; padding: 7px 9px; gap: 6px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.cube-globe__stage:fullscreen { border: 0; border-radius: 0; }
 .cube-globe__stage.is-loading::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 5; pointer-events: none;
   background: linear-gradient(100deg, rgba(255, 209, 102, 0.1) 28%, rgba(255, 209, 102, 0.85) 50%, rgba(255, 209, 102, 0.1) 72%);
@@ -2751,22 +2756,21 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
   animation: cube-pulse 1.2s ease-in-out infinite;
 }
 #cube-globe-record.is-recording:disabled { opacity: 1; }
-#cube-globe-container { width: 100%; height: max(62vh, calc(100vh - 315px)); }
+#cube-globe-container { width: 100%; flex: 1 1 auto; min-height: max(62vh, calc(100vh - 315px)); }
 
 [data-page="cube"]:has(#cube-stage:not([hidden]).is-globe) {
   max-width: none; height: 100dvh; min-height: 0;
-  padding: 14px clamp(10px, 1vw, 18px) 12px;
+  padding: 8px clamp(10px, 1vw, 18px) 6px;
 }
 [data-page="cube"]:has(#cube-stage:not([hidden]).is-globe).is-active { display: flex; flex-direction: column; }
 body:has(#cube-stage:not([hidden]).is-globe) .footer { display: none; }
 .cube-stage.is-globe:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.cube-stage.is-globe .cube-modes { margin-bottom: 10px; }
+.cube-stage.is-globe .cube-modes { margin-bottom: 6px; }
 .cube-stage.is-globe .cube-view[data-view="globe"] { display: flex; flex-direction: column; }
-.cube-stage.is-globe .cube-view[data-view="globe"] .cube-pview { gap: 10px; }
 .cube-stage.is-globe .cube-view[data-view="globe"],
 .cube-stage.is-globe .cube-view[data-view="globe"] .cube-pview,
 .cube-stage.is-globe .cube-globe__stage { flex: 1 1 auto; min-height: 0; }
-.cube-stage.is-globe #cube-globe-container { height: 100%; }
+.cube-stage.is-globe #cube-globe-container { min-height: 0; }
 #cube-globe-container .cesium-viewer-bottom { font-size: 10px; }
 
 @media (max-width: 900px) {
