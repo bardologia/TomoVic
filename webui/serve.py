@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
+import signal
 import sys
 from pathlib import Path
 
@@ -26,7 +28,14 @@ class ServeEntry:
         self.parser.add_argument("--root", type=Path, default=None, help="project root the console operates on (jobs, logs, runs); defaults to the repository holding this file")
 
     def run(self) -> None:
-        """Parses the command line and serves the console until it is stopped."""
+        """Parses the command line and serves the console until it is stopped.
+
+        SIGUSR1 dumps every thread's stack to stderr, so a request or a cube
+        load that hangs can be located with ``kill -USR1 <pid>`` while the
+        console keeps running.
+        """
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
+
         args   = self.parser.parse_args()
         server = WebUIServer(host=args.host, port=args.port, root=args.root)
         server.serve()
