@@ -312,7 +312,15 @@ class TomogramGlobe {
     const anchor = new Cesium.Cartesian3(globe.anchor_ecef[0], globe.anchor_ecef[1], globe.anchor_ecef[2]);
     const enu = Cesium.Transforms.eastNorthUpToFixedFrame(anchor);
     const column = (i) => Cesium.Cartesian3.fromCartesian4(Cesium.Matrix4.getColumn(enu, i, new Cesium.Cartesian4()), new Cesium.Cartesian3());
-    return { anchor, east: column(0), north: column(1), up: column(2) };
+    const vec = (a) => new Cesium.Cartesian3(a[0], a[1], a[2]);
+    return { anchor, east: column(0), north: column(1), up: column(2), azimuth: vec(globe.axes.azimuth), range: vec(globe.axes.range) };
+  }
+
+  _planeSpans(frame, dir) {
+    const ref = Math.abs(Cesium.Cartesian3.dot(dir, frame.up)) > 0.9 ? frame.north : frame.up;
+    const span1 = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(dir, ref, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const span2 = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(dir, span1, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    return [span1, span2];
   }
 
   _rebuildCut() {
@@ -335,8 +343,7 @@ class TomogramGlobe {
 
     const frame = this._cutAxes();
     const dir = frame[axis === "height" ? "up" : axis];
-    const span1 = axis === "east" ? frame.north : frame.east;
-    const span2 = axis === "height" ? frame.north : frame.up;
+    const [span1, span2] = this._planeSpans(frame, dir);
 
     const n = this.collection.length;
     this.cutAlong = new Float32Array(n);

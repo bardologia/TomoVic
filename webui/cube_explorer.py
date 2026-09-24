@@ -1577,10 +1577,11 @@ class CubeExplorer:
         Returns:
             Dict with the scene geocoder, the cube's azimuth and range origins in
             full-scene pixels, the DEM, the median terrain height in metres, the
-            ECEF anchor of the scene centre, the lon/lat bounding box, the flight
-            lines when the run records its pass labels, and the beam segment;
-            None when the track parameters lack the geocoding keys or the DEM
-            holds no finite height.
+            ECEF anchor of the scene centre, the lon/lat bounding box, the azimuth
+            and ground-range scene-axis unit vectors, the flight lines when the
+            run records its pass labels, and the beam segment; None when the
+            track parameters lack the geocoding keys or the DEM holds no finite
+            height.
         """
         if dem is None:
             return None
@@ -1617,9 +1618,34 @@ class CubeExplorer:
             "base_height" : base_height,
             "anchor_ecef" : anchor[0],
             "bbox"        : [float(lon.min()), float(lat.min()), float(lon.max()), float(lat.max())],
+            "axes"        : self._scene_axes(geocoder, az_start, rg_start, n_az, n_rg, base_height),
             "tracks"      : self._track_lines(params, pass_labels, az_start, n_az) if pass_labels is not None else None,
             "beam"        : self._beam_segment(geocoder, reference, dem, base_height, az_start, rg_start, n_az, n_rg),
         }
+
+    @staticmethod
+    def _scene_axes(geocoder: SceneGeocoder, az_start: int, rg_start: int, n_az: int, n_rg: int, base_height: float) -> dict:
+        """Computes the ECEF unit vectors of the cube's azimuth and ground-range grid axes.
+
+        Args:
+            geocoder    : Scene geocoder of the reference track.
+            az_start    : Azimuth origin of the cube in full-scene pixels.
+            rg_start    : Range origin of the cube in full-scene pixels.
+            n_az        : Azimuth extent of the cube, in pixels.
+            n_rg        : Range extent of the cube, in pixels.
+            base_height : Median terrain height in metres the axes are evaluated at.
+
+        Returns:
+            Dict with the ``azimuth`` and ``range`` ECEF unit vectors as float lists of length 3.
+        """
+        mid_az = az_start + n_az / 2
+        mid_rg = rg_start + n_rg / 2
+
+        _, _, az_ends = geocoder.geocode([az_start, az_start + n_az], [mid_rg, mid_rg], [base_height, base_height])
+        _, _, rg_ends = geocoder.geocode([mid_az, mid_az], [rg_start, rg_start + n_rg], [base_height, base_height])
+
+        unit = lambda seg: [float(v) for v in seg / np.linalg.norm(seg)]
+        return {"azimuth": unit(az_ends[1] - az_ends[0]), "range": unit(rg_ends[1] - rg_ends[0])}
 
     TRACK_LINE_POINTS = 17
 
@@ -1713,7 +1739,8 @@ class CubeExplorer:
 
         Returns:
             Dict with the ECEF anchor, lon/lat bounding box, base height in
-            metres, the geocoder's residual RMS in metres and, when the run
+            metres, the geocoder's residual RMS in metres, the azimuth and
+            ground-range scene-axis ECEF unit vectors and, when the run
             records its pass labels, the flight lines and beam expressed as ECEF
             offsets from the anchor; None when geo is None.
         """
@@ -1730,6 +1757,7 @@ class CubeExplorer:
             "bbox"           : geo["bbox"],
             "base_height"    : geo["base_height"],
             "residual_rms_m" : geo["geocoder"].residual_rms_m,
+            "axes"           : geo["axes"],
             "tracks_note"    : None if tracks is not None else "this preprocessing run stores no pass labels, so the flight lines cannot be drawn",
             "tracks"         : None if tracks is None else {
                 "labels"    : tracks["labels"],

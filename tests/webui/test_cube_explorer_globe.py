@@ -1,7 +1,7 @@
 """Tests for the globe view geometry the cube explorer derives from geocoded runs.
 
-Covers the globe metadata (bounding box, anchor, DEM residual, flight lines and
-beam segment) built from the track parameters, the graceful path when a run
+Covers the globe metadata (bounding box, anchor, DEM residual, scene axes,
+flight lines and beam segment) built from the track parameters, the graceful path when a run
 records no pass labels or no geocoding at all, and the binary scatterer point
 blob served to Cesium, including DEM gap removal, elevation ordering, amplitude
 thresholding and the rejection of unknown sources.
@@ -75,6 +75,24 @@ def test_globe_meta_carries_only_the_run_passes(tmp_path):
         assert points.shape == (17, 3)
         assert np.all(np.isfinite(points))
         assert np.all(np.abs(points @ up - 3020.0) < 5.0)
+
+
+def test_globe_scene_axes_are_orthonormal_and_track_aligned(tmp_path):
+    """Checks the scene axes are unit vectors, mutually orthogonal, and the azimuth axis follows the reference flight line."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+    globe             = explorer.load_status()["cube"]["globe"]
+
+    azimuth = np.array(globe["axes"]["azimuth"])
+    rng     = np.array(globe["axes"]["range"])
+    assert abs(float(np.linalg.norm(azimuth)) - 1.0) < 1e-6
+    assert abs(float(np.linalg.norm(rng)) - 1.0) < 1e-6
+    assert abs(float(azimuth @ rng)) < 0.05
+
+    tracks    = globe["tracks"]
+    reference = np.array(tracks["lines"][tracks["labels"].index(tracks["reference"])])
+    forward   = reference[-1] - reference[0]
+    forward   = forward / np.linalg.norm(forward)
+    assert abs(float(forward @ azimuth)) > 0.99
 
 
 def test_globe_beam_segment_matches_slant_geometry(tmp_path):
