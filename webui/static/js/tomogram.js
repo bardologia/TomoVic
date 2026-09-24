@@ -1512,6 +1512,7 @@ class TomogramView {
         az     : query.has("az") ? Number(query.get("az")) : null,
         rg     : query.has("rg") ? Number(query.get("rg")) : null,
         source : query.get("source"),
+        tag    : query.get("tag"),
         space  : query.get("space"),
         cmap   : query.get("cmap"),
       };
@@ -1525,6 +1526,7 @@ class TomogramView {
     query.set("id", this.selectedId);
     query.set("view", this.view);
     query.set("source", this.srcFor());
+    query.set("tag", this._loadedTag());
     query.set("space", this.space);
     query.set("cmap", this.cmap);
 
@@ -1543,6 +1545,7 @@ class TomogramView {
 
     if (state.id !== this.selectedId || !this.meta) {
       if (this.cubes.some((cube) => cube.id === state.id)) {
+        if (state.tag !== null) localStorage.setItem(`cube-param:${state.id}`, state.tag);
         this.select(state.id);
       } else if (this.cubes.length) {
         Toast.show("The linked cube is not in the current runs root.", "warn");
@@ -1551,8 +1554,22 @@ class TomogramView {
       return;
     }
 
+    if (state.tag !== null && state.tag !== this._loadedTag()) {
+      if (!state.tagReloaded && (state.tag === "" || this.paramTags.includes(state.tag))) {
+        state.tagReloaded = true;
+        localStorage.setItem(`cube-param:${state.id}`, state.tag);
+        this.select(state.id, true);
+        return;
+      }
+      Toast.show(`Parameter run '${state.tag}' is not available for this cube.`, "warn");
+    }
+
     this.pendingState = null;
     this._applyState(state);
+  }
+
+  _loadedTag() {
+    return (this.meta && this.meta.param && this.meta.param.tag) || "";
   }
 
   _applyState(state) {
@@ -1561,6 +1578,9 @@ class TomogramView {
       this._setCmap(state.cmap);
     }
     if (state.space) this._setSpace(state.space);
+    if (state.source === "param" && !this.paramActive) {
+      Toast.show("The linked view shows a parameter run that is not loaded; showing Capon instead.", "warn");
+    }
     if (state.source) this._setViewSource(state.source);
 
     if (Number.isFinite(state.az) && Number.isFinite(state.rg)) {
