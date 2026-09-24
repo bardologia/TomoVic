@@ -12,6 +12,9 @@ class TomogramGlobe {
     this.thrEl = refs.thr;
     this.thrValEl = refs.thrVal;
     this.maxEl = refs.max;
+    this.cutAxisEl = refs.cutAxis;
+    this.cutPosEl = refs.cutPos;
+    this.cutSweepEl = refs.cutSweep;
     this.exaggEl = refs.exagg;
     this.liftEl = refs.lift;
     this.clampEl = refs.clamp;
@@ -48,6 +51,16 @@ class TomogramGlobe {
     this.pointAlong = null;
     this.alongOrder = null;
     this.shownUpTo = -1;
+    this.cutLayer = null;
+    this.cutDir = null;
+    this.cutAlong = null;
+    this.cutOrder = null;
+    this.cutRange = null;
+    this.cutShownUpTo = -1;
+    this.cutPlane = null;
+    this.cutBase = 0;
+    this.sweepFrame = null;
+    this.sweepT0 = null;
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -62,6 +75,9 @@ class TomogramGlobe {
     this.tracksEl.addEventListener("change", () => this._onTracksToggle());
     this.flyEl.addEventListener("change", () => this._onFlyToggle());
     this.reframeEl.addEventListener("click", () => this._flyToScene(true));
+    this.cutAxisEl.addEventListener("change", () => this._onCutAxis());
+    this.cutPosEl.addEventListener("input", () => this._onCutPos());
+    this.cutSweepEl.addEventListener("change", () => this._onCutSweep());
   }
 
   configure(meta) {
@@ -74,6 +90,15 @@ class TomogramGlobe {
     this.tracksEl.title = hasTracks ? "" : (meta.globe && meta.globe.tracks_note) || "no track selection stored for this stamp";
     this.flyEl.disabled = !hasTracks;
     if (!hasTracks) this.flyEl.checked = false;
+
+    this._stopSweep();
+    this.cutDir = null;
+    this.cutAlong = null;
+    this.cutOrder = null;
+    this.cutRange = null;
+    this.cutShownUpTo = -1;
+    this.cutPlane = null;
+    if (this.cutLayer) this.cutLayer.removeAll();
 
     this._stopFlight();
     this._abortPrefetch();
@@ -192,6 +217,7 @@ class TomogramGlobe {
     this.collection = this.viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
     this.collection.show = this.pointsEl.checked;
     this.trackLayer = this.viewer.scene.primitives.add(new Cesium.PrimitiveCollection());
+    this.cutLayer = this.viewer.scene.primitives.add(new Cesium.PrimitiveCollection());
   }
 
   _onPointsToggle() {
@@ -210,6 +236,12 @@ class TomogramGlobe {
   }
 
   _onFlyToggle() {
+    if (this.flyEl.checked && this.cutAxisEl.value !== "off") {
+      this.cutAxisEl.value = "off";
+      this.cutSweepEl.checked = false;
+      this._stopSweep();
+      this._rebuildCut();
+    }
     if (this.flyEl.checked && !this.tracksEl.checked) {
       this.tracksEl.checked = true;
       this._onTracksToggle();
@@ -218,6 +250,176 @@ class TomogramGlobe {
     if (!this.viewer) return;
     this._redrawTracks();
     this._syncStatus();
+    this.viewer.scene.requestRender();
+  }
+
+  _onCutAxis() {
+    if (this.cutAxisEl.value !== "off" && this.flyEl.checked) {
+      this.flyEl.checked = false;
+      this._redrawTracks();
+    }
+    if (this.cutAxisEl.value === "off") {
+      this.cutSweepEl.checked = false;
+      this._stopSweep();
+    }
+    this._rebuildCut();
+    this._syncStatus();
+  }
+
+  _onCutPos() {
+    this._applyCut();
+    this._syncStatus();
+  }
+
+  _onCutSweep() {
+    if (this.cutSweepEl.checked && this.cutAxisEl.value === "off") {
+      this.cutAxisEl.value = "east";
+      this._onCutAxis();
+    }
+    if (this.cutSweepEl.checked) this._startSweep();
+    else this._stopSweep();
+  }
+
+  _startSweep() {
+    this._stopSweep();
+    this.sweepFrame = requestAnimationFrame((now) => this._sweepStep(now));
+  }
+
+  _stopSweep() {
+    if (this.sweepFrame !== null) cancelAnimationFrame(this.sweepFrame);
+    this.sweepFrame = null;
+    this.sweepT0 = null;
+  }
+
+  _sweepStep(now) {
+    if (this.host.view !== "globe" || !this.cutSweepEl.checked || this.cutAxisEl.value === "off" || !this.cutOrder) {
+      this._stopSweep();
+      return;
+    }
+
+    if (this.sweepT0 === null) this.sweepT0 = now - (Number(this.cutPosEl.value) / 100) * (TomogramCloud.SWEEP_MS / 2);
+    const phase = ((now - this.sweepT0) % TomogramCloud.SWEEP_MS) / TomogramCloud.SWEEP_MS;
+    const tri = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+
+    this.cutPosEl.value = String(Math.round(tri * 100));
+    this._applyCut();
+    this._syncStatus();
+    this.sweepFrame = requestAnimationFrame((next) => this._sweepStep(next));
+  }
+
+  _cutAxes() {
+    const globe = this.host.meta.globe;
+    const anchor = new Cesium.Cartesian3(globe.anchor_ecef[0], globe.anchor_ecef[1], globe.anchor_ecef[2]);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(anchor);
+    const column = (i) => Cesium.Cartesian3.fromCartesian4(Cesium.Matrix4.getColumn(enu, i, new Cesium.Cartesian4()), new Cesium.Cartesian3());
+    return { anchor, east: column(0), north: column(1), up: column(2) };
+  }
+
+  _rebuildCut() {
+    if (this.cutLayer) this.cutLayer.removeAll();
+    this.cutDir = null;
+    this.cutAlong = null;
+    this.cutOrder = null;
+    this.cutRange = null;
+    this.cutShownUpTo = -1;
+    this.cutPlane = null;
+
+    if (!this.viewer || !this.points || !this.collection.length) return;
+
+    const axis = this.cutAxisEl.value;
+    if (axis === "off") {
+      for (let i = 0; i < this.collection.length; i += 1) this.collection.get(i).show = true;
+      this.viewer.scene.requestRender();
+      return;
+    }
+
+    const frame = this._cutAxes();
+    const dir = frame[axis === "height" ? "up" : axis];
+    const span1 = axis === "east" ? frame.north : frame.east;
+    const span2 = axis === "height" ? frame.north : frame.up;
+
+    const n = this.collection.length;
+    this.cutAlong = new Float32Array(n);
+    let lo = Infinity, hi = -Infinity;
+    let lo1 = Infinity, hi1 = -Infinity;
+    let lo2 = Infinity, hi2 = -Infinity;
+
+    for (let i = 0; i < n; i += 1) {
+      const p = this.collection.get(i).position;
+      const dx = p.x - frame.anchor.x, dy = p.y - frame.anchor.y, dz = p.z - frame.anchor.z;
+
+      const a = dx * dir.x + dy * dir.y + dz * dir.z;
+      const b = dx * span1.x + dy * span1.y + dz * span1.z;
+      const c = dx * span2.x + dy * span2.y + dz * span2.z;
+
+      this.cutAlong[i] = a;
+      if (a < lo) lo = a;
+      if (a > hi) hi = a;
+      if (b < lo1) lo1 = b;
+      if (b > hi1) hi1 = b;
+      if (c < lo2) lo2 = c;
+      if (c > hi2) hi2 = c;
+
+      this.collection.get(i).show = true;
+    }
+
+    this.cutDir = dir;
+    this.cutRange = hi > lo ? [lo, hi] : [lo, lo + 1];
+    this.cutOrder = this._alongOrder(this.cutAlong);
+    this.cutShownUpTo = n - 1;
+    this.cutBase = this.cutRange[0];
+    this._buildCutPlane(frame, dir, span1, span2, [lo1, hi1], [lo2, hi2]);
+    this._applyCut();
+    if (this.cutSweepEl.checked && this.sweepFrame === null) this._startSweep();
+  }
+
+  _buildCutPlane(frame, dir, span1, span2, ext1, ext2) {
+    const pad1 = Math.max(0.05 * (ext1[1] - ext1[0]), 10.0);
+    const pad2 = Math.max(0.05 * (ext2[1] - ext2[0]), 10.0);
+    const corners = [
+      [ext1[0] - pad1, ext2[0] - pad2], [ext1[1] + pad1, ext2[0] - pad2],
+      [ext1[1] + pad1, ext2[1] + pad2], [ext1[0] - pad1, ext2[1] + pad2],
+    ];
+
+    const point = ([b, c]) => new Cesium.Cartesian3(
+      frame.anchor.x + dir.x * this.cutBase + span1.x * b + span2.x * c,
+      frame.anchor.y + dir.y * this.cutBase + span1.y * b + span2.y * c,
+      frame.anchor.z + dir.z * this.cutBase + span1.z * b + span2.z * c,
+    );
+
+    const quad = corners.map(point);
+    const mesh = this.cutLayer.add(this._meshPrimitive([quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]], Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.14)));
+
+    const edges = this.cutLayer.add(new Cesium.PolylineCollection());
+    edges.add({ positions: [...quad, quad[0]], width: 1.5, material: Cesium.Material.fromType("Color", { color: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.7) }) });
+
+    this.cutPlane = [mesh, edges];
+  }
+
+  _cutThreshold() {
+    const frac = Number(this.cutPosEl.value) / 100;
+    return this.cutRange[0] + frac * (this.cutRange[1] - this.cutRange[0]);
+  }
+
+  _applyCut() {
+    if (!this.viewer || !this.cutOrder || !this.cutPlane) return;
+
+    const s = this._cutThreshold();
+    const order = this.cutOrder;
+    const along = this.cutAlong;
+
+    while (this.cutShownUpTo + 1 < order.length && along[order[this.cutShownUpTo + 1]] <= s) {
+      this.cutShownUpTo += 1;
+      this.collection.get(order[this.cutShownUpTo]).show = true;
+    }
+    while (this.cutShownUpTo >= 0 && along[order[this.cutShownUpTo]] > s) {
+      this.collection.get(order[this.cutShownUpTo]).show = false;
+      this.cutShownUpTo -= 1;
+    }
+
+    const shift = Cesium.Cartesian3.multiplyByScalar(this.cutDir, s - this.cutBase, new Cesium.Cartesian3());
+    const matrix = Cesium.Matrix4.fromTranslation(shift);
+    this.cutPlane.forEach((item) => { item.modelMatrix = matrix; });
     this.viewer.scene.requestRender();
   }
 
@@ -422,6 +624,7 @@ class TomogramGlobe {
     }
 
     this.shown = rows.length / 5;
+    this._rebuildCut();
     this._redrawTracks();
     this._syncStatus();
     this.viewer.scene.requestRender();
@@ -439,6 +642,8 @@ class TomogramGlobe {
     const exagg = Number(this.exaggEl.value || 1);
     const exaggNote = exagg > 1 ? ` · height ${exagg}×` : "";
 
+    const cutNote = this.cutAxisEl.value !== "off" && this.cutOrder ? ` · cut ${this.cutAxisEl.value} @ ${this.cutPosEl.value}%` : "";
+
     let trackNote = globe.tracks ? "" : ` · ${globe.tracks_note}`;
     if (this.tracksEl.checked && globe.tracks) {
       const beam = globe.tracks.beam;
@@ -446,7 +651,7 @@ class TomogramGlobe {
       if (this.flyEl.checked) trackNote += " · flight loop";
     }
 
-    this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
+    this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${cutNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
   }
 
   _redrawTracks() {
@@ -539,6 +744,10 @@ class TomogramGlobe {
     this._setAllPoints(true);
     if (this.flightGroup) {
       this.flightGroup.forEach((item) => { item.modelMatrix = Cesium.Matrix4.clone(Cesium.Matrix4.IDENTITY); });
+    }
+    if (this.cutOrder) {
+      this.cutShownUpTo = this.cutOrder.length - 1;
+      this._applyCut();
     }
     if (this.viewer) this.viewer.scene.requestRender();
   }
@@ -651,6 +860,7 @@ class TomogramGlobe {
         this.viewer.resize();
         if (!this.points) this._fetch();
         else this._redraw();
+        if (this.cutSweepEl.checked && this.sweepFrame === null) this._startSweep();
       })
       .catch(() => {
         this.atEl.textContent = "CesiumJS could not be loaded — the globe needs internet access.";

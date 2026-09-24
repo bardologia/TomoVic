@@ -431,6 +431,17 @@
                 <option value="150000">150k</option>
               </select>
             </div>
+            <div class="cube-mctl" role="group" aria-label="Section cut">
+              <label for="cube-cloud-cut-axis" title="Slide a cutting plane through the cloud; points beyond the plane are hidden so the interior section is exposed">cut</label>
+              <select id="cube-cloud-cut-axis" class="cube-mselect">
+                <option value="off" selected>off</option>
+                <option value="az">azimuth</option>
+                <option value="rg">range</option>
+                <option value="mu">elevation</option>
+              </select>
+              <input type="range" id="cube-cloud-cut-pos" min="0" max="100" value="50" title="Position of the cutting plane along the chosen axis" />
+            </div>
+            <label class="lb-check" id="cube-cloud-cut-sweep-wrap" title="Animate the cutting plane back and forth through the volume"><input type="checkbox" id="cube-cloud-cut-sweep" /> sweep</label>
             <label class="lb-check" id="cube-cloud-dem-wrap" title="Drape the cloud on the terrain: point height = DEM + elevation"><input type="checkbox" id="cube-cloud-dem" /> DEM terrain</label>
             <label class="lb-check" id="cube-cloud-scale-wrap" title="Metres on all three axes &mdash; no height exaggeration"><input type="checkbox" id="cube-cloud-scale" /> in scale (1:1)</label>
             <span class="cube-elev__at" id="cube-cloud-at">Drag to orbit &middot; wheel to zoom &middot; double-click to reset.</span>
@@ -475,6 +486,17 @@
               <label for="cube-globe-lift" title="Extra vertical offset applied to every point, in metres">lift [m]</label>
               <input type="number" id="cube-globe-lift" class="cube-jump__input" step="10" value="0" />
             </div>
+            <div class="cube-mctl" role="group" aria-label="Section cut">
+              <label for="cube-globe-cut-axis" title="Slide a cutting plane through the scene; scatterers beyond the plane are hidden so the interior section is exposed">cut</label>
+              <select id="cube-globe-cut-axis" class="cube-mselect">
+                <option value="off" selected>off</option>
+                <option value="east">east</option>
+                <option value="north">north</option>
+                <option value="height">height</option>
+              </select>
+              <input type="range" id="cube-globe-cut-pos" min="0" max="100" value="50" title="Position of the cutting plane along the chosen axis" />
+            </div>
+            <label class="lb-check" id="cube-globe-cut-sweep-wrap" title="Animate the cutting plane back and forth through the scene"><input type="checkbox" id="cube-globe-cut-sweep" /> sweep</label>
             <label class="lb-check" id="cube-globe-clamp-wrap" title="Subtract the median DEM height so the terrain rests on the imagery; untick to place points at their absolute heights above the ellipsoid"><input type="checkbox" id="cube-globe-clamp" checked /> rest on imagery</label>
             <label class="lb-check" id="cube-globe-points-wrap" title="Hide the scatterers to inspect the imagery underneath"><input type="checkbox" id="cube-globe-points" checked /> points</label>
             <label class="lb-check" id="cube-globe-tracks-wrap" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
