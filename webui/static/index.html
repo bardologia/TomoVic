@@ -575,9 +575,9 @@
             <label class="lb-check" id="cube-globe-fly-wrap" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
             <button type="button" class="btn btn--mini" id="cube-globe-reframe" title="Fly the camera back to the scene">Reframe</button>
             <div class="cube-mctl" role="group" aria-label="Camera tour">
-              <label for="cube-globe-move" title="Preset camera move played from wherever the camera stands: a full orbit, a spiral descent, a straight approach or retreat, a pass along the flight direction, or a tilt from the horizon down to nadir">tour</label>
+              <label for="cube-globe-move" title="A single camera move played from wherever the camera stands, or a sequence that chains several moves and drives the section cut in step with them">tour</label>
               <select id="cube-globe-move" class="cube-mselect"></select>
-              <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="60" step="1" inputmode="numeric" title="Length of the move in seconds" />
+              <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="120" step="1" inputmode="numeric" title="Total length of the move or sequence in seconds" />
               <button type="button" class="btn btn--mini" id="cube-globe-play" title="Play the move once, without recording">Play</button>
               <button type="button" class="btn btn--mini" id="cube-globe-record" title="Play the move while capturing the globe, then write the clip as WebM under figures/globe_tours of the run">Record</button>
             </div>
