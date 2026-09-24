@@ -63,18 +63,63 @@ class GlobeClipRecorder {
 }
 
 
+class GlobeTourPlan {
+  constructor(steps, seconds) {
+    const base  = steps.reduce((total, step) => total + step.lead + step.seconds, 0);
+    const scale = (seconds * 1000) / base;
+
+    this.steps    = steps;
+    this.segments = [];
+
+    let start = 0;
+    steps.forEach((step, index) => {
+      if (step.lead > 0) {
+        this.segments.push({ lead: true, step, index, start, span: step.lead * scale });
+        start += step.lead * scale;
+      }
+
+      step.span = step.seconds * scale;
+      this.segments.push({ lead: false, step, index, start, span: step.span });
+      start += step.span;
+    });
+
+    this.total = start;
+  }
+
+  segmentAt(ms) {
+    for (let i = this.segments.length - 1; i > 0; i -= 1) {
+      if (ms >= this.segments[i].start) return this.segments[i];
+    }
+    return this.segments[0];
+  }
+}
+
+
 class GlobeTour {
   static MOVES = {
-    orbit:   { label: "orbit",         seconds: 18, spin: [0.0,  1.00], pitch: [-32, -32], zoom: [1.00, 1.00], slide: [ 0.0, 0.0], ease: false },
-    spiral:  { label: "spiral in",     seconds: 20, spin: [0.0,  1.00], pitch: [-20, -45], zoom: [2.00, 0.70], slide: [ 0.0, 0.0], ease: true  },
-    closein: { label: "zoom in",       seconds: 12, spin: [0.0,  0.10], pitch: [-22, -42], zoom: [2.40, 0.50], slide: [ 0.0, 0.0], ease: true  },
-    pullout: { label: "zoom out",      seconds: 12, spin: [0.0, -0.10], pitch: [-42, -22], zoom: [0.50, 2.40], slide: [ 0.0, 0.0], ease: true  },
-    along:   { label: "along track",   seconds: 16, spin: [0.0,  0.00], pitch: [-24, -24], zoom: [0.90, 0.90], slide: [-0.9, 0.9], ease: true  },
-    nadir:   { label: "tilt to nadir", seconds: 12, spin: [0.0,  0.15], pitch: [ -6, -88], zoom: [1.40, 1.00], slide: [ 0.0, 0.0], ease: true  },
+    orbit:   { label: "orbit",         seconds: 18, spin: [0,  360], pitch: [-32, -32], zoom: [1.00, 1.00], slide: [ 0.0, 0.0], ease: false },
+    spiral:  { label: "spiral in",     seconds: 20, spin: [0,  360], pitch: [-20, -45], zoom: [2.00, 0.70], slide: [ 0.0, 0.0], ease: true  },
+    closein: { label: "zoom in",       seconds: 12, spin: [0,   36], pitch: [-22, -42], zoom: [2.40, 0.50], slide: [ 0.0, 0.0], ease: true  },
+    pullout: { label: "zoom out",      seconds: 12, spin: [0,  -36], pitch: [-42, -22], zoom: [0.50, 2.40], slide: [ 0.0, 0.0], ease: true  },
+    along:   { label: "along track",   seconds: 16, spin: [0,    0], pitch: [-24, -24], zoom: [0.90, 0.90], slide: [-0.9, 0.9], ease: true  },
+    nadir:   { label: "tilt to nadir", seconds: 12, spin: [0,   54], pitch: [ -6, -88], zoom: [1.40, 1.00], slide: [ 0.0, 0.0], ease: true  },
+  };
+
+  static SEQUENCES = {
+    walkthrough: {
+      label  : "cut walkthrough",
+      seconds: 55,
+      steps  : [
+        { lead: 2.5, seconds:  9, face: "azimuth", spin: [ 0,   8], pitch: [-88, -88], zoom: [1.20, 1.05], cut: "height",  sweep: [0, 1] },
+        { lead: 3.5, seconds: 10, face: "range",   spin: [ 0,  10], pitch: [-14, -22], zoom: [1.10, 0.90], cut: "range",   sweep: [0, 1] },
+        { lead: 3.5, seconds: 11, face: "range",   spin: [35,  35], pitch: [-20, -20], zoom: [0.80, 0.80], cut: "azimuth", sweep: [0, 1], follow: true },
+        { lead: 3.5, seconds: 12, face: "azimuth", spin: [ 0, 270], pitch: [-46, -24], zoom: [1.70, 1.00], cut: "off", tracks: true, fly: true, ease: false },
+      ],
+    },
   };
 
   static MIN_SECONDS = 3;
-  static MAX_SECONDS = 60;
+  static MAX_SECONDS = 120;
 
   constructor(refs, globe) {
     this.globe    = globe;
@@ -90,6 +135,10 @@ class GlobeTour {
     this.origin     = null;
     this.settle     = null;
     this.renderMode = null;
+    this.plan       = null;
+    this.cursor     = null;
+    this.from       = null;
+    this.center     = null;
 
     this.moveEl.innerHTML = this._options();
     this.moveEl.value     = Object.keys(GlobeTour.MOVES)[0];
@@ -98,24 +147,54 @@ class GlobeTour {
     this.playEl.addEventListener("click", () => this._onPlay());
     this.recordEl.addEventListener("click", () => this.record());
 
-    this.secsEl.value = this._move().seconds;
+    this.secsEl.value = this._entry().seconds;
     if (!GlobeClipRecorder.codec()) this.recordEl.title = "this browser cannot record WebM video";
     this._setBusy(false);
   }
 
-  _options() {
-    return Object.entries(GlobeTour.MOVES)
-      .map(([key, move]) => `<option value="${SharedCharts.esc(key)}">${SharedCharts.esc(move.label)}</option>`)
+  static group(label, table) {
+    const options = Object.entries(table)
+      .map(([key, entry]) => `<option value="${SharedCharts.esc(key)}">${SharedCharts.esc(entry.label)}</option>`)
       .join("");
+
+    return `<optgroup label="${label}">${options}</optgroup>`;
   }
 
-  _move() {
-    return GlobeTour.MOVES[this.moveEl.value];
+  _options() {
+    return GlobeTour.group("moves", GlobeTour.MOVES) + GlobeTour.group("sequences", GlobeTour.SEQUENCES);
+  }
+
+  _entry() {
+    return GlobeTour.MOVES[this.moveEl.value] || GlobeTour.SEQUENCES[this.moveEl.value];
+  }
+
+  static filled(step) {
+    return {
+      lead   : step.lead || 0,
+      seconds: step.seconds,
+      face   : step.face || "",
+      spin   : step.spin || [0, 0],
+      pitch  : step.pitch,
+      zoom   : step.zoom,
+      slide  : step.slide || [0, 0],
+      follow : !!step.follow,
+      cut    : step.cut === undefined ? null : step.cut,
+      sweep  : step.sweep || null,
+      tracks : !!step.tracks,
+      fly    : !!step.fly,
+      ease   : step.ease === undefined ? true : step.ease,
+      span   : 0,
+    };
+  }
+
+  _steps() {
+    const entry = this._entry();
+    return (entry.steps || [entry]).map((step) => GlobeTour.filled(step));
   }
 
   _onMove() {
     this.stop();
-    this.secsEl.value = this._move().seconds;
+    this.secsEl.value = this._entry().seconds;
   }
 
   _setBusy(on) {
@@ -136,46 +215,135 @@ class GlobeTour {
 
   _seconds() {
     const asked = Number(this.secsEl.value);
-    if (!Number.isFinite(asked) || !asked) return this._move().seconds;
+    if (!Number.isFinite(asked) || !asked) return this._entry().seconds;
     return Math.min(GlobeTour.MAX_SECONDS, Math.max(GlobeTour.MIN_SECONDS, asked));
+  }
+
+  static bearing(axis, frame) {
+    return Math.atan2(Cesium.Cartesian3.dot(axis, frame.east), Cesium.Cartesian3.dot(axis, frame.north));
   }
 
   _begin() {
     const viewer = this.globe.viewer;
     const sphere = this.globe.sceneSphere();
+    const frame  = this.globe.sceneFrame();
 
     this.origin = {
-      center : sphere.center,
-      radius : sphere.radius,
-      range  : sphere.radius * TomogramGlobe.VIEW_RANGE_FACTOR,
-      heading: viewer.camera.heading,
-      axis   : this.globe.sceneFrame().azimuth,
+      center  : sphere.center,
+      radius  : sphere.radius,
+      range   : sphere.radius * TomogramGlobe.VIEW_RANGE_FACTOR,
+      heading : viewer.camera.heading,
+      axis    : frame.azimuth,
+      bearings: { azimuth: GlobeTour.bearing(frame.azimuth, frame), range: GlobeTour.bearing(frame.range, frame) },
     };
+
+    this.center = sphere.center;
+    this.plan   = new GlobeTourPlan(this._steps(), this._seconds());
+    this.cursor = null;
 
     this.renderMode = viewer.scene.requestRenderMode;
     viewer.scene.requestRenderMode = false;
+  }
+
+  _currentPose() {
+    const camera = this.globe.viewer.camera;
+    const center = this.center;
+
+    return { heading: camera.heading, pitch: camera.pitch, range: Cesium.Cartesian3.distance(camera.positionWC, center), center };
+  }
+
+  static opening(step) {
+    return { cut: step.cut, tracks: false, fly: false, span: 0 };
+  }
+
+  _stage(step) {
+    const globe = this.globe;
+
+    globe.cutSweepEl.checked = false;
+    globe._stopSweep();
+
+    if (globe.cutAxisEl.value !== step.cut) {
+      globe.cutAxisEl.value = step.cut;
+      globe._rebuildCut();
+    }
+
+    globe.tracksEl.checked = step.tracks && !globe.tracksEl.disabled;
+    globe.flyEl.checked    = step.fly && !globe.flyEl.disabled;
+    globe.flightPeriod     = step.span || TomogramGlobe.FLIGHT_PERIOD_MS;
+    globe._redrawTracks();
+    globe._syncStatus();
+  }
+
+  _enter(segment) {
+    this.cursor = segment;
+    this.from   = this._currentPose();
+
+    if (segment.step.cut === null) return;
+    this._stage(segment.lead ? GlobeTour.opening(segment.step) : segment.step);
   }
 
   static span(ends, t) {
     return ends[0] + (ends[1] - ends[0]) * t;
   }
 
-  _pose(move, t) {
+  static smooth(t) {
+    return t * t * (3 - 2 * t);
+  }
+
+  static wrap(angle) {
+    const turn = Math.PI * 2;
+    return angle - turn * Math.round(angle / turn);
+  }
+
+  static blend(from, to, t) {
+    return {
+      heading: from.heading + GlobeTour.wrap(to.heading - from.heading) * t,
+      pitch  : from.pitch + (to.pitch - from.pitch) * t,
+      range  : from.range + (to.range - from.range) * t,
+      center : new Cesium.Cartesian3(
+        from.center.x + (to.center.x - from.center.x) * t,
+        from.center.y + (to.center.y - from.center.y) * t,
+        from.center.z + (to.center.z - from.center.z) * t,
+      ),
+    };
+  }
+
+  _reference(step) {
+    return step.face ? this.origin.bearings[step.face] : this.origin.heading;
+  }
+
+  _cutOffset(step, eased) {
+    const range = this.globe.cutRange;
+    if (!range || !step.sweep) return 0;
+
+    const mid = (range[0] + range[1]) / 2;
+    return range[0] + GlobeTour.span(step.sweep, eased) * (range[1] - range[0]) - mid;
+  }
+
+  _poseFor(step, eased) {
     const origin = this.origin;
-    const eased  = move.ease ? t * t * (3 - 2 * t) : t;
-    const slide  = GlobeTour.span(move.slide, eased) * origin.radius;
+    const axis   = step.follow && this.globe.cutDir ? this.globe.cutDir : origin.axis;
+    const along  = step.follow ? this._cutOffset(step, eased) : GlobeTour.span(step.slide, eased) * origin.radius;
 
-    const center = new Cesium.Cartesian3(
-      origin.center.x + origin.axis.x * slide,
-      origin.center.y + origin.axis.y * slide,
-      origin.center.z + origin.axis.z * slide,
-    );
+    return {
+      heading: this._reference(step) + Cesium.Math.toRadians(GlobeTour.span(step.spin, eased)),
+      pitch  : Cesium.Math.toRadians(GlobeTour.span(step.pitch, eased)),
+      range  : origin.range * GlobeTour.span(step.zoom, eased),
+      center : new Cesium.Cartesian3(origin.center.x + axis.x * along, origin.center.y + axis.y * along, origin.center.z + axis.z * along),
+    };
+  }
 
-    const heading = origin.heading + Cesium.Math.TWO_PI * GlobeTour.span(move.spin, eased);
-    const pitch   = Cesium.Math.toRadians(GlobeTour.span(move.pitch, eased));
-    const range   = origin.range * GlobeTour.span(move.zoom, eased);
+  _applyPose(pose) {
+    this.center = pose.center;
+    this.globe.viewer.camera.lookAt(pose.center, new Cesium.HeadingPitchRange(pose.heading, pose.pitch, pose.range));
+  }
 
-    this.globe.viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(heading, pitch, range));
+  _cutTo(fraction) {
+    if (!this.globe.cutOrder) return;
+
+    this.globe.cutPosEl.value = String(Math.round(fraction * 100));
+    this.globe._applyCut();
+    this.globe._syncStatus();
   }
 
   _step(now) {
@@ -185,12 +353,20 @@ class GlobeTour {
     }
 
     if (this.t0 === null) this.t0 = now;
-    const t = Math.min((now - this.t0) / (this._seconds() * 1000), 1);
 
-    this._pose(this._move(), t);
+    const elapsed = now - this.t0;
+    const segment = this.plan.segmentAt(elapsed);
+    if (segment !== this.cursor) this._enter(segment);
+
+    const step  = segment.step;
+    const u     = Math.min((elapsed - segment.start) / segment.span, 1);
+    const eased = segment.lead ? 0 : (step.ease ? GlobeTour.smooth(u) : u);
+
+    this._applyPose(segment.lead ? GlobeTour.blend(this.from, this._poseFor(step, 0), GlobeTour.smooth(u)) : this._poseFor(step, eased));
+    if (step.sweep) this._cutTo(segment.lead ? GlobeTour.span([1, step.sweep[0]], GlobeTour.smooth(u)) : GlobeTour.span(step.sweep, eased));
     this.globe.viewer.scene.requestRender();
 
-    if (t >= 1) {
+    if (elapsed >= this.plan.total) {
       this.stop();
       return;
     }
@@ -205,8 +381,11 @@ class GlobeTour {
     viewer.scene.requestRenderMode = this.renderMode;
     viewer.scene.requestRender();
 
+    this.globe.flightPeriod = TomogramGlobe.FLIGHT_PERIOD_MS;
     this.origin     = null;
     this.renderMode = null;
+    this.plan       = null;
+    this.cursor     = null;
   }
 
   stop() {

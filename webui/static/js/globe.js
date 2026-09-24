@@ -7,6 +7,7 @@ class TomogramGlobe {
   static CACHE_LIMIT = 8;
   static VIEW_PITCH_DEG = -32;
   static VIEW_RANGE_FACTOR = 3.4;
+  static FLIGHT_PERIOD_MS = 12000;
 
   constructor(refs, host) {
     this.host = host;
@@ -64,6 +65,7 @@ class TomogramGlobe {
     this.cutBase = 0;
     this.sweepFrame = null;
     this.sweepT0 = null;
+    this.flightPeriod = TomogramGlobe.FLIGHT_PERIOD_MS;
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -95,6 +97,7 @@ class TomogramGlobe {
     if (!hasTracks) this.flyEl.checked = false;
 
     this._stopSweep();
+    this.flightPeriod = TomogramGlobe.FLIGHT_PERIOD_MS;
     this.cutDir = null;
     this.cutAlong = null;
     this.cutOrder = null;
@@ -786,8 +789,7 @@ class TomogramGlobe {
     }
 
     if (this.flightT0 === null) this.flightT0 = now;
-    const period = 12000;
-    const frac = ((now - this.flightT0) % period) / period;
+    const frac = ((now - this.flightT0) % this.flightPeriod) / this.flightPeriod;
     const t = Math.min(frac / 0.85, 1.0);
     const s = this.flightBasis.length * t;
 
