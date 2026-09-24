@@ -250,6 +250,23 @@ class TomogramTransect {
     this.map.addEventListener("click", (ev) => this._onClick(ev));
     this.clearBtn.addEventListener("click", () => this._reset());
     this.printBtn.addEventListener("click", () => this._print());
+    this.downloadBtn = refs.download || null;
+    if (this.downloadBtn) this.downloadBtn.addEventListener("click", () => this._download());
+  }
+
+  _download() {
+    if (!this.start || !this.end) return;
+
+    const tag = `${this.host.fileTag()}_transect_az${this.start.az}_rg${this.start.rg}_to_az${this.end.az}_rg${this.end.rg}`;
+    let count = 0;
+
+    this.panels.forEach((panel) => {
+      if (panel.root.hidden || !panel.canvas.width) return;
+      this.host.downloadCanvas(panel.canvas, `${tag}_${this.host.srcFor()}_${this.host.space}.png`);
+      count += 1;
+    });
+
+    if (!count) Toast.show("No rendered transect panel to download.", "warn");
   }
 
   configure() {
@@ -280,6 +297,7 @@ class TomogramTransect {
     this.grid.hidden = true;
     this.clearBtn.hidden = true;
     this.printBtn.hidden = true;
+    if (this.downloadBtn) this.downloadBtn.hidden = true;
     this.atEl.textContent = "Click a start point on the map, then an end point, to cut every tomogram along that line.";
   }
 
@@ -304,6 +322,7 @@ class TomogramTransect {
       this.end = null;
       this.grid.hidden = true;
       this.printBtn.hidden = true;
+      if (this.downloadBtn) this.downloadBtn.hidden = true;
       this.clearBtn.hidden = false;
       this.atEl.textContent = `start az = ${point.az} · rg = ${point.rg} · click the end point`;
       this._drawOverlay();
@@ -314,6 +333,7 @@ class TomogramTransect {
 
     this.end = point;
     this.printBtn.hidden = false;
+    if (this.downloadBtn) this.downloadBtn.hidden = false;
     this.atEl.textContent = `transect az ${this.start.az},${this.start.rg} to az ${point.az},${point.rg}`;
     this._drawOverlay();
     this._fetchAll();
@@ -1060,6 +1080,75 @@ class TomogramView {
     if (this.jumpRg) this.jumpRg.addEventListener("change", () => this._setManualCut());
     if (this.jumpGo) this.jumpGo.addEventListener("click", () => this._setManualCut());
     if (this.jumpPrint) this.jumpPrint.addEventListener("click", () => this._printSlices());
+
+    this.jumpDownload = refs.jumpDownload || null;
+    this.jumpCsv = refs.jumpCsv || null;
+    if (this.jumpDownload) this.jumpDownload.addEventListener("click", () => this._downloadCuts());
+    if (this.jumpCsv) this.jumpCsv.addEventListener("click", () => this._downloadProfilesCsv());
+  }
+
+  downloadBlob(name, blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  downloadCanvas(canvas, name) {
+    canvas.toBlob((blob) => { if (blob) this.downloadBlob(name, blob); }, "image/png");
+  }
+
+  downloadBitmap(bitmap, name) {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    this.downloadCanvas(canvas, name);
+  }
+
+  fileTag() {
+    const cube = this.cubes.find((c) => c.id === this.selectedId);
+    const raw = cube ? `${cube.run}_${cube.stamp}` : "cube";
+    return raw.replace(/[^A-Za-z0-9._-]+/g, "_");
+  }
+
+  _downloadCuts() {
+    if (!this.meta || !this.point) {
+      Toast.show("Hover or lock a cut first.", "warn");
+      return;
+    }
+
+    const az = String(this.point.az).padStart(4, "0");
+    const rg = String(this.point.rg).padStart(4, "0");
+    const tag = this.fileTag();
+
+    let count = 0;
+    this.panels.forEach((panel) => {
+      if (panel.root.hidden || !panel.bitmap) return;
+      this.downloadBitmap(panel.bitmap, `${tag}_az${az}_rg${rg}_${panel.axis}_${panel.source}_${this.space}.png`);
+      count += 1;
+    });
+
+    if (!count) Toast.show("No rendered cut to download.", "warn");
+  }
+
+  _downloadProfilesCsv() {
+    if (!this.profData) {
+      Toast.show("Lock a pixel first so the profiles are loaded.", "warn");
+      return;
+    }
+
+    const az = String(this.profData.az).padStart(4, "0");
+    const rg = String(this.profData.rg).padStart(4, "0");
+    const lines = ["source,height_m,value"];
+
+    Object.entries(this.profData.sources).forEach(([source, series]) => {
+      series.heights.forEach((height, i) => lines.push(`${source},${height},${series.values[i]}`));
+    });
+
+    this.downloadBlob(`${this.fileTag()}_profiles_az${az}_rg${rg}.csv`, new Blob([lines.join("\n")], { type: "text/csv" }));
   }
 
   leave() {
