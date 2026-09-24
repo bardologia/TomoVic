@@ -223,6 +223,7 @@ class App {
         reframe   : document.getElementById("cube-globe-reframe"),
         at        : document.getElementById("cube-globe-at"),
         container : document.getElementById("cube-globe-container"),
+        stage     : document.getElementById("cube-globe-stage"),
       },
       cmapSel       : document.getElementById("cube-cmap"),
       demWrap       : document.getElementById("cube-dem-wrap"),

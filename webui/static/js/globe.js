@@ -21,7 +21,7 @@ class TomogramGlobe {
     this.reframeEl = refs.reframe;
     this.atEl = refs.at;
     this.container = refs.container;
-    this.stageEl = refs.container.parentElement;
+    this.stageEl = refs.stage;
 
     this.source = "full";
     this.colorBy = "mu";
