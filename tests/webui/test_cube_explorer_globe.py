@@ -10,12 +10,13 @@ the front end uploads into the run directory.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import numpy as np
 
 from tests.webui.conftest         import N_AZ, N_ELEV, N_RG, load_cube
-from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run, make_preproc_run, open_runs
+from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run, make_param_run, make_preproc_run, open_runs
 
 
 def globe_blob(explorer, cube_id, source="full", amp_min=0.0, max_points=0):
@@ -208,7 +209,7 @@ def test_a_repeated_globe_request_is_served_from_the_blob_cache(tmp_path):
     explorer, cube_id = loaded_run(tmp_path, with_geo=True)
 
     first  = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=100)
-    cached = explorer.globe_blobs.get(f"{cube_id}|full|{0.0!r}|100")
+    cached = explorer.globe_blobs.get(f"{cube_id}|None|full|{0.0!r}|100")
 
     assert first is cached
     assert explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=100) is first
@@ -228,7 +229,7 @@ def test_the_warmed_blobs_serve_the_published_default_request(tmp_path):
     assert explorer.globe_blobs.size() == len(defaults["amp_min"])
 
     for source, amp_min in defaults["amp_min"].items():
-        warmed = explorer.globe_blobs.get(f"{cube_id}|{source}|{amp_min!r}|{defaults['max_points']}")
+        warmed = explorer.globe_blobs.get(f"{cube_id}|params_k2|{source}|{amp_min!r}|{defaults['max_points']}")
         assert warmed is not None
         assert explorer.globe_points_bin(cube_id, source, amp_min, defaults["max_points"]) is warmed
 
@@ -243,8 +244,8 @@ def test_globe_defaults_are_absent_without_geocoding(tmp_path):
     assert explorer.globe_blobs.size() == 0
 
 
-def test_loading_another_cube_drops_the_previous_blobs(tmp_path):
-    """Checks the blob cache is emptied when a different cube is loaded."""
+def test_loading_another_cube_keeps_the_previous_blobs_for_a_revisit(tmp_path):
+    """Checks a cube's globe blobs survive loading a different cube, so switching back is served warm."""
     make_preproc_run(tmp_path, name="run_a", with_geo=True)
     make_preproc_run(tmp_path, name="run_b", with_geo=True)
 
@@ -252,12 +253,45 @@ def test_loading_another_cube_drops_the_previous_blobs(tmp_path):
     defaults          = load_cube(explorer, run_ids[0])["cube"]["globe_defaults"]
 
     explorer._warm_globe_blobs(run_ids[0])
-    key = f"{run_ids[0]}|full|{defaults['amp_min']['full']!r}|{defaults['max_points']}"
+    key = f"{run_ids[0]}|None|full|{defaults['amp_min']['full']!r}|{defaults['max_points']}"
 
     assert explorer.globe_blobs.get(key) is not None
 
     load_cube(explorer, run_ids[1])
-    assert explorer.globe_blobs.get(key) is None
+    assert explorer.globe_blobs.get(key) is not None
+
+
+def test_revisiting_a_cube_is_served_from_memory(tmp_path):
+    """Checks a run loaded earlier comes back without reading files, with its timings marked as memory."""
+    make_preproc_run(tmp_path, name="run_a", with_geo=True)
+    make_preproc_run(tmp_path, name="run_b", with_geo=True)
+
+    explorer, run_ids = open_runs(tmp_path, expected=2)
+    first             = load_cube(explorer, run_ids[0])
+    load_cube(explorer, run_ids[1])
+    status            = load_cube(explorer, run_ids[0])
+
+    assert status["cube"]["timings"] == {"total": 0.0, "stages": {"memory": 0.0}}
+    assert status["cube"]["sources"] == first["cube"]["sources"]
+    assert explorer.cube_cache.size() == 2
+
+
+def test_a_parameter_run_switch_never_serves_the_other_tags_globe_blob(tmp_path):
+    """Checks the param globe blob of one parameter run is not returned after loading the same run with another."""
+    run_dir = make_preproc_run(tmp_path, with_geo=True)
+    make_param_run(run_dir, "params_a", seed=1)
+    make_param_run(run_dir, "params_b", seed=2)
+
+    explorer, run_ids = open_runs(tmp_path, expected=1)
+    blobs             = []
+    for tag in ("params_a", "params_b"):
+        assert explorer.start_load(run_ids[0], param_tag=tag)["ok"]
+        while explorer.load_status()["state"] == "loading":
+            time.sleep(0.05)
+        blobs.append(explorer.globe_points_bin(run_ids[0], "param", amp_min=0.0, max_points=0))
+
+    assert blobs[0] != blobs[1]
+    assert explorer.cube_cache.size() == 2
 
 
 def test_a_recorded_tour_is_written_under_the_run(tmp_path):

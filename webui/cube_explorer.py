@@ -442,6 +442,10 @@ class StampReader:
         path = self.run_dir / "data" / name
         return path if path.is_file() else None
 
+    def cache_key(self, param_tag: str | None) -> str:
+        """Returns the key under which a load of this run with the given parameter run is kept in memory."""
+        return f"{self.run_dir}|{param_tag}"
+
     def byte_plan(self, param_tag: str | None) -> int:
         """Returns the bytes a load of this run reads whole: the tomogram, the primary SLC, the DEM and the chosen parameter block.
 
@@ -600,7 +604,8 @@ class CubeExplorer:
     primary SLC amplitude map in dB, the DEM, the geocoding context and, when a
     parameter run tag is given, the lazily reconstructed parametrized tomogram
     of that run. Loading runs in a background thread whose progress is polled
-    through ``load_status``.
+    through ``load_status``; the last few loaded cubes stay in memory so
+    switching back to one is immediate.
 
     Attributes:
         logger: Web logger for load and save reporting.
@@ -609,7 +614,8 @@ class CubeExplorer:
         scanner: Scanner listing preprocessing runs under a root.
         lock: Guards the loaded cube and the load status.
         loaded: Currently loaded cube state, or None.
-        globe_blobs: Cache of packed globe point blobs, dropped on every load.
+        cube_cache: Recently loaded cube states keyed by run directory and parameter run tag.
+        globe_blobs: Cache of packed globe point blobs keyed by cube id, parameter run tag and request.
         status: Load state machine payload polled by the front end.
     """
 
@@ -617,6 +623,7 @@ class CubeExplorer:
     CLOUD_CURVE_SOURCES  = ("full", "param")
     GLOBE_SOURCES        = ("full", "param")
     GLOBE_CACHE_ENTRIES  = 12
+    CUBE_CACHE_ENTRIES   = 8
     GLOBE_BLOB_MAX_BYTES = 32 * 1024 * 1024
     GLOBE_DEFAULT_POINTS = 60000
     GLOBE_TOUR_DIR       = Path("figures") / "globe_tours"
@@ -638,6 +645,7 @@ class CubeExplorer:
         self.scanner     = RunScanner(self.roots)
         self.lock        = threading.Lock()
         self.loaded      = None
+        self.cube_cache  = LruCache(self.CUBE_CACHE_ENTRIES)
         self.globe_blobs = LruCache(self.GLOBE_CACHE_ENTRIES)
         self.status      = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
 
@@ -673,7 +681,11 @@ class CubeExplorer:
         return {"ok": True, "tags": reader.param_tags()}
 
     def start_load(self, cube_id: str, param_tag: str | None = None) -> dict:
-        """Starts loading a cube in a background thread.
+        """Starts loading a cube in a background thread, or serves it from memory.
+
+        A run loaded recently with the same parameter run is swapped in at
+        once; otherwise a background thread reads it and stores the result for
+        later switches.
 
         Args:
             cube_id: Preprocessing run directory path.
@@ -695,16 +707,26 @@ class CubeExplorer:
             if param_tag not in tags:
                 return {"ok": False, "error": f"unknown parameter run tag '{param_tag}' for {cube_id}; available: {tags}"}
 
+        cached = self.cube_cache.get(reader.cache_key(param_tag))
+
         with self.lock:
             if self.status["state"] == "loading":
                 return {"ok": False, "error": f"a load is already running for {self.status['id']}"}
             if self.status["state"] == "ready" and self.status["id"] == cube_id and self.loaded is not None and self.loaded["param_tag"] == param_tag:
                 return {"ok": True}
 
-            self.loaded = None
-            self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "reading": [], "error": ""}
+            if cached is not None:
+                cached["meta"] = {**cached["meta"], "timings": {"total": 0.0, "stages": {"memory": 0.0}}}
+                self.loaded    = cached
+                self.status    = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
+            else:
+                self.loaded = None
+                self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "reading": [], "error": ""}
 
-        self.globe_blobs.clear()
+        if cached is not None:
+            self.logger.info(f"cube served from memory: {cube_id}")
+            return {"ok": True}
+
         threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
         return {"ok": True}
 
@@ -1063,12 +1085,13 @@ class CubeExplorer:
         with self.lock:
             if self.loaded is None or self.loaded["id"] != cube_id:
                 return None
-            geo = self.loaded["geo"]
+            geo       = self.loaded["geo"]
+            param_tag = self.loaded["param_tag"]
 
         if geo is None or source not in self.GLOBE_SOURCES:
             return None
 
-        key    = f"{cube_id}|{source}|{amp_min!r}|{max_points}"
+        key    = f"{cube_id}|{param_tag}|{source}|{amp_min!r}|{max_points}"
         cached = self.globe_blobs.get(key)
         if cached is not None:
             return cached
@@ -1754,6 +1777,7 @@ class CubeExplorer:
             with self.lock:
                 self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo, "passes": passes}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
+                self.cube_cache.put(reader.cache_key(param_tag), self.loaded)
 
             self.logger.info(f"cube ready in {timer.total():.1f} s: {cube_id} sources={meta['sources']} ({timer.summary()})")
         except Exception as exc:
