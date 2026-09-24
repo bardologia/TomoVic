@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tests.webui.conftest         import N_AZ, N_ELEV, N_RG
-from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run
+from tests.webui.conftest         import N_AZ, N_ELEV, N_RG, load_cube
+from tests.webui.preproc_fixtures import HEIGHT_RANGE, loaded_param_run, loaded_run, make_preproc_run, open_runs
 
 
 def globe_blob(explorer, cube_id, source="full", amp_min=0.0, max_points=0):
@@ -180,3 +180,60 @@ def test_globe_points_reject_unknown_source_and_unloaded_cube(tmp_path):
 
     assert explorer.globe_points_bin(cube_id, "banana", amp_min=0.0, max_points=0) is None
     assert explorer.globe_points_bin("wrong", "full", amp_min=0.0, max_points=0) is None
+
+
+def test_a_repeated_globe_request_is_served_from_the_blob_cache(tmp_path):
+    """Checks a second identical point request returns the very object the first one cached."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    first  = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=100)
+    cached = explorer.globe_blobs.get(f"{cube_id}|full|{0.0!r}|100")
+
+    assert first is cached
+    assert explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=100) is first
+
+
+def test_the_warmed_blobs_serve_the_published_default_request(tmp_path):
+    """Checks the warm fills the cache with exactly the requests the published globe defaults describe."""
+    explorer, cube_id = loaded_param_run(tmp_path, with_geo=True)
+    defaults          = explorer.load_status()["cube"]["globe_defaults"]
+
+    assert set(defaults["amp_min"]) == {"full", "param"}
+    assert defaults["max_points"] == explorer.GLOBE_DEFAULT_POINTS
+
+    explorer.globe_blobs.clear()
+    explorer._warm_globe_blobs(cube_id)
+
+    assert explorer.globe_blobs.size() == len(defaults["amp_min"])
+
+    for source, amp_min in defaults["amp_min"].items():
+        warmed = explorer.globe_blobs.get(f"{cube_id}|{source}|{amp_min!r}|{defaults['max_points']}")
+        assert warmed is not None
+        assert explorer.globe_points_bin(cube_id, source, amp_min, defaults["max_points"]) is warmed
+
+
+def test_globe_defaults_are_absent_without_geocoding(tmp_path):
+    """Checks a run that cannot be geolocated publishes no globe defaults and warms nothing."""
+    explorer, cube_id = loaded_run(tmp_path)
+
+    assert explorer.load_status()["cube"]["globe_defaults"] is None
+
+    explorer._warm_globe_blobs(cube_id)
+    assert explorer.globe_blobs.size() == 0
+
+
+def test_loading_another_cube_drops_the_previous_blobs(tmp_path):
+    """Checks the blob cache is emptied when a different cube is loaded."""
+    make_preproc_run(tmp_path, name="run_a", with_geo=True)
+    make_preproc_run(tmp_path, name="run_b", with_geo=True)
+
+    explorer, run_ids = open_runs(tmp_path, expected=2)
+    defaults          = load_cube(explorer, run_ids[0])["cube"]["globe_defaults"]
+
+    explorer._warm_globe_blobs(run_ids[0])
+    key = f"{run_ids[0]}|full|{defaults['amp_min']['full']!r}|{defaults['max_points']}"
+
+    assert explorer.globe_blobs.get(key) is not None
+
+    load_cube(explorer, run_ids[1])
+    assert explorer.globe_blobs.get(key) is None

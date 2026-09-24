@@ -60,3 +60,20 @@ def test_concurrent_writers_never_exceed_the_capacity():
         worker.join()
 
     assert cache.size() == 8
+
+
+def test_clearing_drops_every_entry_and_keeps_the_cache_usable():
+    """clear() empties the cache, makes former keys read as None and leaves it writable."""
+    cache = LruCache(2)
+
+    cache.put("a", 1)
+    cache.put("b", 2)
+    cache.clear()
+
+    assert cache.size() == 0
+    assert cache.get("a") is None
+    assert cache.get("b") is None
+
+    cache.put("c", 3)
+    assert cache.get("c") == 3
+    assert cache.size() == 1

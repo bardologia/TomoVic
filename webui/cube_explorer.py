@@ -440,15 +440,16 @@ class CubeExplorer:
         scanner: Scanner listing preprocessing runs under a root.
         lock: Guards the loaded cube and the load status.
         loaded: Currently loaded cube state, or None.
+        globe_blobs: Cache of packed globe point blobs, dropped on every load.
         status: Load state machine payload polled by the front end.
     """
 
-    SOURCES             = ("full", "param")
-    CLOUD_CURVE_SOURCES = ("full", "param")
-    GLOBE_SOURCES       = ("full", "param")
-    GLOBE_CACHE_ENTRIES = 12
-    GLOBE_CACHE_BYTES   = 32 * 1024 * 1024
-    GLOBE_WARM_POINTS   = 60000
+    SOURCES              = ("full", "param")
+    CLOUD_CURVE_SOURCES  = ("full", "param")
+    GLOBE_SOURCES        = ("full", "param")
+    GLOBE_CACHE_ENTRIES  = 12
+    GLOBE_BLOB_MAX_BYTES = 32 * 1024 * 1024
+    GLOBE_DEFAULT_POINTS = 60000
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
@@ -868,7 +869,7 @@ class CubeExplorer:
         header     = np.array([globe_rows.shape[0], total, 0.0, 0.0], dtype=np.float32)
         blob       = header.tobytes() + np.ascontiguousarray(globe_rows).tobytes()
 
-        if len(blob) <= self.GLOBE_CACHE_BYTES:
+        if len(blob) <= self.GLOBE_BLOB_MAX_BYTES:
             self.globe_blobs.put(key, blob)
         return blob
 
@@ -877,23 +878,23 @@ class CubeExplorer:
 
         Runs after a cube load so the first globe render and subsequent source
         swaps are served from cache instead of rescanning the memory-mapped
-        cubes. The amplitude floors mirror the front-end threshold slider at its
-        default position of zero.
+        cubes. The warmed requests are exactly the ones the front end issues at
+        its default threshold and point budget, because both sides read them from
+        the ``globe_defaults`` block of the cube metadata.
 
         Args:
             cube_id: Id of the freshly loaded cube.
         """
         with self.lock:
-            if self.loaded is None or self.loaded["id"] != cube_id or self.loaded["geo"] is None:
+            if self.loaded is None or self.loaded["id"] != cube_id:
                 return
-            meta = self.loaded["meta"]
+            defaults = self.loaded["meta"]["globe_defaults"]
 
-        for source in self.GLOBE_SOURCES:
-            if source not in meta["sources"]:
-                continue
+        if defaults is None:
+            return
 
-            amp_min = float(meta["intensity"][source][0])
-            self.globe_points_bin(cube_id, source, amp_min, self.GLOBE_WARM_POINTS)
+        for source, amp_min in defaults["amp_min"].items():
+            self.globe_points_bin(cube_id, source, amp_min, defaults["max_points"])
 
     def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
         """Renders an elevation section along an arbitrary line as a PNG.
@@ -1350,10 +1351,7 @@ class CubeExplorer:
             self.logger.error(f"cube load failed: {cube_id}: {exc}")
             return
 
-        try:
-            self._warm_globe_blobs(cube_id)
-        except Exception as exc:
-            self.logger.error(f"globe warm failed: {cube_id}: {exc}")
+        self._warm_globe_blobs(cube_id)
 
     def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
@@ -1417,7 +1415,31 @@ class CubeExplorer:
             "spacing"   : self._load_spacing(reader),
             "globe"     : self._globe_meta(geo),
         }
+        meta["globe_defaults"] = self._globe_defaults(meta)
+
         return entries, meta, primary, dem, geo
+
+    def _globe_defaults(self, meta: dict) -> dict | None:
+        """Returns the globe request every source is first served with.
+
+        Both the server-side warm and the front end read this block, so the
+        default amplitude floor and point budget have one authority and the warmed
+        cache entries are the ones the first request looks up.
+
+        Args:
+            meta: Cube metadata built so far, carrying the globe block, the source
+                list and the per-source intensity ranges.
+
+        Returns:
+            Dict with the default ``max_points`` budget and the ``amp_min`` floor
+            of every globe-renderable source, or None when the scene has no
+            geocoding and the globe cannot be drawn.
+        """
+        if meta["globe"] is None:
+            return None
+
+        amp_min = {source: float(meta["intensity"][source][0]) for source in self.GLOBE_SOURCES if source in meta["sources"]}
+        return {"max_points": self.GLOBE_DEFAULT_POINTS, "amp_min": amp_min}
 
     def _param_entry(self, reader: StampReader, tag: str, n_az: int, n_rg: int, x_axis: np.ndarray) -> dict:
         """Builds the lazily reconstructed parametrized-tomogram entry of one run.
