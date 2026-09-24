@@ -762,6 +762,11 @@ class TomogramGlobe {
     if (this.viewer) this.viewer.scene.requestRender();
   }
 
+  leave() {
+    this._stopSweep();
+    this._stopFlight();
+  }
+
   _flightStep(now) {
     if (this.host.view !== "globe" || !this.flightBasis || !this.flightGroup) {
       this._stopFlight();

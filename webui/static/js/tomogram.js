@@ -597,6 +597,10 @@ class TomogramCloud {
     this.sweepFrame = requestAnimationFrame((next) => this._sweepStep(next));
   }
 
+  leave() {
+    this._stopSweep();
+  }
+
   _cutSpec() {
     const axis = this.cutAxisEl.value;
     if (axis === "off" || !this.host.meta || !this.muBounds) return null;
@@ -1060,6 +1064,8 @@ class TomogramView {
 
   leave() {
     this._stopSweeps();
+    if (this.cloud) this.cloud.leave();
+    if (this.globe) this.globe.leave();
   }
 
   async enter() {
