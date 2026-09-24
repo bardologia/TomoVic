@@ -931,6 +931,169 @@ class TomogramCloud {
   }
 }
 
+class TomogramPasses {
+  constructor(refs, host) {
+    this.host = host;
+    this.kindEl = refs.kind;
+    this.playBtn = refs.play;
+    this.input = refs.input;
+    this.rangeEl = refs.range;
+    this.atEl = refs.at;
+    this.media = refs.media;
+    this.canvas = refs.canvas;
+    this.cbar = refs.cbar;
+    this.minEl = refs.min;
+    this.maxEl = refs.max;
+
+    this.meta = null;
+    this.kind = "amplitude";
+    this.idx = 0;
+    this.token = 0;
+    this.playing = false;
+
+    this.kindEl.querySelectorAll(".cube-space").forEach((btn) => {
+      btn.addEventListener("click", () => this._setKind(btn.dataset.kind));
+    });
+    this.media.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
+    this.input.addEventListener("change", () => this._onManual());
+    this.playBtn.addEventListener("click", () => this._togglePlay());
+  }
+
+  get available() {
+    return !!this.meta;
+  }
+
+  configure(meta) {
+    this.meta = meta.passes || null;
+    this.kind = "amplitude";
+    this.idx = 0;
+    this._stopPlay();
+
+    if (!this.meta) return;
+
+    this.input.min = 1;
+    this.input.max = this.meta.n_passes;
+    this.input.value = 1;
+    this.rangeEl.textContent = `1–${this.meta.n_passes}`;
+  }
+
+  render() {
+    if (!this.meta) return;
+    this._syncBtns();
+    this._fetch();
+  }
+
+  leave() {
+    this._stopPlay();
+  }
+
+  _setKind(kind) {
+    if (kind === this.kind) return;
+    if (kind === "phase" && !this.meta.phase) {
+      Toast.show("This preprocessing run stores no interferogram cube.", "warn");
+      return;
+    }
+
+    this.kind = kind;
+    if (kind === "phase" && this.idx === 0) this.idx = Math.min(1, this.meta.n_passes - 1);
+    this.render();
+  }
+
+  _syncBtns() {
+    this.kindEl.querySelectorAll(".cube-space").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.kind === this.kind);
+      if (btn.dataset.kind === "phase") btn.disabled = !this.meta.phase;
+    });
+  }
+
+  _onWheel(ev) {
+    if (!this.meta) return;
+    ev.preventDefault();
+    this._stopPlay();
+
+    const lowest = this.kind === "phase" ? 1 : 0;
+    const next = Math.min(this.meta.n_passes - 1, Math.max(lowest, this.idx + (ev.deltaY > 0 ? 1 : -1)));
+    if (next === this.idx) return;
+
+    this.idx = next;
+    this._fetch();
+  }
+
+  _onManual() {
+    if (!this.meta) return;
+    this._stopPlay();
+
+    const lowest = this.kind === "phase" ? 1 : 0;
+    this.idx = Math.min(this.meta.n_passes - 1, Math.max(lowest, Math.floor(Number(this.input.value)) - 1 || 0));
+    this._fetch();
+  }
+
+  _togglePlay() {
+    if (this.playing) this._stopPlay();
+    else this._startPlay();
+  }
+
+  _startPlay() {
+    if (!this.meta || this.meta.n_passes < 2) return;
+    this.playing = true;
+    this.playBtn.textContent = "Pause";
+    this.playBtn.classList.add("is-playing");
+    this._loop();
+  }
+
+  _stopPlay() {
+    this.playing = false;
+    this.playBtn.textContent = "Play";
+    this.playBtn.classList.remove("is-playing");
+  }
+
+  async _loop() {
+    while (this.playing && this.meta && this.host.view === "passes") {
+      const lowest = this.kind === "phase" ? 1 : 0;
+      await this._fetch();
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      if (!this.playing) break;
+      this.idx = this.idx + 1 > this.meta.n_passes - 1 ? lowest : this.idx + 1;
+    }
+    this._stopPlay();
+  }
+
+  _url(idx) {
+    return `/api/cubes/pass_map?id=${encodeURIComponent(this.host.selectedId)}&kind=${this.kind}&idx=${idx}&cmap=gray`;
+  }
+
+  async _fetch() {
+    this.token += 1;
+    const token = this.token;
+
+    if (document.activeElement !== this.input) this.input.value = this.idx + 1;
+    const label = this.meta.labels[this.idx] || `pass ${this.idx}`;
+    const what = this.kind === "phase" ? "interferometric phase vs primary" : "SLC amplitude";
+    this.atEl.textContent = `${label} · ${what} · pass ${this.idx + 1} / ${this.meta.n_passes}`;
+
+    if (this.kind === "phase") {
+      this.cbar.src = "/api/cubes/cbar?cmap=twilight";
+      this.minEl.textContent = "−π";
+      this.maxEl.textContent = "+π";
+    } else {
+      this.cbar.src = "/api/cubes/cbar?cmap=gray";
+      this.minEl.textContent = "p1";
+      this.maxEl.textContent = "p99 dB";
+    }
+
+    if (this.idx + 1 < this.meta.n_passes) this.host.cacheBitmap(this._url(this.idx + 1));
+
+    const bitmap = await this.host.cacheBitmap(this._url(this.idx));
+    if (!bitmap || token !== this.token) return;
+
+    if (this.canvas.width !== bitmap.width || this.canvas.height !== bitmap.height) {
+      this.canvas.width = bitmap.width;
+      this.canvas.height = bitmap.height;
+    }
+    this.canvas.getContext("2d").drawImage(bitmap, 0, 0);
+  }
+}
+
 class TomogramFigures {
   constructor(refs, host) {
     this.host = host;
@@ -1065,6 +1228,7 @@ class TomogramView {
     this.cloud = refs.cloud ? new TomogramCloud(refs.cloud, this) : null;
     this.globe = refs.globe ? new TomogramGlobe(refs.globe, this) : null;
     this.figures = refs.figures && refs.figures.root ? new TomogramFigures(refs.figures, this) : null;
+    this.passes = refs.passes && refs.passes.canvas ? new TomogramPasses(refs.passes, this) : null;
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
 
@@ -1206,6 +1370,7 @@ class TomogramView {
     this._stopSweeps();
     if (this.cloud) this.cloud.leave();
     if (this.globe) this.globe.leave();
+    if (this.passes) this.passes.leave();
   }
 
   async enter() {
@@ -1458,6 +1623,14 @@ class TomogramView {
       if (!this.globe.available && this.view === "globe") this._setView("explorer");
     }
 
+    if (this.passes) {
+      this.passes.configure(meta);
+      const passesBtn = this.modeBtns.find((btn) => btn.dataset.view === "passes");
+      if (passesBtn) passesBtn.hidden = !this.passes.available;
+      if (!this.passes.available && this.view === "passes") this._setView("explorer");
+      else if (this.view === "passes") this.passes.render();
+    }
+
     if (this.figures) {
       this.figures.configure();
       if (this.view === "figures") this.figures.render();
@@ -1532,7 +1705,7 @@ class TomogramView {
   }
 
   _setView(view) {
-    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "globe", "figures"].includes(view) || view === this.view) return;
+    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "globe", "figures", "passes"].includes(view) || view === this.view) return;
 
     this._stopSweeps();
     this.view = view;
@@ -1556,6 +1729,10 @@ class TomogramView {
     }
     if (view === "figures" && this.figures && this.meta) {
       this.figures.render();
+      return;
+    }
+    if (view === "passes" && this.passes && this.meta) {
+      this.passes.render();
       return;
     }
 

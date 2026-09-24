@@ -3,7 +3,8 @@
 Exposes preprocessing-run listing and loading, parameter-run listing and the
 per-pixel Gaussian readout of the parametrized tomogram, plane/slice/transect
 renderings, colour bars, point clouds for the 3D and globe views, the DEM grid,
-the run's saved figures and multi-run slice collection.
+per-pass SLC amplitude and interferogram phase maps, the run's saved figures
+and multi-run slice collection.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ class CubeRouter(SubRouter):
         table.add("GET", "/api/cubes/transect",     self.transect)
         table.add("GET", "/api/cubes/slice",        self.slice_view)
         table.add("GET", "/api/cubes/figures",      self.figures)
+        table.add("GET", "/api/cubes/pass_map",     self.pass_map)
         table.add("GET", "/api/cubes/figure",       self.figure)
 
         table.add("POST", "/api/cubes/load",          self.load)
@@ -146,6 +148,16 @@ class CubeRouter(SubRouter):
             space   = exchange.text("space", "physical"),
             cmap    = exchange.text("cmap", "jet"),
             dem     = exchange.integer("dem", "0") != 0,
+        )
+        exchange.send_png(png)
+
+    def pass_map(self, exchange: HttpExchange) -> None:
+        """Answers with the PNG amplitude or interferometric-phase map of one pass."""
+        png = self.cubes.pass_map_png(
+            cube_id = exchange.text("id"),
+            kind    = exchange.text("kind", "amplitude"),
+            index   = exchange.integer("idx"),
+            cmap    = exchange.text("cmap", "gray"),
         )
         exchange.send_png(png)
 

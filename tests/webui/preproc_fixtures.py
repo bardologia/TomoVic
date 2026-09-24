@@ -2,7 +2,8 @@
 
 Writes run directories following the ``data/dataset.json`` layout the
 preprocessing pipeline produces, with a full tomogram, a primary SLC, an
-optional DEM, optional track parameters and optional Gaussian parameter runs
+optional DEM, an optional secondary stack with its interferograms, optional
+track parameters and optional Gaussian parameter runs
 under ``params/<tag>``, and provides helpers that register a runs root and
 drive CubeExplorer loading over those runs.
 """
@@ -49,7 +50,7 @@ def write_track_parameters(run_dir: Path, with_geo: bool) -> None:
     (run_dir / "meta" / "track_parameters.json").write_text(json.dumps(payload))
 
 
-def make_preproc_run(base: Path, group: str = "group", name: str = "run_a", seed: int = 0, tomogram: np.ndarray | None = None, with_dem: bool = False, with_geo: bool = False, with_spacing: bool = False, pass_labels: tuple | None = ("T01", "T02"), tomogram_tag: str = "capon") -> Path:
+def make_preproc_run(base: Path, group: str = "group", name: str = "run_a", seed: int = 0, tomogram: np.ndarray | None = None, with_dem: bool = False, with_geo: bool = False, with_spacing: bool = False, pass_labels: tuple | None = ("T01", "T02"), tomogram_tag: str = "capon", with_passes: bool = False) -> Path:
     """Writes one synthetic preprocessing run directory.
 
     Args:
@@ -65,6 +66,8 @@ def make_preproc_run(base: Path, group: str = "group", name: str = "run_a", seed
         pass_labels: Pass labels recorded in the layout, or None for a run
             without a pass labelling.
         tomogram_tag: Tomogram tag recorded in the layout.
+        with_passes: Whether two complex secondary SLCs and their
+            interferograms against the primary are written.
 
     Returns:
         Path of the created preprocessing run directory.
@@ -79,6 +82,11 @@ def make_preproc_run(base: Path, group: str = "group", name: str = "run_a", seed
 
     primary = rng.normal(size=(N_AZ, N_RG)) + 1j * rng.normal(size=(N_AZ, N_RG))
     np.save(run_dir / "data" / "primary.npy", primary)
+
+    if with_passes:
+        stack = rng.normal(size=(2, N_AZ, N_RG)) + 1j * rng.normal(size=(2, N_AZ, N_RG))
+        np.save(run_dir / "data" / "secondaries.npy", stack)
+        np.save(run_dir / "data" / "interferograms.npy", stack * np.conj(primary)[None])
 
     if with_dem or with_geo:
         dem       = np.full((N_AZ, N_RG), 680.0, dtype=np.float32)

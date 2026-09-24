@@ -702,7 +702,7 @@ class CubeExplorer:
         Returns:
             PNG bytes of the ramp, or None when the colormap is not allowed.
         """
-        if cmap not in ("viridis", "inferno", "coolwarm", "jet", "gray"):
+        if cmap not in ("viridis", "inferno", "coolwarm", "jet", "gray", "twilight"):
             return None
 
         ramp = np.tile(np.linspace(0.0, 1.0, 256), (12, 1))
@@ -961,6 +961,57 @@ class CubeExplorer:
             return None
 
         return target
+
+    def pass_map_png(self, cube_id: str, kind: str, index: int, cmap: str = "gray") -> bytes | None:
+        """Renders one acquisition pass of the raw input stack as a PNG.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            kind    : "amplitude" for the SLC amplitude in dB, "phase" for the interferometric phase against the primary.
+            index   : Pass index, 0 being the primary; phase exists for indices 1 and up only.
+            cmap    : Colormap for amplitude maps; phase always uses the cyclic twilight map.
+
+        Returns:
+            PNG bytes of the (azimuth, range) map, or None when the cube is not loaded, the stack is unavailable or the kind and index do not name a renderable map.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return None
+            ctx = self.loaded["passes"]
+
+        if ctx is None:
+            return None
+
+        index = int(index)
+
+        if kind == "amplitude":
+            if index == 0:
+                crop = np.asarray(np.load(ctx["primary"], mmap_mode="r"))
+            else:
+                raw = np.load(ctx["secondaries"], mmap_mode="r")
+                if not 1 <= index <= raw.shape[0]:
+                    return None
+                crop = np.asarray(raw[index - 1])
+
+            db         = 20.0 * np.log10(np.maximum(np.abs(crop).astype(np.float32), 1e-12))
+            vmin, vmax = np.percentile(db, [1.0, 99.0])
+            data       = db
+            palette    = cmap if cmap in self.CMAPS else "gray"
+        elif kind == "phase":
+            if ctx["interferograms"] is None or index < 1:
+                return None
+            raw = np.load(ctx["interferograms"], mmap_mode="r")
+            if index > raw.shape[0]:
+                return None
+            data       = np.angle(np.asarray(raw[index - 1]))
+            vmin, vmax = -np.pi, np.pi
+            palette    = "twilight"
+        else:
+            return None
+
+        buf = io.BytesIO()
+        plt.imsave(buf, data, cmap=palette, vmin=float(vmin), vmax=float(vmax), format="png")
+        return buf.getvalue()
 
     def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
         """Renders an elevation section along an arbitrary line as a PNG.
@@ -1408,11 +1459,11 @@ class CubeExplorer:
             param_tag: Parameter run loaded alongside the raw cube, or None.
         """
         try:
-            entries, meta, primary, dem, geo = self._load_all(reader, param_tag)
+            entries, meta, primary, dem, geo, passes = self._load_all(reader, param_tag)
             clim = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
 
             with self.lock:
-                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo}
+                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo, "passes": passes}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
 
             self.logger.muted(f"cube ready: {cube_id} sources={meta['sources']}")
@@ -1426,7 +1477,7 @@ class CubeExplorer:
 
         self._warm_globe_blobs(cube_id)
 
-    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None]:
+    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
 
         Args:
@@ -1437,8 +1488,9 @@ class CubeExplorer:
         Returns:
             Tuple of the per-source entries, the front-end metadata payload, the
             primary amplitude map in dB of shape (azimuth, range), the DEM in
-            metres and the geocoding context; the last two are None when the
-            scene cannot be geolocated.
+            metres, the geocoding context and the raw pass-stack context; DEM
+            and geocoding are None when the scene cannot be geolocated, the pass
+            context when the run stores no secondary stack.
 
         Raises:
             ValueError: If the tomogram is not three-dimensional or its footprint
@@ -1474,6 +1526,7 @@ class CubeExplorer:
         primary = self._primary_db(reader, n_az, n_rg)
         dem     = self._load_dem(reader, n_az, n_rg)
         geo     = self._load_geo(reader, dem, n_az, n_rg)
+        passes  = self._load_passes(reader, n_az, n_rg)
 
         meta = {
             "sources"   : [s for s in self.SOURCES if s in entries],
@@ -1487,10 +1540,11 @@ class CubeExplorer:
             "dem"       : dem is not None,
             "spacing"   : self._load_spacing(reader),
             "globe"     : self._globe_meta(geo),
+            "passes"    : self._passes_meta(passes),
         }
         meta["globe_defaults"] = self._globe_defaults(meta)
 
-        return entries, meta, primary, dem, geo
+        return entries, meta, primary, dem, geo, passes
 
     def _globe_defaults(self, meta: dict) -> dict | None:
         """Returns the globe request every source is first served with.
@@ -1841,6 +1895,56 @@ class CubeExplorer:
                 },
             },
         }
+
+    def _load_passes(self, reader: StampReader, n_az: int, n_rg: int) -> dict | None:
+        """Locates the raw pass stack of a preprocessing run.
+
+        Args:
+            reader : Preprocessing run reader.
+            n_az   : Azimuth extent of the tomogram, in pixels.
+            n_rg   : Range extent of the tomogram, in pixels.
+
+        Returns:
+            Context with the primary, secondaries and interferogram paths and the pass labels (primary first), or None when the run stores no secondary stack.
+
+        Raises:
+            ValueError : If the secondary or interferogram stack does not match the tomogram footprint or the recorded pass labels do not count the primary plus every secondary.
+        """
+        primary_path     = reader.artifact_path("primary")
+        secondaries_path = reader.artifact_path("secondaries")
+        if primary_path is None or secondaries_path is None:
+            return None
+
+        secondaries = np.load(secondaries_path, mmap_mode="r")
+        if secondaries.ndim != 3 or secondaries.shape[1:] != (n_az, n_rg):
+            raise ValueError(f"secondaries shape {secondaries.shape} does not match the {n_az}x{n_rg} tomogram footprint in {reader.where}")
+
+        interferograms_path = reader.artifact_path("interferograms")
+        if interferograms_path is not None:
+            interferograms = np.load(interferograms_path, mmap_mode="r")
+            if interferograms.shape != secondaries.shape:
+                raise ValueError(f"interferograms shape {interferograms.shape} does not match the secondaries shape {secondaries.shape} in {reader.where}")
+
+        n_secondaries = int(secondaries.shape[0])
+        labels        = reader.layout()["pass_labels"]
+        if labels is None:
+            labels = ["primary"] + [f"pass {k:02d}" for k in range(1, n_secondaries + 1)]
+        if len(labels) != n_secondaries + 1:
+            raise ValueError(f"dataset.json records {len(labels)} pass labels but the run stores a primary plus {n_secondaries} secondaries in {reader.where}; rerun preprocessing to regenerate it")
+
+        return {
+            "primary"        : primary_path,
+            "secondaries"    : secondaries_path,
+            "interferograms" : interferograms_path,
+            "labels"         : [str(label) for label in labels],
+        }
+
+    @staticmethod
+    def _passes_meta(ctx: dict | None) -> dict | None:
+        """Serialises the pass-stack context for the front end, or None without a stack."""
+        if ctx is None:
+            return None
+        return {"labels": ctx["labels"], "n_passes": len(ctx["labels"]), "phase": ctx["interferograms"] is not None}
 
     def _ingest(self, raw: np.ndarray, x_axis: np.ndarray, advance) -> dict:
         """Materialises a cube plane by plane and derives its display colour limits.
