@@ -47,7 +47,7 @@ Results (Results, Cube, Slices).
 | Configuration | `#/configuration` | `/api/configs` | Every configuration dataclass, field, type and default, parsed live from `configuration/`. |
 | Console | `#/console` | `/api/jobs`, `/api/jobs/<id>/stream` | Real-time stdout of launched jobs over SSE with stop control, plus per-unit logs and a progress strip for fan-out jobs. |
 | Results | `#/results` | `/api/results/*`, `/api/fs/*` | Browse any run or dataset directory: rendered markdown reports, figure galleries with compare pinning, configs, and inline log and text files. |
-| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, arbitrary-line transects, a 3D scatterer point cloud, the DEM grid, the scene on a Cesium globe with flight tracks and beam segment, selectable colormaps, paper-style figure export and PNG/CSV downloads, a Passes view walking the per-pass SLC amplitude and interferogram phase, a Figures view over the figures saved under the run's `images`, `figures` and `params` trees, with the parametrized tomogram from `params/<tag>` runs as a selectable source. A run is any directory holding `data/dataset.json`. |
+| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, polyline transects with saved lines, a 3D scatterer point cloud, a WebGL2 ray-marched volume with transfer function and clip plane, the DEM grid, the scene on a Cesium globe with flight tracks and beam segment, selectable colormaps, paper-style figure export and PNG/CSV downloads, a Passes view walking the per-pass SLC amplitude and interferogram phase, a Figures view over the figures saved under the run's `images`, `figures` and `params` trees, with the parametrized tomogram from `params/<tag>` runs as a selectable source. A run is any directory holding `data/dataset.json`. |
 | Slices | `#/slices` | `/api/slices/*` | Multi-run slice collector: tick any number of cubes, set a cut position plus an optional queue of extra points, and preview the same slice from every run side by side on a shared colour scale. Collect renders the figures into one `slice_collections/<name>/` folder with a `collection.json` manifest. |
 
 ## How launching works
@@ -109,9 +109,9 @@ checker `repomap_derive.py`, and `config_descriptions.json`.
 `cube_explorer.py`, which also carries the slice collector.
 
 **Frontend.** `static/index.html`, `static/css/styles.css`, `static/vendor/marked.min.js`
-and 27 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
+and 28 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
 tab (`home`, `repomap`, `scripts`, `launch` with its widget modules (`python_literal`,
 `form_widgets`, `config_form`) and `launch_pickers`, `saved_runs`, `configs`, `console`,
 `results`, `tomogram`, `slice_collector`); the rest are shared helpers (`api`,
 `shared_charts`, `results_sources`, `run_strip`, `canvas_base`, `diagram`, `gauges`,
-`globe`, `process_anim`, `server_anim`, `tomo_anim`).
+`globe`, `volume`, `process_anim`, `server_anim`, `tomo_anim`).

@@ -223,6 +223,7 @@
         <button type="button" class="cube-mode" data-view="range">Range sweep</button>
         <button type="button" class="cube-mode" data-view="transect">Transect</button>
         <button type="button" class="cube-mode" data-view="cloud">Point cloud</button>
+        <button type="button" class="cube-mode" data-view="volume" title="Ray-marched volume rendering of the cube with an adjustable transfer function">Volume</button>
         <button type="button" class="cube-mode" data-view="globe">Globe</button>
         <button type="button" class="cube-mode" data-view="passes" title="Browse the raw acquisition stack: per-pass SLC amplitude and interferometric phase against the primary">Passes</button>
         <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
@@ -453,6 +454,48 @@
           </div>
           <div class="cube-cloud__stage">
             <canvas id="cube-cloud-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="cube-view" data-view="volume" hidden>
+        <div class="cube-pview">
+          <div class="cube-pview__bar">
+            <div class="cube-spaces cube-srcsel" role="group" aria-label="Tomogram source" hidden>
+              <button type="button" class="cube-space is-active" data-ssource="full">Capon</button>
+              <button type="button" class="cube-space" data-ssource="param">Parametrized</button>
+            </div>
+            <div class="cube-mctl" role="group" aria-label="Transfer function window">
+              <label for="cube-volume-lo" title="Intensities below this fraction of the display range stay transparent">tf</label>
+              <input type="range" id="cube-volume-lo" min="0" max="99" value="35" />
+              <input type="range" id="cube-volume-hi" min="1" max="100" value="90" />
+            </div>
+            <div class="cube-mctl" role="group" aria-label="Opacity">
+              <label for="cube-volume-opacity">opacity</label>
+              <input type="range" id="cube-volume-opacity" min="1" max="100" value="45" />
+            </div>
+            <div class="cube-mctl" role="group" aria-label="Quality">
+              <label for="cube-volume-steps" title="Ray-march steps per pixel; more is sharper and slower">steps</label>
+              <select id="cube-volume-steps" class="cube-mselect">
+                <option value="128">128</option>
+                <option value="256" selected>256</option>
+                <option value="512">512</option>
+              </select>
+            </div>
+            <div class="cube-mctl" role="group" aria-label="Clip plane">
+              <label for="cube-volume-clip-axis" title="Cut the volume open along one axis">clip</label>
+              <select id="cube-volume-clip-axis" class="cube-mselect">
+                <option value="off" selected>off</option>
+                <option value="az">azimuth</option>
+                <option value="rg">range</option>
+                <option value="elev">elevation</option>
+              </select>
+              <input type="range" id="cube-volume-clip-pos" min="0" max="100" value="50" />
+            </div>
+            <span class="cube-elev__at" id="cube-volume-at"></span>
+          </div>
+          <div class="cube-cloud__stage">
+            <canvas id="cube-volume-canvas"></canvas>
           </div>
         </div>
       </div>
@@ -801,6 +844,7 @@
 <script src="/static/js/results.js"></script>
 <script src="/static/js/run_strip.js"></script>
 <script src="/static/js/tomogram.js"></script>
+<script src="/static/js/volume.js"></script>
 <script src="/static/js/globe.js"></script>
 <script src="/static/js/slice_collector.js"></script>
 <script src="/static/js/app.js"></script>

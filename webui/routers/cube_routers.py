@@ -37,6 +37,7 @@ class CubeRouter(SubRouter):
         table.add("GET", "/api/cubes/plane",        self.plane)
         table.add("GET", "/api/cubes/cbar",         self.cbar)
         table.add("GET", "/api/cubes/points",       self.points)
+        table.add("GET", "/api/cubes/volume",       self.volume)
         table.add("GET", "/api/cubes/globe_points", self.globe_points)
         table.add("GET", "/api/cubes/dem_grid",     self.dem_grid)
         table.add("GET", "/api/cubes/transect",     self.transect)
@@ -115,6 +116,15 @@ class CubeRouter(SubRouter):
             source     = exchange.text("source", "full"),
             amp_min    = exchange.number("amp_min", "0.001"),
             max_points = exchange.integer("max", "60000"),
+        )
+        exchange.send_bytes(blob)
+
+    def volume(self, exchange: HttpExchange) -> None:
+        """Answers with the quantised binary volume of one cube source."""
+        blob = self.cubes.volume_bin(
+            cube_id = exchange.text("id"),
+            source  = exchange.text("source", "full"),
+            max_dim = exchange.integer("max", "192"),
         )
         exchange.send_bytes(blob)
 

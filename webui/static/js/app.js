@@ -218,6 +218,16 @@ class App {
         at        : document.getElementById("cube-cloud-at"),
         canvas    : document.getElementById("cube-cloud-canvas"),
       },
+      volume        : {
+        lo       : document.getElementById("cube-volume-lo"),
+        hi       : document.getElementById("cube-volume-hi"),
+        opacity  : document.getElementById("cube-volume-opacity"),
+        steps    : document.getElementById("cube-volume-steps"),
+        clipAxis : document.getElementById("cube-volume-clip-axis"),
+        clipPos  : document.getElementById("cube-volume-clip-pos"),
+        at       : document.getElementById("cube-volume-at"),
+        canvas   : document.getElementById("cube-volume-canvas"),
+      },
       globe         : {
         source    : document.getElementById("cube-globe-source"),
         color     : document.getElementById("cube-globe-color"),

@@ -1327,6 +1327,7 @@ class TomogramView {
     this.globe = refs.globe ? new TomogramGlobe(refs.globe, this) : null;
     this.figures = refs.figures && refs.figures.root ? new TomogramFigures(refs.figures, this) : null;
     this.passes = refs.passes && refs.passes.canvas ? new TomogramPasses(refs.passes, this) : null;
+    this.volume = refs.volume && refs.volume.canvas && window.TomogramVolume ? new window.TomogramVolume(refs.volume, this) : null;
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
 
@@ -1719,6 +1720,14 @@ class TomogramView {
       if (!this.cloud.available && this.view === "cloud") this._setView("explorer");
     }
 
+    if (this.volume) {
+      this.volume.configure(meta);
+      const volumeBtn = this.modeBtns.find((btn) => btn.dataset.view === "volume");
+      if (volumeBtn) volumeBtn.hidden = !this.volume.available;
+      if (!this.volume.available && this.view === "volume") this._setView("explorer");
+      else if (this.view === "volume") this.volume.render();
+    }
+
     if (this.globe) {
       this.globe.configure(meta);
       const globeBtn = this.modeBtns.find((btn) => btn.dataset.view === "globe");
@@ -1808,7 +1817,7 @@ class TomogramView {
   }
 
   _setView(view) {
-    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "globe", "figures", "passes"].includes(view) || view === this.view) return;
+    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "volume", "globe", "figures", "passes"].includes(view) || view === this.view) return;
 
     this._stopSweeps();
     this.view = view;
@@ -1824,6 +1833,10 @@ class TomogramView {
     }
     if (view === "cloud" && this.cloud && this.meta) {
       this.cloud.render();
+      return;
+    }
+    if (view === "volume" && this.volume && this.meta) {
+      this.volume.render();
       return;
     }
     if (view === "globe" && this.globe && this.meta) {
@@ -1974,6 +1987,7 @@ class TomogramView {
 
     if (this.view === "transect" && this.transect) { this.transect.syncSpace(); return; }
     if (this.view === "cloud" && this.cloud)       { this.cloud.render(); return; }
+    if (this.view === "volume" && this.volume)     { this.volume.render(); return; }
     if (this.view === "globe" && this.globe)       { this.globe.render(); return; }
 
     const sweep = this._sweepFor(this.view);
