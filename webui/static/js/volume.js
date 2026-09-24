@@ -142,7 +142,7 @@ class TomogramVolume {
     if (this.gl) return true;
     if (this.failed) return false;
 
-    const gl = this.canvas.getContext("webgl2", { alpha: true, antialias: false });
+    const gl = this.canvas.getContext("webgl2", { alpha: true, antialias: false, preserveDrawingBuffer: true });
     if (!gl) {
       this.failed = true;
       this.atEl.textContent = "WebGL2 is not available in this browser; the volume view is disabled.";

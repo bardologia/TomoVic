@@ -480,7 +480,7 @@ class TomogramTransect {
 
     this.panels.forEach((panel) => {
       if (panel.root.hidden || !panel.canvas.width) return;
-      this.host.downloadCanvas(panel.canvas, `${tag}_${this.host.srcFor()}_${this.host.space}.png`);
+      FigureExport.saveCanvas(panel.canvas, `${tag}_${this.host.srcFor()}_${this.host.space}.png`);
       count += 1;
     });
 
@@ -521,6 +521,7 @@ class TomogramLens {
     this.media = media;
     this.canvas = document.createElement("canvas");
     this.canvas.className = "cube-lens";
+    this.canvas.dataset.nofig = "";
     this.canvas.width = TomogramLens.SIZE;
     this.canvas.height = TomogramLens.SIZE;
     this.canvas.hidden = true;
@@ -1425,31 +1426,17 @@ class TomogramView {
     if (this.jumpCsv) this.jumpCsv.addEventListener("click", () => this._downloadProfilesCsv());
   }
 
-  downloadBlob(name, blob) {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
-
-  downloadCanvas(canvas, name) {
-    canvas.toBlob((blob) => { if (blob) this.downloadBlob(name, blob); }, "image/png");
-  }
-
-  downloadBitmap(bitmap, name) {
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    canvas.getContext("2d").drawImage(bitmap, 0, 0);
-    this.downloadCanvas(canvas, name);
-  }
-
   fileTag() {
     const cube = this.cubes.find((c) => c.id === this.selectedId);
     const raw = cube ? [cube.run, cube.stamp].filter(Boolean).join("_") : "cube";
     return raw.replace(/[^A-Za-z0-9._-]+/g, "_");
+  }
+
+  figureTag() {
+    const parts = [this.fileTag(), this.srcFor(), this.space];
+    if (this.point) parts.push(`az${String(this.point.az).padStart(4, "0")}_rg${String(this.point.rg).padStart(4, "0")}`);
+
+    return parts.filter(Boolean).join("_");
   }
 
   _downloadCuts() {
@@ -1465,7 +1452,7 @@ class TomogramView {
     let count = 0;
     this.panels.forEach((panel) => {
       if (panel.root.hidden || !panel.bitmap) return;
-      this.downloadBitmap(panel.bitmap, `${tag}_az${az}_rg${rg}_${panel.axis}_${panel.source}_${this.space}.png`);
+      FigureExport.saveBitmap(panel.bitmap, `${tag}_az${az}_rg${rg}_${panel.axis}_${panel.source}_${this.space}.png`);
       count += 1;
     });
 
@@ -1486,7 +1473,7 @@ class TomogramView {
       series.heights.forEach((height, i) => lines.push(`${source},${height},${series.values[i]}`));
     });
 
-    this.downloadBlob(`${this.fileTag()}_profiles_az${az}_rg${rg}.csv`, new Blob([lines.join("\n")], { type: "text/csv" }));
+    FigureExport.download(`${this.fileTag()}_profiles_az${az}_rg${rg}.csv`, new Blob([lines.join("\n")], { type: "text/csv" }));
   }
 
   leave() {
@@ -1753,10 +1740,7 @@ class TomogramView {
     steps.forEach((step, index) => {
       const snapshot = this.storySnapshots[step.id];
       if (!snapshot) return;
-      const link = document.createElement("a");
-      link.href = snapshot;
-      link.download = `story_${String(index + 1).padStart(2, "0")}_${step.name.replace(/[^A-Za-z0-9._-]+/g, "_")}.png`;
-      link.click();
+      FigureExport.download(`story_${String(index + 1).padStart(2, "0")}_${FigureExport.slug(step.name)}.png`, snapshot);
       count += 1;
     });
 

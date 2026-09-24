@@ -316,8 +316,8 @@
               <span class="cube-cutgroup__at" data-axis="range"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="range" data-source="full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
-              <figure class="cube-slice" data-axis="range" data-source="param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="range" data-source="full" data-fig="range cut full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="range" data-source="param" data-fig="range cut param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
           <section class="cube-cutgroup" data-axis="azimuth">
@@ -326,8 +326,8 @@
               <span class="cube-cutgroup__at" data-axis="azimuth"></span>
             </h3>
             <div class="cube-cutgroup__stack">
-              <figure class="cube-slice" data-axis="azimuth" data-source="full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
-              <figure class="cube-slice" data-axis="azimuth" data-source="param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="azimuth" data-source="full" data-fig="azimuth cut full"><figcaption class="cube-slice__tag">capon</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
+              <figure class="cube-slice" data-axis="azimuth" data-source="param" data-fig="azimuth cut param" hidden><figcaption class="cube-slice__tag">parametrized</figcaption><div class="cube-slice__media"><canvas></canvas><i class="cube-ref" hidden></i></div></figure>
             </div>
           </section>
         </div>
@@ -343,7 +343,7 @@
           </div>
           <p class="cube-coords" id="cube-prof-at">Hover a slice to read the profiles at that position.</p>
           <div class="cube-profiles__grid">
-            <figure class="cube-prof" data-source="full"><div class="cube-prof__media"><canvas></canvas></div></figure>
+            <figure class="cube-prof" data-source="full" data-fig="vertical profile"><div class="cube-prof__media"><canvas></canvas></div></figure>
           </div>
           <div class="cube-slots" id="cube-slots" hidden>
             <h4 class="cube-slots__title">Parametrized slots at this pixel</h4>
@@ -390,7 +390,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-elevation-fill"></i></div>
           <div class="cube-elev__grid" id="cube-elevation-grid">
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
+            <figure class="cube-eplane" data-source="full" data-fig="elevation plane"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -429,7 +429,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-azimuth-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-azimuth-grid">
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
+            <figure class="cube-eplane" data-source="full" data-fig="azimuth plane"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -475,7 +475,7 @@
             <span class="cube-elev__at" id="cube-cloud-at">Drag to orbit &middot; wheel to zoom &middot; double-click to reset.</span>
           </div>
           <div class="cube-cloud__stage">
-            <canvas id="cube-cloud-canvas"></canvas>
+            <canvas id="cube-cloud-canvas" data-fig="scatterer cloud"></canvas>
           </div>
         </div>
       </div>
@@ -517,7 +517,7 @@
             <span class="cube-elev__at" id="cube-volume-at"></span>
           </div>
           <div class="cube-cloud__stage">
-            <canvas id="cube-volume-canvas"></canvas>
+            <canvas id="cube-volume-canvas" data-fig="volume view"></canvas>
           </div>
         </div>
       </div>
@@ -615,7 +615,7 @@
               </div>
             </figure>
             <div class="cube-elev__grid cube-elev__grid--transect" id="cube-transect-grid">
-              <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
+              <figure class="cube-eplane" data-source="full" data-fig="transect plane"><div class="cube-eplane__media"><canvas></canvas></div></figure>
             </div>
           </div>
         </div>
@@ -644,7 +644,7 @@
           <div class="cube-pview__deck">
             <figure class="cube-pmap">
               <div class="cube-pmap__media" id="cube-pass-media">
-                <canvas id="cube-pass-canvas"></canvas>
+                <canvas id="cube-pass-canvas" data-fig="raw pass"></canvas>
               </div>
               <figcaption class="cube-pmap__legend">
                 <span class="cube-pmap__bound" id="cube-pass-min"></span>
@@ -696,7 +696,7 @@
           </div>
           <div class="cube-elev__track"><i class="cube-elev__fill" id="cube-range-fill"></i></div>
           <div class="cube-elev__grid cube-elev__grid--strip" id="cube-range-grid">
-            <figure class="cube-eplane" data-source="full"><div class="cube-eplane__media"><canvas></canvas></div></figure>
+            <figure class="cube-eplane" data-source="full" data-fig="range plane"><div class="cube-eplane__media"><canvas></canvas></div></figure>
           </div>
         </div>
       </div>
@@ -848,6 +848,8 @@
 <script src="/static/js/results_sources.js"></script>
 <script src="/static/js/shared_charts.js"></script>
 <script src="/static/js/canvas_base.js"></script>
+<script src="/static/js/figure_export.js"></script>
+<script src="/static/js/figure_saver.js"></script>
 <script src="/static/js/tomo_anim.js"></script>
 <script src="/static/js/gauges.js"></script>
 <script src="/static/js/server_anim.js"></script>

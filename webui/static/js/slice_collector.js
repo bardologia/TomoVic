@@ -54,6 +54,12 @@ class SliceCollectorView {
     this._refresh();
   }
 
+  figureTag() {
+    const az = this._num(this.refs.azInput);
+    const rg = this._num(this.refs.rgInput);
+    return `az${String(az).padStart(4, "0")}_rg${String(rg).padStart(4, "0")}_${this.space}`;
+  }
+
   async _refresh() {
     this.refs.hint.hidden = false;
     this.refs.hint.textContent = "Loading saved cubes…";
