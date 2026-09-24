@@ -649,7 +649,10 @@ class TomogramGlobe {
     const exagg = Number(this.exaggEl.value || 1);
     const exaggNote = exagg > 1 ? ` · height ${exagg}×` : "";
 
-    const cutNote = this.cutAxisEl.value !== "off" && this.cutOrder ? ` · cut ${this.cutAxisEl.value} @ ${this.cutPosEl.value}%` : "";
+    const cutActive = this.cutAxisEl.value !== "off" && this.cutOrder;
+    const cutNote = cutActive ? ` · cut ${this.cutAxisEl.value} @ ${this.cutPosEl.value}%` : "";
+    const curtainActive = this.flyEl.checked && this.flightFrame !== null && this.pointAlong;
+    const visible = cutActive ? this.cutShownUpTo + 1 : curtainActive ? this.shownUpTo + 1 : this.shown;
 
     let trackNote = globe.tracks ? "" : ` · ${globe.tracks_note}`;
     if (this.tracksEl.checked && globe.tracks) {
@@ -658,7 +661,7 @@ class TomogramGlobe {
       if (this.flyEl.checked) trackNote += " · flight loop";
     }
 
-    this.atEl.textContent = `${this.shown.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${cutNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
+    this.atEl.textContent = `${visible.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${cutNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
   }
 
   _redrawTracks() {
