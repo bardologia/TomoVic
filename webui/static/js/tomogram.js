@@ -735,6 +735,7 @@ class TomogramView {
   static HOLD_SAVE_MS = 4000;
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
+  static DEM_VIEWS = ["explorer", "azimuth", "range", "transect"];
 
   constructor(refs) {
     this.strip = refs.strip;
@@ -1104,7 +1105,7 @@ class TomogramView {
     this._syncSpaceBtns();
     this._syncProfModeBtns();
 
-    if (this.demWrap) this.demWrap.hidden = !meta.dem;
+    this._syncDemToggle();
     if (this.demChk) this.demChk.checked = this.dem;
 
     this.visible = new Set(meta.sources);
@@ -1171,15 +1172,7 @@ class TomogramView {
     if (cmap === this.cmap) return;
     this.cmap = cmap;
     localStorage.setItem("cube-cmap", cmap);
-
-    if (!this.meta) return;
-
-    this.panels.forEach((panel) => this._releasePanel(panel));
-
-    const sweep = this._sweepFor(this.view);
-    if (sweep) sweep.syncSpace();
-    if (this.transect) this.transect.syncSpace();
-    if (this.point) this._drawSlices(this.point.az, this.point.rg);
+    this._refreshCuts(true);
   }
 
   demOn() {
@@ -1189,23 +1182,21 @@ class TomogramView {
   _setDem(on) {
     this.dem = !!on;
     localStorage.setItem("cube-dem", this.dem ? "1" : "0");
-
-    if (!this.meta) return;
-
-    this.panels.forEach((panel) => this._releasePanel(panel));
-
-    const sweep = this._sweepFor(this.view);
-    if (sweep) sweep.syncSpace();
-    if (this.transect) this.transect.syncSpace();
-    if (this.point) this._drawSlices(this.point.az, this.point.rg);
+    this._refreshCuts(true);
   }
 
   _setSpace(space) {
     if (space === this.space || !["physical", "normalized"].includes(space)) return;
     this.space = space;
     this._syncSpaceBtns();
+    this._refreshCuts(false);
+  }
 
+  _refreshCuts(release) {
     if (!this.meta) return;
+
+    if (release) this.panels.forEach((panel) => this._releasePanel(panel));
+
     const sweep = this._sweepFor(this.view);
     if (sweep) sweep.syncSpace();
     if (this.transect) this.transect.syncSpace();
@@ -1220,6 +1211,7 @@ class TomogramView {
 
     this.modeBtns.forEach((btn) => btn.classList.toggle("is-active", btn.dataset.view === view));
     this.viewEls.forEach((el) => { el.hidden = el.dataset.view !== view; });
+    this._syncDemToggle();
     this._syncGlobeChrome();
 
     if (view === "transect" && this.transect && this.meta) {
@@ -1237,6 +1229,12 @@ class TomogramView {
 
     const sweep = this._sweepFor(view);
     if (sweep && this.meta) sweep.play();
+  }
+
+  _syncDemToggle() {
+    if (!this.demWrap) return;
+    const carried = !!(this.meta && this.meta.dem);
+    this.demWrap.hidden = !carried || !TomogramView.DEM_VIEWS.includes(this.view);
   }
 
   _syncGlobeChrome() {
