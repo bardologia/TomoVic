@@ -93,26 +93,28 @@ class SliceFigureArchiver(PlotBase):
         finally:
             PlotBase.use_style(previous)
 
-    def render_transect(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, start: tuple, end: tuple, space: str, path: Path, cmap: str = "jet") -> Path:
-        """Saves an elevation section sampled along an arbitrary azimuth-range line.
+    def render_transect(self, data: np.ndarray, heights: np.ndarray, vmin: float, vmax: float, source: str, points: list, space: str, path: Path, cmap: str = "jet") -> Path:
+        """Saves an elevation section sampled along an arbitrary azimuth-range polyline.
 
         Args:
-            data: Cut of shape (elevation bins, samples along the transect).
-            heights: Elevation axis in metres, ascending, one entry per row of data.
-            vmin: Lower colour limit.
-            vmax: Upper colour limit.
-            source: Cube key, one of the keys of LABELS.
-            start: (azimuth, range) pixel index where the transect begins.
-            end: (azimuth, range) pixel index where the transect ends.
-            space: "normalized" when columns were peak-normalised, else "physical".
-            path: Destination PNG path.
-            cmap: Matplotlib colormap name.
+            data    : Cut of shape (elevation bins, samples along the transect).
+            heights : Elevation axis in metres, ascending, one entry per row of data.
+            vmin    : Lower colour limit.
+            vmax    : Upper colour limit.
+            source  : Cube key, one of the keys of LABELS.
+            points  : Ordered (azimuth, range) vertices of the transect polyline, at least two.
+            space   : "normalized" when columns were peak-normalised, else "physical".
+            path    : Destination PNG path.
+            cmap    : Matplotlib colormap name.
 
         Returns:
             The path the figure was written to.
         """
         cbar   = "intensity (per-column normalised)" if space == "normalized" else "intensity"
         extent = [0, int(data.shape[1]), float(heights[0]), float(heights[-1])]
+        start  = points[0]
+        end    = points[-1]
+        via    = f" via {len(points) - 2} points" if len(points) > 2 else ""
 
         previous = PlotBase.style
         PlotBase.use_style("paper")
@@ -121,7 +123,7 @@ class SliceFigureArchiver(PlotBase):
                 data,
                 x_label        = "sample along transect",
                 y_label        = "elevation [m]",
-                title          = f"{self.LABELS[source]} — transect az{start[0]},rg{start[1]} to az{end[0]},rg{end[1]}",
+                title          = f"{self.LABELS[source]} — transect az{start[0]},rg{start[1]} to az{end[0]},rg{end[1]}{via}",
                 cmap           = cmap,
                 vmin           = vmin,
                 vmax           = vmax,
@@ -1013,52 +1015,45 @@ class CubeExplorer:
         plt.imsave(buf, data, cmap=palette, vmin=float(vmin), vmax=float(vmax), format="png")
         return buf.getvalue()
 
-    def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
-        """Renders an elevation section along an arbitrary line as a PNG.
+    def transect_png(self, cube_id: str, source: str, points: list, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
+        """Renders an elevation section along an arbitrary polyline as a PNG.
 
         Args:
-            cube_id: Id of the loaded cube.
-            source: Cube key to render.
-            az0: Azimuth pixel index of the start point.
-            rg0: Range pixel index of the start point.
-            az1: Azimuth pixel index of the end point.
-            rg1: Range pixel index of the end point.
-            space: "normalized" to peak-normalise columns, else "physical".
-            cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, every sample column is
-                shifted vertically by its median-referenced terrain height.
+            cube_id : Id of the loaded cube.
+            source  : Cube key to render.
+            points  : Ordered (azimuth, range) vertices of the polyline, at least two after clipping.
+            space   : "normalized" to peak-normalise columns, else "physical".
+            cmap    : Colormap name; diverging sources always use coolwarm.
+            dem     : When True and the run carries a DEM, every sample column is shifted vertically by its median-referenced terrain height.
 
         Returns:
-            PNG bytes, or None when the cube carries no such source.
+            PNG bytes, or None when the cube carries no such source or the
+            polyline has fewer than two distinct vertices.
         """
         entry = self._entry(cube_id, source)
         if entry is None:
             return None
 
         n_elev, n_az, n_rg = entry["cube"].shape
-        az0 = int(np.clip(az0, 0, n_az - 1))
-        az1 = int(np.clip(az1, 0, n_az - 1))
-        rg0 = int(np.clip(rg0, 0, n_rg - 1))
-        rg1 = int(np.clip(rg1, 0, n_rg - 1))
+        points = self._clip_points(points, n_az, n_rg)
+        if points is None:
+            return None
 
-        data, heights, vmin, vmax = self._transect_cut(entry, az0, rg0, az1, rg1, space)
-        track = self._transect_dem_track(cube_id, az0, rg0, az1, rg1) if dem else None
+        az_idx, rg_idx = self._path_indices(points)
+        data, heights, vmin, vmax = self._transect_cut(entry, az_idx, rg_idx, space)
+        track = self._transect_dem_track(cube_id, az_idx, rg_idx) if dem else None
 
         return self._cut_png(entry, data, heights, vmin, vmax, cmap, track)
 
-    def save_transect(self, cube_id: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> dict:
+    def save_transect(self, cube_id: str, points: list, space: str = "physical", cmap: str = "jet", dem: bool = False) -> dict:
         """Saves one transect figure per loaded source under the run's figures folder.
 
         Args:
-            cube_id: Id of the loaded cube.
-            az0: Azimuth pixel index of the start point, clipped into range.
-            rg0: Range pixel index of the start point, clipped into range.
-            az1: Azimuth pixel index of the end point, clipped into range.
-            rg1: Range pixel index of the end point, clipped into range.
-            space: "physical" or "normalized".
-            cmap: Colormap name; diverging sources always use coolwarm.
-            dem: When True and the run carries a DEM, every sample column is
-                shifted vertically by its median-referenced terrain height.
+            cube_id : Id of the loaded cube.
+            points  : Ordered (azimuth, range) vertices of the polyline, clipped into range.
+            space   : "physical" or "normalized".
+            cmap    : Colormap name; diverging sources always use coolwarm.
+            dem     : When True and the run carries a DEM, every sample column is shifted vertically by its median-referenced terrain height.
 
         Returns:
             Dict with ``ok``, the absolute output ``dir``, its path ``rel`` to the
@@ -1076,57 +1071,91 @@ class CubeExplorer:
         if space not in ("physical", "normalized"):
             return {"ok": False, "error": f"unknown space: {space}"}
 
-        az0 = int(np.clip(az0, 0, meta["n_az"] - 1))
-        az1 = int(np.clip(az1, 0, meta["n_az"] - 1))
-        rg0 = int(np.clip(rg0, 0, meta["n_rg"] - 1))
-        rg1 = int(np.clip(rg1, 0, meta["n_rg"] - 1))
+        points = self._clip_points(points, meta["n_az"], meta["n_rg"])
+        if points is None:
+            return {"ok": False, "error": "a transect needs at least two distinct points"}
 
-        rel     = Path("figures") / "cube_transects" / f"az{az0:04d}_rg{rg0:04d}_to_az{az1:04d}_rg{rg1:04d}"
+        (az0, rg0), (az1, rg1) = points[0], points[-1]
+        via     = f"_via{len(points) - 2}" if len(points) > 2 else ""
+        rel     = Path("figures") / "cube_transects" / f"az{az0:04d}_rg{rg0:04d}_to_az{az1:04d}_rg{rg1:04d}{via}"
         out_dir = reader.save_dir / rel
-        track   = self._transect_dem_track(cube_id, az0, rg0, az1, rg1) if dem else None
+
+        az_idx, rg_idx = self._path_indices(points)
+        track          = self._transect_dem_track(cube_id, az_idx, rg_idx) if dem else None
 
         files = []
         for source in meta["sources"]:
             entry = entries[source]
-            data, heights, vmin, vmax = self._transect_cut(entry, az0, rg0, az1, rg1, space)
+            data, heights, vmin, vmax = self._transect_cut(entry, az_idx, rg_idx, space)
             if track is not None:
                 data, heights = self._terrain_shift(data, heights, track, fill=self._terrain_fill(entry, vmin))
-            saved = self.archiver.render_transect(data, heights, vmin, vmax, source, (az0, rg0), (az1, rg1), space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap))
+            saved = self.archiver.render_transect(data, heights, vmin, vmax, source, points, space, out_dir / f"transect_{source}_{space}.png", cmap=self._entry_cmap(entry, cmap))
             files.append(saved.name)
 
         self.logger.ok(f"saved {len(files)} transect figures to {out_dir}")
         return {"ok": True, "dir": str(out_dir), "rel": str(rel), "files": files}
 
-    @classmethod
-    def _transect_cut(cls, entry: dict, az0: int, rg0: int, az1: int, rg1: int, space: str) -> tuple[np.ndarray, np.ndarray, float, float]:
-        """Samples the cube along a straight azimuth-range line.
-
-        The line is sampled at one point per pixel of its longer axis, with
-        nearest-neighbour rounding of the indices.
+    @staticmethod
+    def _clip_points(points, n_az: int, n_rg: int) -> list | None:
+        """Clips polyline vertices into the cube footprint and drops repeats.
 
         Args:
-            entry: Loaded cube entry.
-            az0: Azimuth pixel index of the start point, clipped into range.
-            rg0: Range pixel index of the start point, clipped into range.
-            az1: Azimuth pixel index of the end point, clipped into range.
-            rg1: Range pixel index of the end point, clipped into range.
-            space: "normalized" to peak-normalise columns, else "physical".
+            points : Iterable of (azimuth, range) pairs.
+            n_az   : Azimuth extent of the cube, in pixels.
+            n_rg   : Range extent of the cube, in pixels.
+
+        Returns:
+            List of clipped integer vertices with consecutive duplicates
+            removed, or None when fewer than two distinct vertices remain.
+        """
+        clipped = []
+        for pair in points:
+            az = int(np.clip(int(pair[0]), 0, n_az - 1))
+            rg = int(np.clip(int(pair[1]), 0, n_rg - 1))
+            if not clipped or clipped[-1] != (az, rg):
+                clipped.append((az, rg))
+
+        return clipped if len(clipped) >= 2 else None
+
+    @classmethod
+    def _path_indices(cls, points: list) -> tuple[np.ndarray, np.ndarray]:
+        """Returns the sample indices tracing a polyline segment by segment.
+
+        Args:
+            points : Ordered (azimuth, range) vertices, at least two.
+
+        Returns:
+            Tuple of the integer azimuth and range index arrays along the whole
+            polyline, each interior vertex sampled once.
+        """
+        az_parts = []
+        rg_parts = []
+        for (az0, rg0), (az1, rg1) in zip(points[:-1], points[1:]):
+            az_idx, rg_idx = cls._line_indices(az0, rg0, az1, rg1)
+            if az_parts:
+                az_idx = az_idx[1:]
+                rg_idx = rg_idx[1:]
+            az_parts.append(az_idx)
+            rg_parts.append(rg_idx)
+
+        return np.concatenate(az_parts), np.concatenate(rg_parts)
+
+    @classmethod
+    def _transect_cut(cls, entry: dict, az_idx: np.ndarray, rg_idx: np.ndarray, space: str) -> tuple[np.ndarray, np.ndarray, float, float]:
+        """Samples the cube along precomputed polyline indices.
+
+        Args:
+            entry  : Loaded cube entry.
+            az_idx : Azimuth pixel index of every sample along the line.
+            rg_idx : Range pixel index of every sample along the line.
+            space  : "normalized" to peak-normalise columns, else "physical".
 
         Returns:
             Tuple of the section of shape (elevation bins, samples) ordered by
             ascending elevation, the elevation axis in metres, and the colour
             limits.
         """
-        cube               = entry["cube"]
-        n_elev, n_az, n_rg = cube.shape
-
-        az0 = int(np.clip(az0, 0, n_az - 1))
-        az1 = int(np.clip(az1, 0, n_az - 1))
-        rg0 = int(np.clip(rg0, 0, n_rg - 1))
-        rg1 = int(np.clip(rg1, 0, n_rg - 1))
-
-        az_idx, rg_idx = cls._line_indices(az0, rg0, az1, rg1)
-        data           = cube[:, az_idx, rg_idx]
+        data = entry["cube"][:, az_idx, rg_idx]
 
         data, vmin, vmax = cls._normalize_cut(entry, data, space)
 
@@ -1254,17 +1283,15 @@ class CubeExplorer:
 
         return dem[:, rg] if axis == "range" else dem[az, :]
 
-    def _transect_dem_track(self, cube_id: str, az0: int, rg0: int, az1: int, rg1: int) -> np.ndarray | None:
-        """Returns the median-referenced DEM terrain heights along a transect line.
+    def _transect_dem_track(self, cube_id: str, az_idx: np.ndarray, rg_idx: np.ndarray) -> np.ndarray | None:
+        """Returns the median-referenced DEM terrain heights along a transect polyline.
 
         The heights follow the same median reference as the slice tracks.
 
         Args:
-            cube_id: Id of the loaded cube.
-            az0: Azimuth pixel index of the start point, already clipped.
-            rg0: Range pixel index of the start point, already clipped.
-            az1: Azimuth pixel index of the end point, already clipped.
-            rg1: Range pixel index of the end point, already clipped.
+            cube_id : Id of the loaded cube.
+            az_idx  : Azimuth pixel index of every sample along the line, already clipped.
+            rg_idx  : Range pixel index of every sample along the line, already clipped.
 
         Returns:
             Float64 median-referenced heights in metres, one per transect sample,
@@ -1274,7 +1301,6 @@ class CubeExplorer:
         if dem is None:
             return None
 
-        az_idx, rg_idx = self._line_indices(az0, rg0, az1, rg1)
         return dem[az_idx, rg_idx]
 
     def _dem_relative(self, cube_id: str) -> np.ndarray | None:
