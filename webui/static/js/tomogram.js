@@ -1915,7 +1915,7 @@ class TomogramView {
       }
 
       if (st.state === "loading") {
-        this._setProgress(st.progress || 0, st.stage || "loading");
+        this._setProgress(st.progress || 0, st.stage || "loading", st.reading || []);
         await new Promise((r) => setTimeout(r, 400));
         continue;
       }
@@ -1944,11 +1944,14 @@ class TomogramView {
     this.hint.hidden = false;
   }
 
-  _setProgress(frac, stage) {
+  _setProgress(frac, stage, reading = []) {
     const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
     this.progressFill.style.width = `${pct}%`;
     const label = TomogramView.LABELS[stage] || stage;
-    this.progressLabel.textContent = `${label} — ${pct}%`;
+    const mb = (bytes) => (bytes / 1048576).toFixed(0);
+    const inFlight = reading.slice(0, 2).map((row) => `${row.file} ${mb(row.done)}/${mb(row.total)} MB`).join(", ");
+    const tail = reading.length ? ` · ${reading.length} file${reading.length === 1 ? "" : "s"} in flight: ${inFlight}` : "";
+    this.progressLabel.textContent = `${label} — ${pct}%${tail}`;
   }
 
   _display(meta) {

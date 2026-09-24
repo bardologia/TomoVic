@@ -230,17 +230,22 @@ class ParametrizedTomogram:
 class LoadProgress:
     """Thread-safe byte counter a cube load reports its file reads through.
 
+    Besides the overall fraction it tracks every file currently in flight with
+    its bytes landed so far, so a stalled load names the file it is waiting on.
+
     Attributes:
         total    : Bytes the load plans to read.
         done     : Bytes read so far.
-        listener : Callable receiving the fraction done after every advance, or None.
+        files    : Files in flight, keyed by path, each as [bytes done, bytes total].
+        listener : Callable receiving the fraction done and the in-flight snapshot after every advance, or None.
     """
 
     def __init__(self, listener=None) -> None:
-        """Starts an empty counter, optionally forwarding fractions to a listener."""
+        """Starts an empty counter, optionally forwarding progress to a listener."""
         self.lock     = threading.Lock()
         self.total    = 0
         self.done     = 0
+        self.files    = {}
         self.listener = listener
 
     def plan(self, n_bytes: int) -> None:
@@ -248,14 +253,31 @@ class LoadProgress:
         with self.lock:
             self.total += int(n_bytes)
 
-    def advance(self, n_bytes: int) -> None:
-        """Books bytes as read and publishes the fraction done."""
+    def begin(self, path: Path, n_bytes: int) -> None:
+        """Registers a file whose chunks are about to land."""
         with self.lock:
+            self.files[str(path)] = [0, int(n_bytes)]
+
+    def advance(self, path: Path, n_bytes: int) -> None:
+        """Books bytes of one file as read and publishes the fraction done."""
+        with self.lock:
+            key        = str(path)
             self.done += int(n_bytes)
-            fraction   = min(1.0, self.done / self.total) if self.total else 0.0
+            self.files[key][0] += int(n_bytes)
+            if self.files[key][0] >= self.files[key][1]:
+                del self.files[key]
+
+            fraction = min(1.0, self.done / self.total) if self.total else 0.0
+            reading  = self._snapshot()
 
         if self.listener is not None:
-            self.listener(fraction)
+            self.listener(fraction, reading)
+
+    def _snapshot(self) -> list:
+        """Lists the files in flight, most bytes outstanding first, with the caller holding the lock."""
+        rows = [{"file": "/".join(Path(key).parts[-5:]), "done": done, "total": total} for key, (done, total) in self.files.items()]
+        rows.sort(key=lambda row: row["done"] - row["total"])
+        return rows
 
 
 class NpyReader:
@@ -316,9 +338,11 @@ class NpyReader:
         return shape, dtype, handle.tell()
 
     def _target(self, path: Path, handle, offset: int, shape: tuple, dtype: np.dtype) -> dict:
-        """Allocates the array a file's chunks land in."""
-        array = np.empty(shape, dtype=dtype)
-        return {"path": path, "fd": handle.fileno(), "offset": offset, "array": array, "buffer": memoryview(array.reshape(-1).view(np.uint8))}
+        """Allocates the array a file's chunks land in and registers it with the progress counter."""
+        array  = np.empty(shape, dtype=dtype)
+        buffer = memoryview(array.reshape(-1).view(np.uint8))
+        self.progress.begin(path, buffer.nbytes)
+        return {"path": path, "fd": handle.fileno(), "offset": offset, "array": array, "buffer": buffer}
 
     def _pull(self, chunk: tuple) -> None:
         """Reads one chunk with pread into its place in the target buffer and books its bytes.
@@ -334,7 +358,7 @@ class NpyReader:
                 raise ValueError(f"{target['path']} ends after {src + done} data bytes")
 
             done += got
-            self.progress.advance(got)
+            self.progress.advance(target["path"], got)
 
     @staticmethod
     def _parse_header(handle, path: Path) -> tuple[tuple, bool, np.dtype]:
@@ -678,17 +702,18 @@ class CubeExplorer:
                 return {"ok": True}
 
             self.loaded = None
-            self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "error": ""}
+            self.status = {"state": "loading", "id": cube_id, "progress": 0.0, "stage": "scanning sources", "reading": [], "error": ""}
 
         self.globe_blobs.clear()
         threading.Thread(target=self._load_worker, args=(cube_id, reader, param_tag), daemon=True).start()
         return {"ok": True}
 
-    def _publish_progress(self, fraction: float) -> None:
-        """Writes the fraction of planned bytes read into the polled load status."""
+    def _publish_progress(self, fraction: float, reading: list) -> None:
+        """Writes the fraction of planned bytes read and the files in flight into the polled load status."""
         with self.lock:
             if self.status["state"] == "loading":
                 self.status["progress"] = fraction
+                self.status["reading"]  = reading
 
     def load_status(self) -> dict:
         """Returns the current load state, with the cube metadata once ready."""
