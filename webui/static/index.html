@@ -228,6 +228,8 @@
         <button type="button" class="cube-mode" data-view="passes" title="Browse the raw acquisition stack: per-pass SLC amplitude and interferometric phase against the primary">Passes</button>
         <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
         <label class="lb-check cube-modes__dem" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
+        <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view and locked pixel exactly as shown">Link</button>
+        <button type="button" class="btn btn--mini" id="cube-story-toggle" title="Record an ordered sequence of view states and replay or share them">Story</button>
         <select id="cube-cmap" class="cube-mselect cube-modes__cmap" aria-label="Tomogram colormap">
           <option value="jet" selected>jet</option>
           <option value="viridis">viridis</option>
@@ -235,6 +237,18 @@
           <option value="turbo">turbo</option>
           <option value="gray">gray</option>
         </select>
+      </div>
+
+      <div class="cube-story" id="cube-story" hidden>
+        <div class="cube-story__bar">
+          <input type="text" id="cube-story-name" class="sc-name" placeholder="step name (optional)" spellcheck="false" autocomplete="off" />
+          <button type="button" class="btn btn--mini" id="cube-story-add" title="Capture the current cube, view, pixel and settings as one story step">Add step</button>
+          <button type="button" class="btn btn--mini" id="cube-story-play" title="Replay the story step by step">Play</button>
+          <button type="button" class="btn btn--mini" id="cube-story-export" title="Download the PNG snapshot taken when each step was added">Snapshots</button>
+          <button type="button" class="btn btn--mini" id="cube-story-clear">Clear</button>
+          <span class="cube-hint" id="cube-story-hint"></span>
+        </div>
+        <ol class="cube-story__list" id="cube-story-list"></ol>
       </div>
 
       <div class="cube-view" data-view="explorer">

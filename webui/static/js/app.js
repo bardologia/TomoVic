@@ -262,6 +262,18 @@ class App {
         min    : document.getElementById("cube-pass-min"),
         max    : document.getElementById("cube-pass-max"),
       },
+      linkBtn       : document.getElementById("cube-link"),
+      story         : {
+        toggle : document.getElementById("cube-story-toggle"),
+        panel  : document.getElementById("cube-story"),
+        name   : document.getElementById("cube-story-name"),
+        add    : document.getElementById("cube-story-add"),
+        play   : document.getElementById("cube-story-play"),
+        export : document.getElementById("cube-story-export"),
+        clear  : document.getElementById("cube-story-clear"),
+        hint   : document.getElementById("cube-story-hint"),
+        list   : document.getElementById("cube-story-list"),
+      },
       cmapSel       : document.getElementById("cube-cmap"),
       demWrap       : document.getElementById("cube-dem-wrap"),
       demChk        : document.getElementById("cube-dem"),
@@ -348,7 +360,7 @@ class App {
     if (route === "saved") this.savedRunsView.enter();
     if (route === "repomap") this.repoMap.enter();
     if (route === "results") this.resultsView.enter();
-    if (route === "cube") this.tomogramView.enter();
+    if (route === "cube") this.tomogramView.enter(param);
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
     if (route === "console") this.runConsole.onShow();
