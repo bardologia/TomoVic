@@ -2662,6 +2662,7 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 /* ==== Cube view shared: maps, bars, selects ==== */
 .cube-pview { display: flex; flex-direction: column; gap: 14px; }
 .cube-pview__bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.cube-pview__bar .btn[hidden] { display: none; }
 .cube-pview__deck { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
 .cube-pmap { margin: 0; }
 .cube-pmap__media { position: relative; line-height: 0; overflow: hidden; background: #10151a; border: 1px solid var(--line); }

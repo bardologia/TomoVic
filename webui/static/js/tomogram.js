@@ -1331,7 +1331,7 @@ class TomogramView {
 
   fileTag() {
     const cube = this.cubes.find((c) => c.id === this.selectedId);
-    const raw = cube ? `${cube.run}_${cube.stamp}` : "cube";
+    const raw = cube ? [cube.run, cube.stamp].filter(Boolean).join("_") : "cube";
     return raw.replace(/[^A-Za-z0-9._-]+/g, "_");
   }
 
