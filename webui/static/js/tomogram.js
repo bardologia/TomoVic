@@ -450,6 +450,7 @@ class TomogramCloud {
   static VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
   static SWEEP_MS = 9000;
   static CUT_NAMES = { az: "azimuth", rg: "range", mu: "elevation" };
+  static CUT_MESH_STEP = 8;
 
   constructor(refs, host) {
     this.host = host;
@@ -819,7 +820,7 @@ class TomogramCloud {
       const [gLo, gHi] = grid && this.demBounds ? this.demBounds : [0, 0];
       const zLo = (this.muBounds[0] - zMid + gLo) * zScale;
       const zHi = (this.muBounds[1] - zMid + gHi) * zScale;
-      this._drawCutPlane(ctx, cut, { meta, cx, cy, azStep, rgStep, zMid, zScale, zLo, zHi, W, H, fit, sinY, cosY, sinP, cosP });
+      this._drawCutPlane(ctx, cut, { meta, grid, cx, cy, azStep, rgStep, zMid, zScale, zLo, zHi, W, H, fit, sinY, cosY, sinP, cosP });
     }
 
     const shown = cut ? drawn : rows.length / 4;
@@ -831,6 +832,11 @@ class TomogramCloud {
   }
 
   _drawCutPlane(ctx, cut, g) {
+    if (cut.axis === "mu" && g.grid) {
+      this._drawDrapedCut(ctx, cut, g);
+      return;
+    }
+
     const zLo = g.zLo;
     const zHi = g.zHi;
     const x0 = (0 - g.cx) * g.rgStep, x1 = (g.meta.n_rg - g.cx) * g.rgStep;
@@ -860,6 +866,41 @@ class TomogramCloud {
     ctx.closePath();
     ctx.fillStyle = "rgba(255, 209, 102, 0.10)";
     ctx.strokeStyle = "rgba(255, 209, 102, 0.55)";
+    ctx.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  _drawDrapedCut(ctx, cut, g) {
+    const step = TomogramCloud.CUT_MESH_STEP;
+    const meta = g.meta;
+
+    const project = (az, rg) => {
+      const height = g.grid[az * meta.n_rg + rg];
+      if (!Number.isFinite(height)) return null;
+      const x = (rg - g.cx) * g.rgStep;
+      const y = (az - g.cy) * g.azStep;
+      const z = (cut.threshold - g.zMid + height) * g.zScale;
+      const rx = x * g.cosY - y * g.sinY;
+      const ry = x * g.sinY + y * g.cosY;
+      return [g.W / 2 + rx * g.fit, g.H / 2 + (ry * g.cosP - z * g.sinP) * g.fit];
+    };
+
+    ctx.beginPath();
+    for (let az = 0; az < meta.n_az - 1; az += step) {
+      const az1 = Math.min(az + step, meta.n_az - 1);
+      for (let rg = 0; rg < meta.n_rg - 1; rg += step) {
+        const rg1 = Math.min(rg + step, meta.n_rg - 1);
+        const quad = [project(az, rg), project(az, rg1), project(az1, rg1), project(az1, rg)];
+        if (quad.some((corner) => corner === null)) continue;
+        ctx.moveTo(quad[0][0], quad[0][1]);
+        quad.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+        ctx.closePath();
+      }
+    }
+
+    ctx.fillStyle = "rgba(255, 209, 102, 0.10)";
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.25)";
     ctx.lineWidth = Math.max(1, window.devicePixelRatio || 1);
     ctx.fill();
     ctx.stroke();
