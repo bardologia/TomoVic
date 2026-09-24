@@ -473,6 +473,7 @@ class TomogramCloud {
     this.total = 0;
     this.muBounds = null;
     this.demGrid = null;
+    this.demBounds = null;
     this.debounceTimer = null;
     this.token = 0;
     this.sweepFrame = null;
@@ -509,6 +510,7 @@ class TomogramCloud {
     this.points = null;
     this.muBounds = null;
     this.demGrid = null;
+    this.demBounds = null;
     this.demWrap.hidden = !meta.dem;
     this.demEl.checked = false;
     this.scaleWrap.hidden = !meta.spacing;
@@ -540,6 +542,7 @@ class TomogramCloud {
   async _onDem() {
     if (this.demEl.checked && !this.demGrid) {
       this.demGrid = await this._fetchBinary(`/api/cubes/dem_grid?id=${encodeURIComponent(this.host.selectedId)}`);
+      this.demBounds = this.demGrid ? TomogramCloud.valueBounds(this.demGrid.rows, 0, 1) : null;
     }
     this._draw();
   }
@@ -757,11 +760,8 @@ class TomogramCloud {
     const fit = (Math.min(W, H) / (extent * 1.9)) * this.zoom;
 
     const cut = this._cutSpec();
-    let zPlotLo = Infinity, zPlotHi = -Infinity;
 
     const plot = (x, y, z, rgb) => {
-      if (z < zPlotLo) zPlotLo = z;
-      if (z > zPlotHi) zPlotHi = z;
       const rx = x * cosY - y * sinY;
       const ry = x * sinY + y * cosY;
       const sx = Math.round(W / 2 + rx * fit);
@@ -815,7 +815,12 @@ class TomogramCloud {
     }
 
     ctx.putImageData(image, 0, 0);
-    if (cut) this._drawCutPlane(ctx, cut, { meta, cx, cy, azStep, rgStep, zMid, zScale, muLo, muHi, zLo: zPlotLo, zHi: zPlotHi, W, H, fit, sinY, cosY, sinP, cosP });
+    if (cut) {
+      const [gLo, gHi] = grid && this.demBounds ? this.demBounds : [0, 0];
+      const zLo = (this.muBounds[0] - zMid + gLo) * zScale;
+      const zHi = (this.muBounds[1] - zMid + gHi) * zScale;
+      this._drawCutPlane(ctx, cut, { meta, cx, cy, azStep, rgStep, zMid, zScale, zLo, zHi, W, H, fit, sinY, cosY, sinP, cosP });
+    }
 
     const shown = cut ? drawn : rows.length / 4;
     const scaleNote = spacing
@@ -826,8 +831,8 @@ class TomogramCloud {
   }
 
   _drawCutPlane(ctx, cut, g) {
-    const zLo = Number.isFinite(g.zLo) ? g.zLo : (g.muLo - g.zMid) * g.zScale;
-    const zHi = Number.isFinite(g.zHi) ? g.zHi : (g.muHi - g.zMid) * g.zScale;
+    const zLo = g.zLo;
+    const zHi = g.zHi;
     const x0 = (0 - g.cx) * g.rgStep, x1 = (g.meta.n_rg - g.cx) * g.rgStep;
     const y0 = (0 - g.cy) * g.azStep, y1 = (g.meta.n_az - g.cy) * g.azStep;
 
