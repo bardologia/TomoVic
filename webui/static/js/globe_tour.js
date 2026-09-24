@@ -1,14 +1,21 @@
 "use strict";
 
 class GlobeClipRecorder {
-  static CODECS   = ["video/webm;codecs=vp9", "video/webm;codecs=vp8"];
-  static BITRATE  = 12e6;
-  static CHUNK_MS = 250;
+  static CODECS      = ["video/webm;codecs=vp9", "video/webm;codecs=vp8"];
+  static SCALE       = 2;
+  static MAX_WIDTH   = 3840;
+  static FRAME_RATE  = 30;
+  static BITS_PER_PX = 0.2;
+  static MIN_BITRATE = 16e6;
+  static MAX_BITRATE = 48e6;
+  static CHUNK_MS    = 250;
 
   constructor() {
     this.recorder = null;
     this.track    = null;
     this.chunks   = [];
+    this.scale    = 1;
+    this.frame    = "";
   }
 
   static codec() {
@@ -16,18 +23,35 @@ class GlobeClipRecorder {
     return GlobeClipRecorder.CODECS.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
   }
 
-  _start(canvas) {
-    const codec = GlobeClipRecorder.codec();
-    if (!codec) throw new Error("this browser cannot record WebM video");
+  _scaleUp(viewer) {
+    const room = GlobeClipRecorder.MAX_WIDTH / Math.max(viewer.canvas.clientWidth, 1);
 
+    this.scale = viewer.resolutionScale;
+    viewer.resolutionScale = Math.max(1, Math.min(GlobeClipRecorder.SCALE, room));
+  }
+
+  _settle(viewer) {
+    return new Promise((resolve) => {
+      const release = viewer.scene.postRender.addEventListener(() => { release(); resolve(); });
+      viewer.scene.requestRender();
+    });
+  }
+
+  _start(canvas) {
     const stream = canvas.captureStream(0);
 
     this.chunks   = [];
+    this.frame    = `${canvas.width}x${canvas.height}`;
     this.track    = stream.getVideoTracks()[0];
-    this.recorder = new MediaRecorder(stream, { mimeType: codec, videoBitsPerSecond: GlobeClipRecorder.BITRATE });
+    this.recorder = new MediaRecorder(stream, { mimeType: GlobeClipRecorder.codec(), videoBitsPerSecond: GlobeClipRecorder._bitrate(canvas) });
 
     this.recorder.addEventListener("dataavailable", (ev) => { if (ev.data.size) this.chunks.push(ev.data); });
     this.recorder.start(GlobeClipRecorder.CHUNK_MS);
+  }
+
+  static _bitrate(canvas) {
+    const rate = canvas.width * canvas.height * GlobeClipRecorder.FRAME_RATE * GlobeClipRecorder.BITS_PER_PX;
+    return Math.round(Math.min(GlobeClipRecorder.MAX_BITRATE, Math.max(GlobeClipRecorder.MIN_BITRATE, rate)));
   }
 
   _grab() {
@@ -51,14 +75,25 @@ class GlobeClipRecorder {
   }
 
   async capture(viewer, cubeId, move, play) {
+    if (!GlobeClipRecorder.codec()) throw new Error("this browser cannot record WebM video");
+
+    this._scaleUp(viewer);
+    await this._settle(viewer);
+
     this._start(viewer.canvas);
     const release = viewer.scene.postRender.addEventListener(() => this._grab());
 
-    await play();
-    release();
+    let clip;
+    try {
+      await play();
+    } finally {
+      release();
+      clip = await this._stop();
+      viewer.resolutionScale = this.scale;
+    }
 
-    const clip = await this._stop();
-    return await this._upload(clip, cubeId, move);
+    const result = await this._upload(clip, cubeId, move);
+    return { ...result, frame: this.frame };
   }
 }
 
@@ -445,6 +480,6 @@ class GlobeTour {
       return;
     }
 
-    Toast.show(`Saved ${result.file} (${(result.bytes / 1048576).toFixed(1)} MB) → ${result.rel}`, "ok");
+    Toast.show(`Saved ${result.file} (${result.frame}, ${(result.bytes / 1048576).toFixed(1)} MB) → ${result.rel}`, "ok");
   }
 }
