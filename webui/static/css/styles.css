@@ -2752,8 +2752,26 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
 }
 #cube-globe-record.is-recording:disabled { opacity: 1; }
 #cube-globe-container { width: 100%; height: max(62vh, calc(100vh - 315px)); }
-.cube-stage.is-globe #cube-globe-container { height: max(70vh, calc(100vh - 175px)); }
+
+[data-page="cube"]:has(#cube-stage:not([hidden]).is-globe) {
+  max-width: none; height: 100dvh; min-height: 0;
+  padding: 14px clamp(10px, 1vw, 18px) 12px;
+}
+[data-page="cube"]:has(#cube-stage:not([hidden]).is-globe).is-active { display: flex; flex-direction: column; }
+body:has(#cube-stage:not([hidden]).is-globe) .footer { display: none; }
+.cube-stage.is-globe:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.cube-stage.is-globe .cube-modes { margin-bottom: 10px; }
+.cube-stage.is-globe .cube-view[data-view="globe"] { display: flex; flex-direction: column; }
+.cube-stage.is-globe .cube-view[data-view="globe"] .cube-pview { gap: 10px; }
+.cube-stage.is-globe .cube-view[data-view="globe"],
+.cube-stage.is-globe .cube-view[data-view="globe"] .cube-pview,
+.cube-stage.is-globe .cube-globe__stage { flex: 1 1 auto; min-height: 0; }
+.cube-stage.is-globe #cube-globe-container { height: 100%; }
 #cube-globe-container .cesium-viewer-bottom { font-size: 10px; }
+
+@media (max-width: 900px) {
+  [data-page="cube"]:has(#cube-stage:not([hidden]).is-globe) { padding-top: 104px; }
+}
 
 /* ==== Results log viewer ==== */
 .res-cfg__size { font-weight: 400; color: var(--ink-faint); margin-left: 8px; }
