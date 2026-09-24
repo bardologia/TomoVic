@@ -1512,7 +1512,7 @@ class TomogramView {
         az     : query.has("az") ? Number(query.get("az")) : null,
         rg     : query.has("rg") ? Number(query.get("rg")) : null,
         source : query.get("source"),
-        tag    : query.get("tag"),
+        tag    : query.get("tag") ?? "",
         space  : query.get("space"),
         cmap   : query.get("cmap"),
       };
@@ -1545,7 +1545,7 @@ class TomogramView {
 
     if (state.id !== this.selectedId || !this.meta) {
       if (this.cubes.some((cube) => cube.id === state.id)) {
-        if (state.tag !== null) localStorage.setItem(`cube-param:${state.id}`, state.tag);
+        localStorage.setItem(`cube-param:${state.id}`, state.tag);
         this.select(state.id);
       } else if (this.cubes.length) {
         Toast.show("The linked cube is not in the current runs root.", "warn");
@@ -1554,7 +1554,7 @@ class TomogramView {
       return;
     }
 
-    if (state.tag !== null && state.tag !== this._loadedTag()) {
+    if (state.tag !== this._loadedTag()) {
       if (!state.tagReloaded && (state.tag === "" || this.paramTags.includes(state.tag))) {
         state.tagReloaded = true;
         localStorage.setItem(`cube-param:${state.id}`, state.tag);
