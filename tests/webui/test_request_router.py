@@ -23,7 +23,7 @@ from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 57
+ROUTE_COUNT   = 59
 SECTION_COUNT = 17
 
 RESOLUTIONS = [
@@ -34,6 +34,8 @@ RESOLUTIONS = [
     ("GET",  "/api/fs/runs",                     DatasetRouter),
     ("GET",  "/api/cubes/plane",                 CubeRouter),
     ("POST", "/api/cubes/save_slices",           CubeRouter),
+    ("GET",  "/api/cubes/figures",               CubeRouter),
+    ("GET",  "/api/cubes/figure",                CubeRouter),
     ("GET",  "/api/slices/slice",                SliceRouter),
     ("POST", "/api/slices/collect",              SliceRouter),
     ("GET",  "/api/repomap",                     ContentLibraryRouter),

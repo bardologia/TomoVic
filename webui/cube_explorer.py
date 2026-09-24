@@ -453,6 +453,9 @@ class CubeExplorer:
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
+    FIGURE_DIRS     = ("images", "figures", "params")
+    FIGURE_SUFFIXES = (".png", ".gif", ".jpg", ".jpeg", ".svg")
+
     def __init__(self, logger: WebLogger) -> None:
         """Builds the explorer with an idle load status and no cube loaded."""
         self.logger      = logger
@@ -895,6 +898,69 @@ class CubeExplorer:
 
         for source, amp_min in defaults["amp_min"].items():
             self.globe_points_bin(cube_id, source, amp_min, defaults["max_points"])
+
+    def list_figures(self, cube_id: str) -> dict:
+        """Lists the figure and animation files saved under a preprocessing run.
+
+        Walks the run's FIGURE_DIRS trees: the preprocessing figures under
+        ``images``, the cuts printed from this console under ``figures`` and
+        the parameter-extraction figures under ``params``.
+
+        Args:
+            cube_id : Id of the loaded cube.
+
+        Returns:
+            Dict with ``ok`` and ``groups``, one entry per directory holding figures, each with its path relative to the run and its file names.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return {"ok": False, "error": "cube not loaded"}
+
+        reader = self._open_source(cube_id)
+        if reader is None:
+            return {"ok": False, "error": f"unknown cube id: {cube_id}"}
+
+        groups = {}
+        for root_name in self.FIGURE_DIRS:
+            root = reader.run_dir / root_name
+            if not root.is_dir():
+                continue
+
+            for path in sorted(root.rglob("*")):
+                if not path.is_file() or path.suffix.lower() not in self.FIGURE_SUFFIXES:
+                    continue
+                rel = path.relative_to(reader.run_dir)
+                groups.setdefault(str(rel.parent), []).append(rel.name)
+
+        return {"ok": True, "groups": [{"dir": name, "files": files} for name, files in sorted(groups.items())]}
+
+    def figure_file(self, cube_id: str, rel: str) -> Path | None:
+        """Resolves one figure file of the loaded run for serving.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            rel     : Path of the figure relative to the run directory.
+
+        Returns:
+            The absolute file path, or None when the cube is not loaded, the path escapes the run's figure trees or the suffix is not an allowed figure type.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return None
+
+        reader = self._open_source(cube_id)
+        if reader is None:
+            return None
+
+        target = (reader.run_dir / rel).resolve()
+        roots  = [(reader.run_dir / name).resolve() for name in self.FIGURE_DIRS]
+
+        if not any(target.is_relative_to(root) for root in roots):
+            return None
+        if target.suffix.lower() not in self.FIGURE_SUFFIXES or not target.is_file():
+            return None
+
+        return target
 
     def transect_png(self, cube_id: str, source: str, az0: int, rg0: int, az1: int, rg1: int, space: str = "physical", cmap: str = "jet", dem: bool = False) -> bytes | None:
         """Renders an elevation section along an arbitrary line as a PNG.
