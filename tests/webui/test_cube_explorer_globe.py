@@ -298,17 +298,17 @@ def test_a_recorded_tour_is_written_under_the_run(tmp_path):
     """Checks an uploaded clip lands in figures/globe_tours of the run, named after the move."""
     explorer, cube_id = loaded_run(tmp_path, with_geo=True)
 
-    result = explorer.save_globe_tour(cube_id, "orbit", b"webm-bytes")
+    result = explorer.save_globe_tour(cube_id, "orbit", b"mp4-bytes")
     assert result["ok"], result
 
     target = Path(result["dir"]) / result["file"]
     assert Path(result["dir"]) == Path(cube_id) / "figures" / "globe_tours"
     assert result["rel"].startswith("figures/globe_tours/orbit_")
-    assert result["bytes"] == len(b"webm-bytes")
+    assert result["bytes"] == len(b"mp4-bytes")
 
     assert target.is_file()
-    assert target.read_bytes() == b"webm-bytes"
-    assert target.name.startswith("orbit_") and target.suffix == ".webm"
+    assert target.read_bytes() == b"mp4-bytes"
+    assert target.name.startswith("orbit_") and target.suffix == ".mp4"
 
 
 def test_clips_of_different_moves_accumulate_side_by_side(tmp_path):
@@ -321,7 +321,7 @@ def test_clips_of_different_moves_accumulate_side_by_side(tmp_path):
     assert orbit["ok"] and nadir["ok"]
     assert orbit["dir"] == nadir["dir"]
 
-    written = {path.name: path.read_bytes() for path in Path(orbit["dir"]).glob("*.webm")}
+    written = {path.name: path.read_bytes() for path in Path(orbit["dir"]).glob("*.mp4")}
     assert written == {orbit["file"]: b"one", nadir["file"]: b"two-longer"}
 
 

@@ -581,7 +581,7 @@
                 <select id="cube-globe-move" class="cube-mselect"></select>
                 <input type="number" id="cube-globe-secs" class="cube-jump__input" min="3" max="120" step="1" inputmode="numeric" title="Total length of the move or sequence in seconds" />
                 <button type="button" class="btn btn--mini" id="cube-globe-play" title="Play the move once, without recording">Play</button>
-                <button type="button" class="btn btn--mini" id="cube-globe-record" title="Play the move while capturing the globe, then write the clip as WebM under figures/globe_tours of the run">Record</button>
+                <button type="button" class="btn btn--mini" id="cube-globe-record" title="Render the move frame by frame at 60 fps, waiting for every tile, then write the clip as MP4 under figures/globe_tours of the run">Record</button>
               </div>
               <span class="cube-elev__at" id="cube-globe-at"></span>
             </div>
@@ -849,6 +849,7 @@
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
 <script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/mp4-muxer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 
