@@ -50,6 +50,34 @@ Results (Results, Cube, Slices).
 | Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, polyline transects with saved lines, a 3D scatterer point cloud, a WebGL2 ray-marched volume with transfer function and clip plane, the DEM grid, the scene on a Cesium globe with flight tracks and beam segment, selectable colormaps, paper-style figure export and PNG/CSV downloads, a Passes view walking the per-pass SLC amplitude and interferogram phase, a Figures view over the figures saved under the run's `images`, `figures` and `params` trees, with the parametrized tomogram from `params/<tag>` runs as a selectable source. Link copies a `#/cube/<state>` URL that reopens the cube, view, source and locked pixel, and Story records an ordered list of such states to replay, share and snapshot. A run is any directory holding `data/dataset.json`. |
 | Slices | `#/slices` | `/api/slices/*` | Multi-run slice collector: tick any number of cubes, set a cut position plus an optional queue of extra points, and preview the same slice from every run side by side on a shared colour scale. Collect renders the figures into one `slice_collections/<name>/` folder with a `collection.json` manifest. |
 
+## Saving figures
+
+The tabs that show images have a figure saver: Results, Cube and Slices. It runs in the
+browser over what is already on screen, so the server renders nothing extra and no run
+directory is written.
+
+- **One figure.** Hovering a chart, map or plot floats a small save button in its top-right
+  corner, and pressing it downloads that figure as a PNG.
+- **Every figure.** A dock at the bottom right counts the figures on the view and packs them
+  into one ZIP.
+- **A subset.** The dock's second button opens the list of those figures, grouped by the card
+  they sit in. Each row has its own PNG button and a checkbox, and the selection saves as one
+  ZIP. Hovering a row outlines the figure on the page and clicking it scrolls there.
+
+A file name carries the tab, the view's context and the figure, so a single save lands as
+`cube_<run>_<source>_<space>_az0413_rg0207_range_cut_full.png` and a batch as
+`<tab>_<context>_figures.zip`. Each tab supplies its context through a `figureTag()` method.
+A figure takes its label from its `data-fig` attribute, or failing that from its `alt` text,
+its caption or the heading above it.
+
+The scanner only sees figures that are visible, so the batch covers the cube view on screen.
+Canvases are written at their backing-store resolution over an opaque background. Small
+server-rendered maps are upscaled by whole pixels the way the page shows them, and vector
+charts are rasterized at twice their layout size with their computed styles inlined.
+`figure_export.js` holds the mechanics, including a store-only ZIP writer, and
+`figure_saver.js` the scanner and the dock. The cube explorer keeps its own PNG and CSV
+buttons and its server-side paper-figure export beside this.
+
 ## How launching works
 
 Every `main/*.py` script builds its configuration as `ConfigCli(<EntryConfig>()).apply()`,
@@ -109,9 +137,10 @@ checker `repomap_derive.py`, and `config_descriptions.json`.
 `cube_explorer.py`, which also carries the slice collector.
 
 **Frontend.** `static/index.html`, `static/css/styles.css`, `static/vendor/marked.min.js`
-and 28 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
+and 30 modules under `static/js/`. `app.js` and `router.js` wire the views; one module per
 tab (`home`, `repomap`, `scripts`, `launch` with its widget modules (`python_literal`,
 `form_widgets`, `config_form`) and `launch_pickers`, `saved_runs`, `configs`, `console`,
 `results`, `tomogram`, `slice_collector`); the rest are shared helpers (`api`,
-`shared_charts`, `results_sources`, `run_strip`, `canvas_base`, `diagram`, `gauges`,
-`globe`, `volume`, `process_anim`, `server_anim`, `tomo_anim`).
+`shared_charts`, `results_sources`, `run_strip`, `canvas_base`, `figure_export`,
+`figure_saver`, `diagram`, `gauges`, `globe`, `volume`, `process_anim`, `server_anim`,
+`tomo_anim`).

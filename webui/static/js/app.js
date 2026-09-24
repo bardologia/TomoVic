@@ -339,6 +339,29 @@ class App {
       msg         : document.getElementById("sc-msg"),
       rows        : document.getElementById("sc-rows"),
     });
+
+    this.figureDock = new window.FigureDock();
+    window.figureDock = this.figureDock;
+  }
+
+  _figureTabs() {
+    return {
+      cube    : this.tomogramView,
+      slices  : this.sliceCollectorView,
+      results : this.resultsView,
+    };
+  }
+
+  _mountFigures(route) {
+    const view = this._figureTabs()[route];
+    const page = document.querySelector(`.page[data-page="${route}"]`);
+
+    if (!view || !page) {
+      this.figureDock.unmount();
+      return;
+    }
+
+    this.figureDock.mount(route, page, () => view.figureTag());
   }
 
   _initRouter() {
@@ -364,6 +387,7 @@ class App {
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
     if (route === "console") this.runConsole.onShow();
+    this._mountFigures(route);
     setTimeout(() => this.reveal.scan(), 60);
   }
 }

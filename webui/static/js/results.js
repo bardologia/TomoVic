@@ -70,6 +70,13 @@ class ResultsView {
     }
   }
 
+  figureTag() {
+    if (!this.root) return "";
+
+    const run = this.root.root.replace(/\/+$/, "").split("/").pop();
+    return [run, this.view === "folder" ? this.activeRel : this.view].filter(Boolean).join("_");
+  }
+
   async loadCatalog() {
     if (!this.sources.datasets && !this.sources.logs) {
       this.catalog = null;
