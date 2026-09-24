@@ -2448,6 +2448,7 @@ main { margin-left: var(--navw); }
   .cube-hint.is-loading { animation: none; }
   .cube-globe__stage.is-loading::before { animation: none; background: rgba(255, 209, 102, 0.55); }
   .cube-elev__at.is-loading { animation: none; }
+  #cube-globe-record.is-recording { animation: none; }
 }
 
 /* ---------- Shared card treatment ---------- */
@@ -2745,6 +2746,11 @@ table.rm-led tbody tr:hover { background: var(--surface-2); }
   animation: cube-shimmer 1.3s linear infinite;
 }
 .cube-elev__at.is-loading { animation: cube-pulse 1.5s ease-in-out infinite; }
+#cube-globe-record.is-recording {
+  color: var(--danger); border-color: var(--danger); background: rgba(185, 28, 28, 0.06);
+  animation: cube-pulse 1.2s ease-in-out infinite;
+}
+#cube-globe-record.is-recording:disabled { opacity: 1; }
 #cube-globe-container { width: 100%; height: max(62vh, calc(100vh - 315px)); }
 .cube-stage.is-globe #cube-globe-container { height: max(70vh, calc(100vh - 175px)); }
 #cube-globe-container .cesium-viewer-bottom { font-size: 10px; }

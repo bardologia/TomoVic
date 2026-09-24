@@ -452,6 +452,9 @@ class CubeExplorer:
     GLOBE_CACHE_ENTRIES  = 12
     GLOBE_BLOB_MAX_BYTES = 32 * 1024 * 1024
     GLOBE_DEFAULT_POINTS = 60000
+    GLOBE_TOUR_DIR       = Path("figures") / "globe_tours"
+    GLOBE_TOUR_MAX_BYTES = 768 * 1024 * 1024
+    GLOBE_TOUR_NAME_RE   = re.compile(r"[^a-z0-9]+")
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
 
@@ -943,6 +946,45 @@ class CubeExplorer:
 
         for source, amp_min in defaults["amp_min"].items():
             self.globe_points_bin(cube_id, source, amp_min, defaults["max_points"])
+
+    def save_globe_tour(self, cube_id: str, move: str, clip: bytes) -> dict:
+        """Writes a globe camera tour recorded in the browser into the run that owns the cube.
+
+        The clip arrives as the WebM stream the front end captured off the
+        Cesium canvas and is stored beside the other figures of the run, one
+        file per recording, stamped with the move and the wall-clock time.
+
+        Args:
+            cube_id: Id of the loaded cube whose run receives the clip.
+            move: Key of the camera move that was played, used in the file name.
+            clip: Recorded WebM bytes.
+
+        Returns:
+            Dict with ``ok``, the absolute output ``dir``, its path ``rel`` to
+            the run, the written ``file`` and its size in ``bytes``, or ``ok``
+            False with the reason.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return {"ok": False, "error": "cube not loaded"}
+
+        reader = self._open_source(cube_id)
+        if reader is None:
+            return {"ok": False, "error": f"unknown cube id: {cube_id}"}
+        if not clip:
+            return {"ok": False, "error": "the recorder uploaded an empty clip"}
+        if len(clip) > self.GLOBE_TOUR_MAX_BYTES:
+            return {"ok": False, "error": f"the clip is {len(clip) / 1048576:.0f} MB, over the {self.GLOBE_TOUR_MAX_BYTES // 1048576} MB limit"}
+
+        name   = self.GLOBE_TOUR_NAME_RE.sub("_", move.lower()).strip("_") or "tour"
+        rel    = self.GLOBE_TOUR_DIR / f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webm"
+        target = reader.save_dir / rel
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(clip)
+
+        self.logger.ok(f"saved a {len(clip) / 1048576:.1f} MB globe tour to {target}")
+        return {"ok": True, "dir": str(target.parent), "rel": str(rel), "file": target.name, "bytes": len(clip)}
 
     def list_figures(self, cube_id: str) -> dict:
         """Lists the figure and animation files saved under a preprocessing run.

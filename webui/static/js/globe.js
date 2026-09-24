@@ -5,6 +5,8 @@ class TomogramGlobe {
   static IMAGERY_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
   static IMAGERY_CREDIT = "Esri, Maxar, Earthstar Geographics, and the GIS User Community";
   static CACHE_LIMIT = 8;
+  static VIEW_PITCH_DEG = -32;
+  static VIEW_RANGE_FACTOR = 3.4;
 
   constructor(refs, host) {
     this.host = host;
@@ -25,6 +27,7 @@ class TomogramGlobe {
     this.atEl = refs.at;
     this.container = refs.container;
     this.stageEl = refs.stage;
+    this.tour = new GlobeTour(refs.tour, this);
 
     this.source = "full";
     this.colorBy = "mu";
@@ -119,6 +122,7 @@ class TomogramGlobe {
       this.viewer.scene.requestRender();
     }
     this._syncThresholdLabel();
+    this.tour.sync();
   }
 
   _ampMin(source = this.source) {
@@ -211,6 +215,7 @@ class TomogramGlobe {
       selectionIndicator: false,
       requestRenderMode: true,
       maximumRenderTimeChange: Infinity,
+      contextOptions: { webgl: { preserveDrawingBuffer: true } },
     });
 
     this.viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#10151a");
@@ -307,7 +312,7 @@ class TomogramGlobe {
     this.sweepFrame = requestAnimationFrame((next) => this._sweepStep(next));
   }
 
-  _cutAxes() {
+  sceneFrame() {
     const globe = this.host.meta.globe;
     const anchor = new Cesium.Cartesian3(globe.anchor_ecef[0], globe.anchor_ecef[1], globe.anchor_ecef[2]);
     const enu = Cesium.Transforms.eastNorthUpToFixedFrame(anchor);
@@ -341,7 +346,7 @@ class TomogramGlobe {
       return;
     }
 
-    const frame = this._cutAxes();
+    const frame = this.sceneFrame();
     const dir = frame[axis === "height" ? "up" : axis];
     const [span1, span2] = this._planeSpans(frame, dir);
 
@@ -536,18 +541,15 @@ class TomogramGlobe {
     );
   }
 
-  _flyToScene(animate) {
-    if (!this.viewer || !this.host.meta || !this.host.meta.globe) return;
-
+  sceneSphere() {
     const globe = this.host.meta.globe;
-    const radius = this._sceneRadius(globe);
 
     const anchor = new Cesium.Cartesian3(globe.anchor_ecef[0], globe.anchor_ecef[1], globe.anchor_ecef[2]);
     const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(anchor, new Cesium.Cartesian3());
     const lift = this._lift(globe);
 
     let center = new Cesium.Cartesian3(anchor.x + up.x * lift, anchor.y + up.y * lift, anchor.z + up.z * lift);
-    let sphere = radius;
+    let sphere = this._sceneRadius(globe);
 
     if (this.tracksEl.checked && globe.tracks) {
       const apex = this._place(globe.tracks.beam.apex, anchor, up, lift);
@@ -564,8 +566,17 @@ class TomogramGlobe {
       }
     }
 
-    this.viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(center, sphere), {
-      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-32), sphere * 3.4),
+    return new Cesium.BoundingSphere(center, sphere);
+  }
+
+  _flyToScene(animate) {
+    if (!this.viewer || !this.host.meta || !this.host.meta.globe) return;
+
+    this.tour.stop();
+    const sphere = this.sceneSphere();
+
+    this.viewer.camera.flyToBoundingSphere(sphere, {
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(TomogramGlobe.VIEW_PITCH_DEG), sphere.radius * TomogramGlobe.VIEW_RANGE_FACTOR),
       duration: animate ? 1.2 : 0,
     });
   }
@@ -765,6 +776,7 @@ class TomogramGlobe {
   leave() {
     this._stopSweep();
     this._stopFlight();
+    this.tour.stop();
   }
 
   _flightStep(now) {

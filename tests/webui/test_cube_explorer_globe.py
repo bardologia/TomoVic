@@ -4,10 +4,13 @@ Covers the globe metadata (bounding box, anchor, DEM residual, scene axes,
 flight lines and beam segment) built from the track parameters, the graceful path when a run
 records no pass labels or no geocoding at all, and the binary scatterer point
 blob served to Cesium, including DEM gap removal, elevation ordering, amplitude
-thresholding and the rejection of unknown sources.
+thresholding and the rejection of unknown sources, plus the camera-tour clips
+the front end uploads into the run directory.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
@@ -255,3 +258,70 @@ def test_loading_another_cube_drops_the_previous_blobs(tmp_path):
 
     load_cube(explorer, run_ids[1])
     assert explorer.globe_blobs.get(key) is None
+
+
+def test_a_recorded_tour_is_written_under_the_run(tmp_path):
+    """Checks an uploaded clip lands in figures/globe_tours of the run, named after the move."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    result = explorer.save_globe_tour(cube_id, "orbit", b"webm-bytes")
+    assert result["ok"], result
+
+    target = Path(result["dir"]) / result["file"]
+    assert Path(result["dir"]) == Path(cube_id) / "figures" / "globe_tours"
+    assert result["rel"].startswith("figures/globe_tours/orbit_")
+    assert result["bytes"] == len(b"webm-bytes")
+
+    assert target.is_file()
+    assert target.read_bytes() == b"webm-bytes"
+    assert target.name.startswith("orbit_") and target.suffix == ".webm"
+
+
+def test_clips_of_different_moves_accumulate_side_by_side(tmp_path):
+    """Checks each recorded move keeps its own file in the shared tour directory."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    orbit = explorer.save_globe_tour(cube_id, "orbit", b"one")
+    nadir = explorer.save_globe_tour(cube_id, "nadir", b"two-longer")
+
+    assert orbit["ok"] and nadir["ok"]
+    assert orbit["dir"] == nadir["dir"]
+
+    written = {path.name: path.read_bytes() for path in Path(orbit["dir"]).glob("*.webm")}
+    assert written == {orbit["file"]: b"one", nadir["file"]: b"two-longer"}
+
+
+def test_a_tour_file_name_drops_unsafe_characters(tmp_path):
+    """Checks the move label is reduced to lowercase words before it reaches the file system."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    result = explorer.save_globe_tour(cube_id, "../Tilt To Nadir!", b"clip")
+    assert result["ok"], result
+
+    assert result["file"].startswith("tilt_to_nadir_")
+    assert Path(result["dir"]) == Path(cube_id) / "figures" / "globe_tours"
+
+
+def test_an_empty_or_oversize_clip_is_refused(tmp_path):
+    """Checks a zero-byte upload and one past the size cap are both rejected without writing a file."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    empty = explorer.save_globe_tour(cube_id, "orbit", b"")
+    assert not empty["ok"]
+    assert "empty" in empty["error"]
+
+    explorer.GLOBE_TOUR_MAX_BYTES = 4
+    oversize = explorer.save_globe_tour(cube_id, "orbit", b"far too many bytes")
+    assert not oversize["ok"]
+    assert "limit" in oversize["error"]
+
+    assert not (Path(cube_id) / "figures" / "globe_tours").exists()
+
+
+def test_a_tour_needs_the_cube_it_names_to_be_loaded(tmp_path):
+    """Checks a clip for another cube id is refused rather than written somewhere else."""
+    explorer, cube_id = loaded_run(tmp_path, with_geo=True)
+
+    result = explorer.save_globe_tour("wrong", "orbit", b"clip")
+    assert not result["ok"]
+    assert result["error"] == "cube not loaded"
