@@ -1175,16 +1175,16 @@ class CubeExplorer:
             self.globe_points_bin(cube_id, source, amp_min, defaults["max_points"])
 
     def save_globe_tour(self, cube_id: str, move: str, clip: bytes) -> dict:
-        """Writes a globe camera tour recorded in the browser into the run that owns the cube.
+        """Writes a globe camera tour rendered in the browser into the run that owns the cube.
 
-        The clip arrives as the WebM stream the front end captured off the
+        The clip arrives as the MP4 the front end encoded frame by frame off the
         Cesium canvas and is stored beside the other figures of the run, one
-        file per recording, stamped with the move and the wall-clock time.
+        file per rendering, stamped with the move and the wall-clock time.
 
         Args:
             cube_id: Id of the loaded cube whose run receives the clip.
-            move: Key of the camera move that was played, used in the file name.
-            clip: Recorded WebM bytes.
+            move: Key of the camera move that was rendered, used in the file name.
+            clip: Encoded MP4 bytes.
 
         Returns:
             Dict with ``ok``, the absolute output ``dir``, its path ``rel`` to
@@ -1204,7 +1204,7 @@ class CubeExplorer:
             return {"ok": False, "error": f"the clip is {len(clip) / 1048576:.0f} MB, over the {self.GLOBE_TOUR_MAX_BYTES // 1048576} MB limit"}
 
         name   = self.GLOBE_TOUR_NAME_RE.sub("_", move.lower()).strip("_") or "tour"
-        rel    = self.GLOBE_TOUR_DIR / f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webm"
+        rel    = self.GLOBE_TOUR_DIR / f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
         target = reader.save_dir / rel
 
         target.parent.mkdir(parents=True, exist_ok=True)

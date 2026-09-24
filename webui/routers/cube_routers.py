@@ -226,7 +226,7 @@ class CubeRouter(SubRouter):
         exchange.send_result(result)
 
     def save_globe_tour(self, exchange: HttpExchange) -> None:
-        """Saves the recorded globe camera tour carried as the raw request body."""
+        """Saves the rendered globe camera tour carried as the raw request body."""
         result = self.cubes.save_globe_tour(
             cube_id = exchange.text("id"),
             move    = exchange.text("move"),

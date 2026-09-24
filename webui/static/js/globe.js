@@ -67,6 +67,7 @@ class TomogramGlobe {
     this.sweepFrame = null;
     this.sweepT0 = null;
     this.flightPeriod = TomogramGlobe.FLIGHT_PERIOD_MS;
+    this.offline = false;
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -677,7 +678,7 @@ class TomogramGlobe {
 
     const cutActive = this.cutAxisEl.value !== "off" && this.cutOrder;
     const cutNote = cutActive ? ` · cut ${this.cutAxisEl.value} @ ${this.cutPosEl.value}%` : "";
-    const curtainActive = this.flyEl.checked && this.flightFrame !== null && this.pointAlong;
+    const curtainActive = this.flyEl.checked && (this.flightFrame !== null || this.offline) && this.pointAlong;
     const visible = cutActive ? this.cutShownUpTo + 1 : curtainActive ? this.shownUpTo + 1 : this.shown;
 
     let trackNote = globe.tracks ? "" : ` · ${globe.tracks_note}`;
@@ -761,6 +762,7 @@ class TomogramGlobe {
   _startFlight() {
     this.flightT0 = null;
     this._setAllPoints(false);
+    if (this.offline) return;
     this.flightFrame = requestAnimationFrame((now) => this._flightStep(now));
   }
 
@@ -794,12 +796,7 @@ class TomogramGlobe {
     this.tour.stop();
   }
 
-  _flightStep(now) {
-    if (this.host.view !== "globe" || !this.flightBasis || !this.flightGroup) {
-      this._stopFlight();
-      return;
-    }
-
+  _flightPose(now) {
     if (this.flightT0 === null) this.flightT0 = now;
     const frac = ((now - this.flightT0) % this.flightPeriod) / this.flightPeriod;
     const t = Math.min(frac / 0.85, 1.0);
@@ -810,7 +807,20 @@ class TomogramGlobe {
     this.flightGroup.forEach((item) => { item.modelMatrix = matrix; });
 
     if (this.pointAlong && this.collection.show) this._advanceCurtain(s);
+  }
 
+  flightTick(now) {
+    if (!this.flyEl.checked || !this.flightBasis || !this.flightGroup) return;
+    this._flightPose(now);
+  }
+
+  _flightStep(now) {
+    if (this.host.view !== "globe" || !this.flightBasis || !this.flightGroup) {
+      this._stopFlight();
+      return;
+    }
+
+    this._flightPose(now);
     this.viewer.scene.requestRender();
     this.flightFrame = requestAnimationFrame((next) => this._flightStep(next));
   }

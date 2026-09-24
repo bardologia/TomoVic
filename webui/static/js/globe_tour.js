@@ -1,26 +1,29 @@
 "use strict";
 
 class GlobeClipRecorder {
-  static CODECS      = ["video/webm;codecs=vp9", "video/webm;codecs=vp8"];
-  static SCALE       = 2;
-  static MAX_WIDTH   = 3840;
-  static FRAME_RATE  = 30;
-  static BITS_PER_PX = 0.2;
-  static MIN_BITRATE = 16e6;
-  static MAX_BITRATE = 48e6;
-  static CHUNK_MS    = 250;
+  static FPS            = 60;
+  static SCALE          = 2;
+  static MAX_WIDTH      = 3840;
+  static BITS_PER_PX    = 0.12;
+  static MIN_BITRATE    = 12e6;
+  static MAX_BITRATE    = 80e6;
+  static KEYFRAME_EVERY = 120;
+  static QUEUE_LIMIT    = 6;
+  static SETTLE_MAX_MS  = 5000;
+  static CODECS         = [
+    { codec: "avc1.640034",    container: "avc", extra: { avc: { format: "avc" } } },
+    { codec: "vp09.00.51.08", container: "vp9", extra: {} },
+  ];
 
   constructor() {
-    this.recorder = null;
-    this.track    = null;
-    this.chunks   = [];
-    this.scale    = 1;
-    this.frame    = "";
+    this.scale   = 1;
+    this.frame   = "";
+    this.failure = null;
+    this.stage   = document.createElement("canvas");
   }
 
-  static codec() {
-    if (!window.MediaRecorder) return "";
-    return GlobeClipRecorder.CODECS.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
+  static available() {
+    return Boolean(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
   }
 
   _scaleUp(viewer) {
@@ -30,70 +33,94 @@ class GlobeClipRecorder {
     viewer.resolutionScale = Math.max(1, Math.min(GlobeClipRecorder.SCALE, room));
   }
 
-  _settle(viewer) {
-    return new Promise((resolve) => {
-      const release = viewer.scene.postRender.addEventListener(() => { release(); resolve(); });
-      viewer.scene.requestRender();
-    });
+  _stageSize(canvas) {
+    this.stage.width  = canvas.width & ~1;
+    this.stage.height = canvas.height & ~1;
+    this.frame        = `${this.stage.width}x${this.stage.height}`;
   }
 
-  _start(canvas) {
-    const stream = canvas.captureStream(0);
-
-    this.chunks   = [];
-    this.frame    = `${canvas.width}x${canvas.height}`;
-    this.track    = stream.getVideoTracks()[0];
-    this.recorder = new MediaRecorder(stream, { mimeType: GlobeClipRecorder.codec(), videoBitsPerSecond: GlobeClipRecorder._bitrate(canvas) });
-
-    this.recorder.addEventListener("dataavailable", (ev) => { if (ev.data.size) this.chunks.push(ev.data); });
-    this.recorder.start(GlobeClipRecorder.CHUNK_MS);
-  }
-
-  static _bitrate(canvas) {
-    const rate = canvas.width * canvas.height * GlobeClipRecorder.FRAME_RATE * GlobeClipRecorder.BITS_PER_PX;
+  static _bitrate(width, height) {
+    const rate = width * height * GlobeClipRecorder.FPS * GlobeClipRecorder.BITS_PER_PX;
     return Math.round(Math.min(GlobeClipRecorder.MAX_BITRATE, Math.max(GlobeClipRecorder.MIN_BITRATE, rate)));
   }
 
-  _grab() {
-    this.track.requestFrame();
+  async _pickCodec(width, height) {
+    for (const entry of GlobeClipRecorder.CODECS) {
+      const config = { codec: entry.codec, width, height, bitrate: GlobeClipRecorder._bitrate(width, height), framerate: GlobeClipRecorder.FPS, latencyMode: "quality", ...entry.extra };
+      const probe  = await VideoEncoder.isConfigSupported(config);
+      if (probe.supported) return { config, container: entry.container };
+    }
+    throw new Error("this browser has neither an H.264 nor a VP9 encoder for offline rendering");
   }
 
-  _stop() {
-    const recorder = this.recorder;
-    this.recorder  = null;
-    this.track     = null;
+  async _settled(viewer) {
+    const t0 = performance.now();
+    while (true) {
+      viewer.render();
+      if (!viewer.scene.globe || viewer.scene.globe.tilesLoaded || performance.now() - t0 > GlobeClipRecorder.SETTLE_MAX_MS) return;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  }
 
-    return new Promise((resolve) => {
-      recorder.addEventListener("stop", () => resolve(new Blob(this.chunks, { type: recorder.mimeType })));
-      recorder.stop();
-    });
+  _grab(viewer, index) {
+    const ctx = this.stage.getContext("2d");
+    ctx.drawImage(viewer.canvas, 0, 0, this.stage.width, this.stage.height, 0, 0, this.stage.width, this.stage.height);
+
+    const tick = 1e6 / GlobeClipRecorder.FPS;
+    return new VideoFrame(this.stage, { timestamp: Math.round(index * tick), duration: Math.round(tick) });
+  }
+
+  async _drain(encoder) {
+    while (encoder.encodeQueueSize > GlobeClipRecorder.QUEUE_LIMIT) {
+      await new Promise((resolve) => encoder.addEventListener("dequeue", resolve, { once: true }));
+    }
+    if (this.failure) throw this.failure;
   }
 
   async _upload(clip, cubeId, move) {
-    if (!clip.size) return { ok: false, error: "the recorder captured no frames" };
+    if (!clip.size) return { ok: false, error: "the renderer produced no frames" };
     return await Api.postBlob(`/api/cubes/save_globe_tour?id=${encodeURIComponent(cubeId)}&move=${encodeURIComponent(move)}`, clip);
   }
 
-  async capture(viewer, cubeId, move, play) {
-    if (!GlobeClipRecorder.codec()) throw new Error("this browser cannot record WebM video");
+  async render(viewer, tour, cubeId, move, onProgress) {
+    if (!GlobeClipRecorder.available()) throw new Error("this browser cannot encode video offline (WebCodecs is missing)");
 
+    this.failure = null;
     this._scaleUp(viewer);
-    await this._settle(viewer);
+    viewer.render();
+    this._stageSize(viewer.canvas);
 
-    this._start(viewer.canvas);
-    const release = viewer.scene.postRender.addEventListener(() => this._grab());
+    const { config, container } = await this._pickCodec(this.stage.width, this.stage.height);
+    const muxer   = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: container, width: this.stage.width, height: this.stage.height, frameRate: GlobeClipRecorder.FPS }, fastStart: "in-memory" });
+    const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (err) => { this.failure = err; } });
+    encoder.configure(config);
 
-    let clip;
+    let frames = 0;
+    tour.beginOffline();
     try {
-      await play();
+      frames = tour.frameCount(GlobeClipRecorder.FPS);
+      for (let i = 0; i < frames; i += 1) {
+        tour.seek((i * 1000) / GlobeClipRecorder.FPS);
+        await this._settled(viewer);
+
+        const frame = this._grab(viewer, i);
+        encoder.encode(frame, { keyFrame: i % GlobeClipRecorder.KEYFRAME_EVERY === 0 });
+        frame.close();
+
+        await this._drain(encoder);
+        onProgress(i + 1, frames);
+      }
+      await encoder.flush();
     } finally {
-      release();
-      clip = await this._stop();
+      tour.endOffline();
+      if (encoder.state !== "closed") encoder.close();
       viewer.resolutionScale = this.scale;
     }
 
+    muxer.finalize();
+    const clip   = new Blob([muxer.target.buffer], { type: "video/mp4" });
     const result = await this._upload(clip, cubeId, move);
-    return { ...result, frame: this.frame };
+    return { ...result, frame: this.frame, frames, codec: config.codec };
   }
 }
 
@@ -183,7 +210,7 @@ class GlobeTour {
     this.recordEl.addEventListener("click", () => this.record());
 
     this.secsEl.value = this._entry().seconds;
-    if (!GlobeClipRecorder.codec()) this.recordEl.title = "this browser cannot record WebM video";
+    if (!GlobeClipRecorder.available()) this.recordEl.title = "this browser cannot encode video offline (WebCodecs is missing)";
     this._setBusy(false);
   }
 
@@ -240,7 +267,7 @@ class GlobeTour {
     this.moveEl.disabled   = blocked;
     this.secsEl.disabled   = blocked;
     this.playEl.disabled   = blocked;
-    this.recordEl.disabled = blocked || !GlobeClipRecorder.codec();
+    this.recordEl.disabled = blocked || !GlobeClipRecorder.available();
   }
 
   sync() {
@@ -381,15 +408,7 @@ class GlobeTour {
     this.globe._syncStatus();
   }
 
-  _step(now) {
-    if (this.globe.host.view !== "globe" || !this.origin) {
-      this.stop();
-      return;
-    }
-
-    if (this.t0 === null) this.t0 = now;
-
-    const elapsed = now - this.t0;
+  _advance(elapsed) {
     const segment = this.plan.segmentAt(elapsed);
     if (segment !== this.cursor) this._enter(segment);
 
@@ -399,14 +418,49 @@ class GlobeTour {
 
     this._applyPose(segment.lead ? GlobeTour.blend(this.from, this._poseFor(step, 0), GlobeTour.smooth(u)) : this._poseFor(step, eased));
     if (step.sweep) this._cutTo(segment.lead ? GlobeTour.span([1, step.sweep[0]], GlobeTour.smooth(u)) : GlobeTour.span(step.sweep, eased));
+    if (this.globe.offline) this.globe.flightTick(elapsed);
+
+    return elapsed >= this.plan.total;
+  }
+
+  _step(now) {
+    if (this.globe.host.view !== "globe" || !this.origin) {
+      this.stop();
+      return;
+    }
+
+    if (this.t0 === null) this.t0 = now;
+
+    const done = this._advance(now - this.t0);
     this.globe.viewer.scene.requestRender();
 
-    if (elapsed >= this.plan.total) {
+    if (done) {
       this.stop();
       return;
     }
 
     this.frame = requestAnimationFrame((next) => this._step(next));
+  }
+
+  frameCount(fps) {
+    return Math.ceil((this.plan.total / 1000) * fps) + 1;
+  }
+
+  beginOffline() {
+    this.stop();
+    this._begin();
+    this.globe.offline = true;
+    this.globe.viewer.scene.requestRenderMode = true;
+  }
+
+  seek(elapsed) {
+    if (this.globe.host.view !== "globe" || !this.origin) throw new Error("the globe view was left while rendering");
+    this._advance(Math.min(elapsed, this.plan.total));
+  }
+
+  endOffline() {
+    this.globe.offline = false;
+    this.stop();
   }
 
   _end() {
@@ -462,11 +516,13 @@ class GlobeTour {
 
     this._setBusy(true);
     this.recordEl.classList.add("is-recording");
-    this.recordEl.textContent = "Recording";
+    this.recordEl.textContent = "Rendering 0%";
+
+    const onProgress = (done, total) => { this.recordEl.textContent = `Rendering ${Math.round((100 * done) / total)}%`; };
 
     let result;
     try {
-      result = await this.recorder.capture(this.globe.viewer, this.globe.host.selectedId, move, () => this.play());
+      result = await this.recorder.render(this.globe.viewer, this, this.globe.host.selectedId, move, onProgress);
     } catch (e) {
       result = { ok: false, error: e.message };
     }
@@ -476,10 +532,10 @@ class GlobeTour {
     this.recordEl.textContent = "Record";
 
     if (!result.ok) {
-      Toast.show(result.error || "The globe recording could not be saved.", "error");
+      Toast.show(result.error || "The globe rendering could not be saved.", "error");
       return;
     }
 
-    Toast.show(`Saved ${result.file} (${result.frame}, ${(result.bytes / 1048576).toFixed(1)} MB) → ${result.rel}`, "ok");
+    Toast.show(`Saved ${result.file} (${result.frame}, ${result.frames} frames at ${GlobeClipRecorder.FPS} fps, ${result.codec}, ${(result.bytes / 1048576).toFixed(1)} MB) → ${result.rel}`, "ok");
   }
 }
