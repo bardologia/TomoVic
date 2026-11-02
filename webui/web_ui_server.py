@@ -11,21 +11,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib     import Path
 
 from config_registry        import ConfigRegistry
-from cube_explorer          import CubeExplorer, SliceCollector
+from contention_monitor     import ContentionMonitor
+from cube_explorer          import CubeExplorer, SliceCollectionMailer, SliceCollector
 from dataset_browser        import DatasetBrowser
 from job_describer          import JobDescriber
 from launch_layout          import LaunchLayout
 from repomap_library        import RepoMapLibrary
 from notifier               import ExperimentProgressWatcher, JobNotifier
+from politeness             import JobPoliteness, JobThrottle
 from process_manager        import ProcessManager, ProcessNuke, ServerDetacher
 from project_paths          import ProjectPaths
 from request_router         import RequestRouter
+from resource_watchdog      import ResourceWatchdog
 from results_browser        import ResultsBrowser
 from run_config_reader      import RunConfigReader
 from run_launcher           import RunLauncher
 from saved_run_store        import SavedRunStore
 from script_catalog         import ScriptCatalog
 from script_config_resolver import ScriptConfigResolver
+from stream_hub             import StreamHub
 from system_monitor         import SystemMonitor
 from web_logger             import WebLogger
 
@@ -100,15 +104,21 @@ class WebUIServer:
         self.repomap        = RepoMapLibrary()
         self.notifier       = JobNotifier(self.paths, self.logger)
         self.describer      = JobDescriber(self.paths, self.resolver)
-        self.processes      = ProcessManager(self.paths, self.logger, self.notifier, self.describer)
+        self.politeness     = JobPoliteness(self.paths, self.logger)
+        self.processes      = ProcessManager(self.paths, self.logger, self.notifier, self.describer, self.politeness)
+        self.stream_hub     = StreamHub(self.logger)
         self.progress_watch = ExperimentProgressWatcher(self.processes, self.notifier, self.logger)
         self.saved_runs     = SavedRunStore(self.paths, self.logger)
         self.nuke           = ProcessNuke(self.logger)
         self.detacher       = ServerDetacher(self.paths, self.logger)
         self.system         = SystemMonitor(self.paths, self.logger)
+        self.throttle       = JobThrottle(self.nuke, self.logger)
+        self.contention     = ContentionMonitor(self.paths, self.logger, self.notifier, self.nuke, self.throttle, self.politeness)
+        self.watchdog       = ResourceWatchdog(self.processes, self.contention, self.logger, self.notifier, self.paths)
         self.results        = ResultsBrowser(self.logger)
         self.cubes          = CubeExplorer(self.logger)
         self.slices         = SliceCollector(self.cubes, self.logger)
+        self.slice_mail     = SliceCollectionMailer(self.slices, self.logger)
         self.datasets       = DatasetBrowser(self.logger)
         self.launcher       = RunLauncher(self.paths, self.logger, self.resolver, self.processes)
         self.run_configs    = RunConfigReader(self.logger)
@@ -118,14 +128,14 @@ class WebUIServer:
             ResultsRouter(self.results),
             DatasetRouter(self.datasets),
             CubeRouter(self.cubes),
-            SliceRouter(self.slices),
+            SliceRouter(self.slices, self.slice_mail),
             ContentLibraryRouter("/api/repomap",   self.repomap,   "folders"),
             ContentLibraryRouter("/api/configs",   self.configs,   "groups"),
             CatalogRouter(self.paths, self.catalog, self.resolver, self.layout, self.launcher),
-            JobRouter(self.paths, self.processes, self.launcher),
+            JobRouter(self.paths, self.processes, self.launcher, self.stream_hub),
             SavedRunRouter(self.paths, self.saved_runs, self.launcher),
             RunConfigRouter(self.run_configs),
-            SystemRouter(self.system, self.detacher, self.notifier, self.nuke, self.processes),
+            SystemRouter(self.system, self.watchdog, self.contention, self.detacher, self.notifier, self.nuke, self.processes, self.logger),
         ])
 
     def _report_ready(self) -> None:
@@ -146,15 +156,17 @@ class WebUIServer:
     def serve(self) -> None:
         """Serves the console until interrupted, then stops the background workers.
 
-        Starts the progress watcher, runs the HTTP server on a worker thread, and
-        blocks in the detacher wait loop until a keyboard interrupt or detach
-        request arrives.
+        Starts the contention monitor and the progress watcher, runs the HTTP
+        server on a worker thread, and blocks in the detacher wait loop until a
+        keyboard interrupt or detach request arrives.
         """
 
         server        = _Server((self.host, self.port), _Handler)
         server.router = self.router
 
         self._report_ready()
+        self.contention.start()
+        self.watchdog.start()
         self.progress_watch.start()
 
         worker = threading.Thread(target=server.serve_forever, name="HttpServer", daemon=True)

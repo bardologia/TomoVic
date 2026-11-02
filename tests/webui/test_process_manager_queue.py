@@ -145,6 +145,17 @@ def test_queue_respects_follow_up_chain(manager, tmp_path):
     assert (tmp_path / "argv.txt").exists()
 
 
+def test_the_stored_request_keeps_the_follow_up_key_unless_detached(manager):
+    """The retry request remembers the follow-up script of an attached launch and drops it for a detached one."""
+    attached = manager.enqueue("sleep_ok", sys.executable, follow_up="args_dump")
+    detached = manager.enqueue("sleep_ok", sys.executable, follow_up="args_dump", detach=True)
+
+    assert job_record(manager, attached["job_id"])["request"]["follow_up"] == "args_dump"
+    assert job_record(manager, detached["job_id"])["request"]["follow_up"] is None
+
+    manager.stop_all()
+
+
 def test_enqueue_rejects_missing_script(manager):
     """Enqueueing an unknown script name is rejected."""
     result = manager.enqueue("missing", sys.executable)
@@ -200,7 +211,7 @@ def test_a_viewer_that_falls_behind_is_truncated_with_a_marker(manager, monkeypa
 
     assert stream.dropped == 4
     assert "stream truncated: 4 event(s) dropped" in drained[0]["data"]
-    assert drained[-1] == {"type": "end"}
+    assert drained[-1]["type"] == "end"
 
 
 def test_the_queued_event_names_the_job_holding_the_queue(manager):

@@ -15,6 +15,8 @@ import pytest
 
 from process_manager import ProcessManager
 
+from tools.orchestration.gpu_queue import GpuPoolFile
+
 from tests.webui.conftest import SLEEP_LONG, job_record, wait_for_status, wait_until_finished
 
 
@@ -81,6 +83,45 @@ def test_launch_keeps_an_explicit_pool_file_override(manager, tmp_path):
     manager.stop(job_id)
 
 
+def test_the_stored_request_keeps_an_explicit_pool_file_override(manager, tmp_path):
+    """The request kept for a retry carries the overrides as sent, an explicit pool file outside gpu_pools_dir included."""
+    job_id, pool = _pooled_job(manager, tmp_path)
+    record       = job_record(manager, job_id)
+
+    assert record["request"] == {"overrides": {"gpus_file": str(pool)}, "follow_up": None}
+
+    manager.stop(job_id)
+
+
+def test_a_recovered_pool_file_under_gpu_pools_dir_is_dropped_from_the_request(manager, tmp_path):
+    """An adopted command line loses a pool file under gpu_pools_dir, but keeps one chosen elsewhere."""
+    injected = str(manager.paths.gpu_pools_dir / "abc.json")
+    chosen   = str(tmp_path / "mine.json")
+
+    assert manager._without_pool_file({"windows": "3", "gpus_file": injected}) == {"windows": "3"}
+    assert manager._without_pool_file({"windows": "3", "gpus_file": chosen}) == {"windows": "3", "gpus_file": chosen}
+    assert manager._without_pool_file({"windows": "3"}) == {"windows": "3"}
+
+
+def test_set_gpus_reports_a_pool_file_write_failure(manager, tmp_path, monkeypatch):
+    """set_gpus returns the OSError of a failed pool file write as an error and leaves the pool unchanged."""
+    job_id, pool = _pooled_job(manager, tmp_path)
+    pool.write_text(json.dumps({"gpus": [0]}))
+
+    def refuse(self, gpus, preempt):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(GpuPoolFile, "write", refuse)
+
+    applied = manager.set_gpus(job_id, [0, 1])
+
+    assert applied["ok"] is False
+    assert "failed to write pool file: disk full" in applied["error"]
+    assert json.loads(pool.read_text()) == {"gpus": [0]}
+
+    manager.stop(job_id)
+
+
 def test_set_gpus_rewrites_a_live_pool_file(manager, tmp_path):
     """set_gpus rewrites an existing pool file and gpu_pool reads it back."""
     job_id, pool = _pooled_job(manager, tmp_path)
@@ -88,7 +129,7 @@ def test_set_gpus_rewrites_a_live_pool_file(manager, tmp_path):
 
     applied = manager.set_gpus(job_id, [0, 2, 3])
 
-    assert applied == {"ok": True, "gpus": [0, 2, 3], "parked": False}
+    assert applied == {"ok": True, "gpus": [0, 2, 3], "parked": False, "preempted": []}
     assert json.loads(pool.read_text()) == {"gpus": [0, 2, 3]}
     assert manager.gpu_pool(job_id)["gpus"] == [0, 2, 3]
 
@@ -121,13 +162,13 @@ def test_set_gpus_parks_only_when_parking_is_confirmed(manager, tmp_path):
 
     parked = manager.set_gpus(job_id, [], park=True)
 
-    assert parked == {"ok": True, "gpus": [], "parked": True}
+    assert parked == {"ok": True, "gpus": [], "parked": True, "preempted": []}
     assert json.loads(pool.read_text()) == {"gpus": []}
     assert manager.gpu_pool(job_id)["gpus"] == []
 
     resumed = manager.set_gpus(job_id, [2])
 
-    assert resumed == {"ok": True, "gpus": [2], "parked": False}
+    assert resumed == {"ok": True, "gpus": [2], "parked": False, "preempted": []}
     assert json.loads(pool.read_text()) == {"gpus": [2]}
 
     manager.stop(job_id)

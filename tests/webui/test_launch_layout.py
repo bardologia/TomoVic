@@ -20,15 +20,17 @@ from script_config_resolver import ScriptConfigResolver
 
 from tools.runtime.config_cli import ConfigCli
 
-from configuration.comparison            import PreprocessingComparisonConfig
-from configuration.param_extraction      import ExtractParamsEntryConfig, ParamExtractionInferenceConfig
-from configuration.sar.processing_config import PreProcessEntryConfig, PreprocessInferenceConfig
+from configuration.comparison              import PreprocessingComparisonConfig
+from configuration.param_extraction        import ExtractParamsEntryConfig, ParamExtractionInferenceConfig
+from configuration.sar.polarimetry_config  import PolarimetryEntryConfig
+from configuration.sar.processing_config   import PreProcessEntryConfig, PreprocessInferenceConfig
 
-_DISPATCH_ONLY = {"generate_tomogram", "generate_interferograms"}
+_DISPATCH_ONLY = {"generate_tomogram", "generate_interferograms", "measure_scene_extent", "generate_polarimetric_primary"}
 
 _PAGES = [
     ("pre_process",                  PreProcessEntryConfig),
     ("extract_params",               ExtractParamsEntryConfig),
+    ("extract_polarimetry",          PolarimetryEntryConfig),
     ("analyze_preprocessing",        PreprocessInferenceConfig),
     ("analyze_param_extraction",     ParamExtractionInferenceConfig),
     ("compare_preprocessing_trials", PreprocessingComparisonConfig),
@@ -101,6 +103,23 @@ def test_the_extraction_sweep_exposes_its_grid_widgets():
     assert layout["widgets"]["fit_modes"]         == LaunchLayout.MULTI_FIT_MODES
     assert layout["widgets"]["gpu_device_ids"]    == LaunchLayout.MULTI_GPUS
     assert layout["widgets"]["parameter_workers"] == LaunchLayout.NUM_WORKERS
+
+
+def test_the_extraction_page_carries_the_resource_monitor_and_hides_its_tensorboard_flag():
+    """The extraction page groups the resource monitor fields with a seconds widget on the poll interval and hides the TensorBoard flag."""
+    layout = LaunchLayout().build("extract_params", _leaves(ExtractParamsEntryConfig))
+    hidden = [field for section in layout["sections"] for panel in section["panels"] if panel["kind"] == "hidden" for field in panel["fields"]]
+
+    assert layout["widgets"]["resources.poll_interval_sec"] == LaunchLayout.NUM_SECONDS
+    assert hidden == ["resources.log_to_tensorboard"]
+
+
+def test_the_polarimetry_page_picks_its_datasets_under_the_base_path():
+    """The polarimetry extraction page renders the dataset filter as the multi dataset picker rooted at dataset_base_path."""
+    layout = LaunchLayout().build("extract_polarimetry", _leaves(PolarimetryEntryConfig))
+
+    assert layout["widgets"]["dataset_filter"] == LaunchLayout.PICK_DATASETS
+    assert LaunchLayout.PICK_DATASETS["baseFrom"] == "dataset_base_path"
 
 
 def test_the_workers_widget_is_a_bounded_number():

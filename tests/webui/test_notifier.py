@@ -522,3 +522,23 @@ def test_watcher_ignores_jobs_without_progress(notifier, watched):
     watcher.scan()
 
     assert watcher.tracked == {}
+
+
+def test_system_alert_pushes_with_the_host_name_appended(notifier, sent):
+    """A system alert is pushed with its priority and the host name appended to the body."""
+    _arm(notifier)
+    notifier.system_alert("neighbour impact: cpu", "your jobs stall a neighbour", "high")
+    calls = _drain(sent, 1)
+
+    assert len(calls) == 1
+    assert calls[0][0] == "neighbour impact: cpu"
+    assert calls[0][1].startswith("your jobs stall a neighbour\non ")
+    assert calls[0][2] == "high"
+
+
+def test_system_alert_stays_silent_while_disabled(notifier, sent):
+    """A disabled notifier drops system alerts."""
+    notifier.system_alert("neighbour impact: cpu", "your jobs stall a neighbour", "high")
+    time.sleep(0.1)
+
+    assert sent == []

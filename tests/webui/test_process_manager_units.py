@@ -1,9 +1,10 @@
 """Tests for per-unit log access inside a fan-out job.
 
 Covers resolution of a unit and its log file from the progress snapshot, the
-flattened per-unit transcript served by job_log, and the unit stream that
-replays a finished log or follows a running one until the unit, the viewer or
-the parent job stops it.
+flattened per-unit transcript served by job_log, the job log route answering
+the job's own log, one unit's log or a 400 for an unparseable unit index, and
+the unit stream that replays a finished log or follows a running one until the
+unit, the viewer or the parent job stops it.
 """
 from __future__ import annotations
 
@@ -15,11 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from process_manager import ProcessManager
+from process_manager        import ProcessManager
+from request_router         import RequestRouter
+from routers.launch_routers import JobRouter
+from web_logger             import WebLogger
 
 from tools.orchestration.gpu_queue import GpuProgressFile
 
-from tests.webui.conftest import SLEEP_LONG, wait_for_status
+from tests.webui.conftest import SLEEP_LONG, FakeHandler, wait_for_status
 
 
 @pytest.fixture
@@ -53,6 +57,15 @@ def _launch_with_units(manager: ProcessManager, tmp_path: Path, units: list[dict
     assert wait_for_status(manager, job_id, "running")
     _write_snapshot(manager, job_id, units)
     return job_id
+
+
+def _request_log(manager: ProcessManager, path: str) -> FakeHandler:
+    """Routes a GET of `path` through a request router serving the job router over `manager` and returns the answered handler."""
+    router  = RequestRouter(WebLogger(), [JobRouter(None, manager, None, None)])
+    handler = FakeHandler("GET", path)
+
+    router.route(handler)
+    return handler
 
 
 def _collect(stream, timeout: float = 6.0) -> list[dict]:
@@ -157,6 +170,52 @@ def test_job_log_for_a_unit_without_a_file_is_unavailable(manager, tmp_path):
     assert data["ok"] is True
     assert data["available"] is False
     assert "has not started" in data["reason"]
+
+    manager.stop(job_id)
+
+
+def test_log_route_without_a_unit_answers_the_job_log(manager, tmp_path):
+    """GET /api/jobs/<id>/log without a unit parameter answers the job's own log, here a pipe with no log file."""
+    job_id = _launch_with_units(manager, tmp_path, [_unit("a", tmp_path / "a.log", "queued")])
+
+    handler = _request_log(manager, f"/api/jobs/{job_id}/log")
+    data    = handler.payload()
+
+    assert handler.status == 200
+    assert data["ok"] is True
+    assert data["available"] is False
+    assert "writes to a pipe" in data["reason"]
+
+    manager.stop(job_id)
+
+
+def test_log_route_with_a_unit_answers_that_unit_log(manager, tmp_path):
+    """GET /api/jobs/<id>/log?unit=0 answers the flattened log of the first fan-out unit."""
+    log = tmp_path / "stage" / "a" / "worker.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("epoch 1\r\x1b[31mepoch 2\x1b[0m\n")
+
+    job_id = _launch_with_units(manager, tmp_path, [_unit("a", log, "done", gpu=0, returncode=0)])
+
+    handler = _request_log(manager, f"/api/jobs/{job_id}/log?unit=0")
+    data    = handler.payload()
+
+    assert handler.status == 200
+    assert data["available"] is True
+    assert data["path"] == str(log)
+    assert data["text"] == "epoch 2\n"
+
+    manager.stop(job_id)
+
+
+def test_log_route_refuses_an_unparseable_unit_index(manager, tmp_path):
+    """GET /api/jobs/<id>/log?unit=abc answers 400 naming the index instead of reading any log."""
+    job_id = _launch_with_units(manager, tmp_path, [_unit("a", tmp_path / "a.log", "queued")])
+
+    handler = _request_log(manager, f"/api/jobs/{job_id}/log?unit=abc")
+
+    assert handler.status == 400
+    assert handler.payload() == {"ok": False, "error": "invalid unit index 'abc'"}
 
     manager.stop(job_id)
 

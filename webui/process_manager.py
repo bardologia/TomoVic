@@ -31,6 +31,7 @@ from tools.orchestration.gpu_queue import GpuPoolFile, GpuProgressFile
 from job_describer  import JobDescriber
 from log_transcript import AnsiTranscript
 from notifier       import JobNotifier
+from politeness     import JobPoliteness
 from proc_stats     import ProcStats
 from project_paths  import ProjectPaths
 from web_logger     import WebLogger
@@ -39,15 +40,17 @@ from web_logger     import WebLogger
 class JobStream:
     """Broadcasts one job's output events to every attached console viewer.
 
-    A replay buffer lets a late subscriber catch up, and a viewer whose queue
-    fills is truncated rather than allowed to stall the publisher.
+    A replay buffer lets a late subscriber catch up. A subscriber is any sink
+    with ``put_nowait``: a bounded queue, which is truncated with a marker when
+    it fills rather than allowed to stall the publisher, or a channel sink that
+    forwards the events into a page's multiplexed stream channel.
 
     Attributes:
-        logger: Console logger warning about truncated viewers.
-        buffer: Replay buffer of the most recent events, capped at 4000.
-        subscribers: Queues of the currently attached viewers.
-        dropped: Total events dropped across all truncations.
-        lock: Guards the buffer and the subscriber list.
+        logger      : Console logger warning about truncated viewers.
+        buffer      : Replay buffer of the most recent events, capped at 4000.
+        subscribers : Sinks of the currently attached viewers.
+        dropped     : Total events dropped across all truncations.
+        lock        : Guards the buffer and the subscriber list.
     """
 
     QUEUE_LIMIT = 8000
@@ -56,22 +59,24 @@ class JobStream:
         """Creates an empty stream with no subscribers.
 
         Args:
-            logger: Console logger for truncation warnings.
+            logger : Console logger for truncation warnings.
         """
         self.logger      = logger
         self.buffer      = deque(maxlen=4000)
         self.subscribers = []
         self.dropped     = 0
         self.lock        = threading.Lock()
+        self.event_counter = 0
 
     def publish(self, event: dict) -> None:
         """Appends an event to the replay buffer and pushes it to every viewer.
 
         Args:
-            event: Stream event, typically a chunk of output, a status change
-                or the terminating end marker.
+            event : Stream event, typically a chunk of output, a status change or the terminating end marker.
         """
         with self.lock:
+            self.event_counter += 1
+            event["id"] = self.event_counter
             self.buffer.append(event)
             overflowed = 0
             for sub in list(self.subscribers):
@@ -89,8 +94,8 @@ class JobStream:
         """Empties a backed-up viewer queue, marks the gap, and returns how many events were lost.
 
         Args:
-            sub: Queue of the viewer that could not keep up.
-            event: Event that overflowed the queue, re-queued after the marker.
+            sub   : Bounded queue of the viewer that could not keep up.
+            event : Event that overflowed the queue, re-queued after the marker.
         """
         dropped = 0
 
@@ -106,17 +111,27 @@ class JobStream:
 
         return dropped
 
-    def subscribe(self) -> queue.Queue:
-        """Attaches a viewer and returns its queue, pre-filled with the replay buffer."""
-        sub = queue.Queue(maxsize=self.QUEUE_LIMIT)
+    def attach(self, sink, last_event_id: int = -1) -> None:
+        """Attaches a viewer sink, replaying the buffered events newer than `last_event_id` into it first.
+
+        Args:
+            sink          : Object with ``put_nowait(event)`` receiving every event from now on.
+            last_event_id : Id of the last event the viewer already holds, -1 for none.
+        """
         with self.lock:
             for event in self.buffer:
-                sub.put_nowait(event)
-            self.subscribers.append(sub)
+                if event.get("id", -1) > last_event_id:
+                    sink.put_nowait(event)
+            self.subscribers.append(sink)
+
+    def subscribe(self, last_event_id: int = -1) -> queue.Queue:
+        """Attaches a bounded viewer queue and returns it, pre-filled with the replay buffer."""
+        sub = queue.Queue(maxsize=self.QUEUE_LIMIT)
+        self.attach(sub, last_event_id)
         return sub
 
-    def unsubscribe(self, sub: queue.Queue) -> None:
-        """Detaches a viewer queue, ignoring one that is already gone."""
+    def unsubscribe(self, sub) -> None:
+        """Detaches a viewer sink, ignoring one that is already gone."""
         with self.lock:
             if sub in self.subscribers:
                 self.subscribers.remove(sub)
@@ -126,10 +141,10 @@ class LogTailer:
     """Follows a log file and republishes its bytes as stream chunks until the writer exits.
 
     Attributes:
-        path: Log file being followed.
-        stream: Stream the decoded text is published to.
-        alive: Predicate reporting whether the writing process is still running.
-        decoder: Incremental UTF-8 decoder that survives split multi-byte characters.
+        path    : Log file being followed.
+        stream  : Stream the decoded text is published to.
+        alive   : Predicate reporting whether the writing process is still running.
+        decoder : Incremental UTF-8 decoder that survives split multi-byte characters.
     """
 
     POLL_S      = 0.5
@@ -140,9 +155,9 @@ class LogTailer:
         """Prepares a tailer for one log file.
 
         Args:
-            path: Log file to follow.
-            stream: Stream the output chunks are published to.
-            alive: Predicate that returns False once the writer has exited.
+            path   : Log file to follow.
+            stream : Stream the output chunks are published to.
+            alive  : Predicate that returns False once the writer has exited.
         """
         self.path    = path
         self.stream  = stream
@@ -184,22 +199,22 @@ class ProcessManager:
     Jobs are launched immediately or queued behind the currently running one,
     can chain a follow-up script on success, and can detach into their own
     session, in which case the manager tracks the surviving pid and tails its
-    log. Untracked training processes started outside the console are adopted
+    log. Untracked entry-point processes started outside the console are adopted
     into the same table.
 
     Attributes:
-        paths: Project paths supplying the script registry and pool directory.
-        logger: Console logger for launch, exit and adoption messages.
-        notifier: Notifier pushed to on job start and finish.
-        describer: Builds the human-readable description of a launch.
-        jobs: Job records keyed by job id.
-        streams: Output stream per job id.
-        launch_queue: Job ids waiting for the running job to finish.
-        queue_held: Job id currently blocking the queue, or None.
-        lock: Guards the job table, streams and queue.
-        uid: Effective user id, used to filter the process table.
-        clk: Clock ticks per second, used to age processes from /proc.
-        orphan_scan_t: Monotonic timestamp of the last orphan sweep.
+        paths         : Project paths supplying the script registry and pool directory.
+        logger        : Console logger for launch, exit and adoption messages.
+        notifier      : Notifier pushed to on job start and finish.
+        describer     : Builds the human-readable description of a launch.
+        jobs          : Job records keyed by job id.
+        streams       : Output stream per job id.
+        launch_queue  : Job ids waiting for the running job to finish.
+        queue_held    : Job id currently blocking the queue, or None.
+        lock          : Guards the job table, streams and queue.
+        uid           : Effective user id, used to filter the process table.
+        clk           : Clock ticks per second, used to age processes from /proc.
+        orphan_scan_t : Monotonic timestamp of the last orphan sweep.
     """
 
     OVERRIDE_NAME    = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
@@ -213,19 +228,21 @@ class ProcessManager:
     POOL_SCRIPTS     = ()
     POOL_FIELD       = "gpus_file"
 
-    def __init__(self, paths: ProjectPaths, logger: WebLogger, notifier: JobNotifier, describer: JobDescriber) -> None:
+    def __init__(self, paths: ProjectPaths, logger: WebLogger, notifier: JobNotifier, describer: JobDescriber, politeness: JobPoliteness) -> None:
         """Creates an empty job table and reads the host constants the manager needs.
 
         Args:
-            paths: Project paths supplying the script registry and pool directory.
-            logger: Console logger for job lifecycle messages.
-            notifier: Notifier pushed to on job start and finish.
-            describer: Builds the description shown for each launch.
+            paths      : Project paths supplying the script registry and pool directory.
+            logger     : Console logger for job lifecycle messages.
+            notifier   : Notifier pushed to on job start and finish.
+            describer  : Builds the description shown for each launch.
+            politeness : Politeness level whose nice and ionice prefix every local launch starts under.
         """
         self.paths         = paths
         self.logger        = logger
         self.notifier      = notifier
         self.describer     = describer
+        self.politeness    = politeness
         self.jobs          = {}
         self.streams       = {}
         self.launch_queue  = deque()
@@ -239,19 +256,18 @@ class ProcessManager:
         """Starts a script immediately and registers it in the job table.
 
         Args:
-            key: Registered script key to run.
-            interpreter: Absolute path of the Python interpreter to run it with.
-            overrides: Config overrides passed as --path value argument pairs.
-            follow_up: Script key to run once this one exits with code 0;
-                ignored for detached launches.
-            detach: Whether to pass --detach so the script re-parents itself.
+            key         : Registered script key to run.
+            interpreter : Absolute path of the Python interpreter to run it with.
+            overrides   : Config overrides passed as --path value argument pairs.
+            follow_up   : Script key to run once this one exits with code 0; ignored for detached launches.
+            detach      : Whether to pass --detach so the script re-parents itself.
 
         Returns:
             Mapping with "ok" True and the new "job_id", or "ok" False with an
             "error" when the script or follow-up is missing or the spawn failed.
 
         Raises:
-            ValueError: If an override key is not a valid dotted config path.
+            ValueError : If an override key is not a valid dotted config path.
         """
         script = self.paths.script_entry(key)["path"]
         if not script.exists():
@@ -263,7 +279,7 @@ class ProcessManager:
             if not self.paths.script_entry(follow_up)["path"].exists():
                 return {"ok": False, "error": f"follow-up script '{follow_up}' not found"}
 
-        record = self._make_record(key, interpreter, self._clean_overrides(overrides), detach)
+        record = self._make_record(key, interpreter, self._clean_overrides(overrides), detach, follow_up)
         stream = JobStream(self.logger)
 
         with self.lock:
@@ -288,11 +304,11 @@ class ProcessManager:
         """Queues a script behind any running job and starts it when the queue advances.
 
         Args:
-            key: Registered script key to run.
-            interpreter: Absolute path of the Python interpreter to run it with.
-            overrides: Config overrides passed as --path value argument pairs.
-            follow_up: Script key to chain after this one; ignored when detached.
-            detach: Whether to pass --detach so the script re-parents itself.
+            key         : Registered script key to run.
+            interpreter : Absolute path of the Python interpreter to run it with.
+            overrides   : Config overrides passed as --path value argument pairs.
+            follow_up   : Script key to chain after this one; ignored when detached.
+            detach      : Whether to pass --detach so the script re-parents itself.
 
         Returns:
             Mapping with "ok" True, the new "job_id", and a "queued" flag that
@@ -300,7 +316,7 @@ class ProcessManager:
             or "ok" False with an "error" when a script is missing.
 
         Raises:
-            ValueError: If an override key is not a valid dotted config path.
+            ValueError : If an override key is not a valid dotted config path.
         """
         script = self.paths.script_entry(key)["path"]
         if not script.exists():
@@ -315,7 +331,7 @@ class ProcessManager:
             if not self.paths.script_entry(follow_up)["path"].exists():
                 return {"ok": False, "error": f"follow-up script '{follow_up}' not found"}
 
-        record                 = self._make_record(key, interpreter, self._clean_overrides(overrides), detach)
+        record                 = self._make_record(key, interpreter, self._clean_overrides(overrides), detach, follow_up)
         record["status"]       = "queued"
         record["queue_follow"] = follow_up
         stream                 = JobStream(self.logger)
@@ -336,17 +352,22 @@ class ProcessManager:
             still_queued = record["status"] == "queued"
         return {"ok": True, "job_id": record["job_id"], "queued": still_queued}
 
-    def _make_record(self, key: str, interpreter: str, overrides: dict, detach: bool = False) -> dict:
+    def _make_record(self, key: str, interpreter: str, overrides: dict, detach: bool = False, follow_up: str | None = None) -> dict:
         """Builds a pending job record with a fresh id, rendered command and description.
 
+        The record keeps the launch request as the form sent it under ``request``
+        (overrides before the per-job pool file and the follow-up key), so the
+        console can reopen the launch page with it.
+
         Args:
-            key: Registered script key.
-            interpreter: Interpreter the script will run under.
-            overrides: Validated config overrides, extended with a GPU pool file
-                for the scripts that support one.
-            detach: Whether the launch will pass --detach.
+            key         : Registered script key.
+            interpreter : Interpreter the script will run under.
+            overrides   : Validated config overrides, extended with a GPU pool file for the scripts that support one.
+            detach      : Whether the launch will pass --detach.
+            follow_up   : Script key chained after this one, dropped when the launch is detached.
         """
         job_id    = uuid.uuid4().hex[:12]
+        request   = {"overrides": dict(overrides), "follow_up": None if detach else follow_up}
         overrides = self._with_pool_file(key, overrides, job_id)
 
         return {
@@ -356,6 +377,7 @@ class ProcessManager:
             "description"  : self.describer.describe(key, interpreter, overrides),
             "interpreter"  : interpreter,
             "overrides"    : overrides,
+            "request"      : request,
             "detach"       : detach,
             "status"       : "pending",
             "pid"          : None,
@@ -371,26 +393,41 @@ class ProcessManager:
         """Adds a per-job live GPU pool file to the overrides of pool-aware scripts.
 
         Args:
-            key: Registered script key.
-            overrides: Overrides to extend; returned unchanged when the script
-                does not support a pool or the caller already set one.
-            job_id: Job id, used as the pool file name.
+            key       : Registered script key.
+            overrides : Overrides to extend; returned unchanged when the script does not support a pool or the caller already set one.
+            job_id    : Job id, used as the pool file name.
         """
         if key not in self.POOL_SCRIPTS or overrides.get(self.POOL_FIELD):
             return overrides
 
         return {**overrides, self.POOL_FIELD: str(self.paths.gpu_pools_dir / f"{job_id}.json")}
 
+    def _without_pool_file(self, overrides: dict) -> dict:
+        """Returns the overrides without a per-job pool file taken from gpu_pools_dir.
+
+        Args:
+            overrides : Overrides recovered from a command line; an explicit pool file elsewhere is kept.
+        """
+        pool = overrides.get(self.POOL_FIELD)
+        if pool is None or Path(pool).parent != self.paths.gpu_pools_dir:
+            return dict(overrides)
+        return {path: value for path, value in overrides.items() if path != self.POOL_FIELD}
+
     def _runtime_env(self, interpreter: str) -> dict:
         """Builds the child environment: unbuffered coloured output at a fixed terminal size.
 
         The interpreter's own lib directory is prepended to LD_LIBRARY_PATH so
-        environment-local shared objects resolve before the system ones.
+        environment-local shared objects resolve before the system ones. Any
+        CUDA_VISIBLE_DEVICES inherited from the server's shell is dropped: local
+        jobs are pinned to physical devices by the webui GPU scheduler, and a
+        stale interactive mask would turn those indices into out-of-range
+        positions inside EnvironmentPinner.
 
         Args:
-            interpreter: Absolute path of the interpreter the job will run under.
+            interpreter : Absolute path of the interpreter the job will run under.
         """
         env = dict(os.environ)
+        env.pop("CUDA_VISIBLE_DEVICES", None)
         env["PYTHONUNBUFFERED"] = "1"
         env["FORCE_COLOR"]      = "1"
         env["COLUMNS"]          = "120"
@@ -405,20 +442,22 @@ class ProcessManager:
         return env
 
     def _start(self, record: dict, stream: JobStream) -> str | None:
-        """Spawns the job in its own session and starts pumping its output.
+        """Spawns the job in its own session, under the politeness prefix, and starts pumping its output.
+
+        The prefix execs through `nice` and `ionice` into the interpreter, so the
+        pid the process handle reports is the interpreter's own.
 
         Args:
-            record: Job record to start; updated in place with the pid, the
-                running status and a fresh start timestamp.
-            stream: Stream the job's output is published to.
+            record : Job record to start; updated in place with the pid, the running status and a fresh start timestamp.
+            stream : Stream the job's output is published to.
 
         Returns:
             None once the process is running, or the spawn error as text.
         """
         entry = self.paths.script_entry(record["script"])
-        argv  = [record["interpreter"], "-u", str(entry["path"])]
+        argv  = self.politeness.prefix() + [record["interpreter"], "-u", str(entry["path"])]
         for path, value in record["overrides"].items():
-            argv += [f"--{path}", value]
+            argv += [f"--{path}", str(value)]
         if record.get("detach"):
             argv.append("--detach")
 
@@ -433,7 +472,7 @@ class ProcessManager:
                 env               = env,
                 start_new_session = True,
             )
-        except OSError as exc:
+        except Exception as exc:
             return str(exc)
 
         with self.lock:
@@ -454,9 +493,8 @@ class ProcessManager:
         """Registers a scheduled follow-up job that starts when the parent exits cleanly.
 
         Args:
-            parent: Job record the follow-up is chained to; its follow_up field
-                is set to the new job id.
-            key: Registered script key of the follow-up.
+            parent : Job record the follow-up is chained to; its follow_up field is set to the new job id.
+            key    : Registered script key of the follow-up.
         """
         record              = self._make_record(key, parent["interpreter"], {})
         record["status"]    = "scheduled"
@@ -480,15 +518,22 @@ class ProcessManager:
     def _resolve_follow_up(self, follow_id: str, code: int) -> None:
         """Starts or cancels a scheduled follow-up according to the parent's exit code.
 
+        The scheduled status is re-checked and advanced to pending in the same
+        lock hold, mirroring the queue advance, so a stop that cancelled the
+        follow-up meanwhile is never overwritten back to a running job.
+
         Args:
-            follow_id: Job id of the scheduled follow-up.
-            code: Exit code of the parent job; anything other than 0 cancels
-                the follow-up.
+            follow_id : Job id of the scheduled follow-up.
+            code      : Exit code of the parent job; anything other than 0 cancels the follow-up.
         """
         with self.lock:
             record = self.jobs.get(follow_id)
             stream = self.streams.get(follow_id)
-        if record is None or stream is None or record["status"] != "scheduled":
+            live   = record is not None and stream is not None and record["status"] == "scheduled"
+            if live and code == 0:
+                record["status"] = "pending"
+
+        if not live:
             return
 
         if code == 0:
@@ -566,10 +611,10 @@ class ProcessManager:
         """Validates override keys as dotted config paths and stringifies their values.
 
         Args:
-            overrides: Raw override mapping, or None for no overrides.
+            overrides : Raw override mapping, or None for no overrides.
 
         Raises:
-            ValueError: If a key is not a dotted identifier path.
+            ValueError : If a key is not a dotted identifier path.
         """
         cleaned = {}
         for path, value in (overrides or {}).items():
@@ -579,9 +624,9 @@ class ProcessManager:
         return cleaned
 
     def _render_command(self, interpreter: str, key: str, overrides: dict, detach: bool = False) -> str:
-        """Returns the shell-quoted command line shown for a job in the console."""
+        """Returns the shell-quoted command line shown for a job in the console, politeness prefix included."""
         entry = self.paths.script_entry(key)
-        parts = [interpreter, "-u", entry["rel"]]
+        parts = self.politeness.prefix() + [interpreter, "-u", entry["rel"]]
         for path, value in overrides.items():
             parts += [f"--{path}", shlex.quote(value)]
         if detach:
@@ -597,9 +642,9 @@ class ProcessManager:
         the notifier is told, and the queue and history are advanced.
 
         Args:
-            job_id: Job the process belongs to.
-            process: The spawned child, with stderr merged into stdout.
-            stream: Stream the output is published to.
+            job_id  : Job the process belongs to.
+            process : The spawned child, with stderr merged into stdout.
+            stream  : Stream the output is published to.
         """
         fd      = process.stdout.fileno()
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -676,10 +721,10 @@ class ProcessManager:
         """Re-points a job at the process that survived detaching and follows it.
 
         Args:
-            job_id: Job whose record is re-pointed at the surviving process.
-            pid: Pid the detaching launcher announced.
-            log: Log file to tail, or None when the script announced none.
-            stream: Stream the tailed output and status changes are published to.
+            job_id : Job whose record is re-pointed at the surviving process.
+            pid    : Pid the detaching launcher announced.
+            log    : Log file to tail, or None when the script announced none.
+            stream : Stream the tailed output and status changes are published to.
         """
         token = self._pid_start_token(pid)
 
@@ -703,10 +748,10 @@ class ProcessManager:
         """Starts a tailer thread for a detached job's log, or returns None when there is none.
 
         Args:
-            log: Log file to follow, or None.
-            pid: Pid whose liveness ends the tail.
-            token: Start token identifying that exact process incarnation.
-            stream: Stream the tailed output is published to.
+            log    : Log file to follow, or None.
+            pid    : Pid whose liveness ends the tail.
+            token  : Start token identifying that exact process incarnation.
+            stream : Stream the tailed output is published to.
         """
         if log is None:
             return None
@@ -719,15 +764,18 @@ class ProcessManager:
     def _watch_detached(self, job_id: str, pid: int, token: tuple | None, stream: JobStream, tailer: threading.Thread | None = None) -> None:
         """Polls a detached or adopted pid and finalises the job once it is gone.
 
-        The exit code of such a process is not observable, so the job finishes
-        with a status of "finished" and an unknown verdict.
+        The exit code of such a process is not observable, so the final progress
+        snapshot settles the outcome instead: a fan-out that ran every unit but
+        saw failures failed with an error verdict, one whose units all completed
+        finished ok, one whose snapshot stopped short of the unit total died
+        mid-run, and a job without a snapshot ends with an unknown verdict.
 
         Args:
-            job_id: Job being watched; the watch stops if its record disappears.
-            pid: Pid to poll.
-            token: Start token guarding against pid reuse.
-            stream: Stream the closing status events are published to.
-            tailer: Log tailer thread to join before finalising, if any.
+            job_id : Job being watched; the watch stops if its record disappears.
+            pid    : Pid to poll.
+            token  : Start token guarding against pid reuse.
+            stream : Stream the closing status events are published to.
+            tailer : Log tailer thread to join before finalising, if any.
         """
         while self._pid_running(pid, token):
             time.sleep(2.0)
@@ -738,23 +786,51 @@ class ProcessManager:
         if tailer is not None:
             tailer.join(timeout=LogTailer.POLL_S * 6)
 
+        progress        = self._final_progress(job_id)
+        status, verdict = self._detached_verdict(progress)
+
         with self.lock:
             record = self.jobs.get(job_id)
             if record is None:
                 return
-            record["status"]    = "finished"
+            record["status"]    = status
             record["exit_code"] = None
+            record["verdict"]   = verdict
             snapshot            = dict(record)
 
-        self.logger.muted(f"detached job {job_id} (pid {pid}) exited, exit status unknown")
-        stream.publish({"type": "status", "status": "finished", "code": None, "verdict": "unknown"})
+        self.logger.muted(f"detached job {job_id} (pid {pid}) exited, verdict {verdict} from its completion snapshot" if verdict != "unknown" else f"detached job {job_id} (pid {pid}) exited, exit status unknown")
+        stream.publish({"type": "status", "status": status, "code": None, "verdict": verdict})
         stream.publish({"type": "end"})
 
-        snapshot["progress"] = self._final_progress(job_id)
+        snapshot["progress"] = progress
         self.notifier.job_finished(snapshot)
 
         self._advance_queue()
         self._prune_history()
+
+    def _detached_verdict(self, progress: dict | None) -> tuple[str, str]:
+        """Settles a detached job's final status from its last progress snapshot.
+
+        A snapshot that settled fewer units than the total is evidence the
+        process was killed mid-run, whereas failed units in a settled snapshot
+        only mean the fan-out finished with errors, not that the process died.
+
+        Args:
+            progress : Final fan-out progress snapshot, or None when the job never wrote one.
+
+        Returns:
+            Tuple of the job status and verdict: ("failed", "died") when the
+            snapshot stops short of the unit total, ("failed", "error") when
+            every unit settled but some failed, ("finished", "ok") when every
+            unit completed, and ("finished", "unknown") without a snapshot.
+        """
+        if not progress or not progress.get("total"):
+            return "finished", "unknown"
+        if progress.get("done", 0) + progress.get("failed", 0) < progress["total"]:
+            return "failed", "died"
+        if progress.get("failed"):
+            return "failed", "error"
+        return "finished", "ok"
 
     def _final_progress(self, job_id: str) -> dict | None:
         """Returns the job's last progress snapshot, or None when it never wrote one."""
@@ -857,9 +933,9 @@ class ProcessManager:
         """Walks up the process tree for a pid in the known set.
 
         Args:
-            pid: Pid to start from, itself included in the search.
-            known: Pids to match against.
-            parents: Memoisation cache of pid to parent pid.
+            pid     : Pid to start from, itself included in the search.
+            known   : Pids to match against.
+            parents : Memoisation cache of pid to parent pid.
 
         Returns:
             The matching ancestor pid, or None after reaching init or 16 hops.
@@ -881,8 +957,8 @@ class ProcessManager:
         directory, and only paths under the main directory count.
 
         Args:
-            pid: Pid whose working directory anchors a relative script path.
-            tokens: The process command line, split into arguments.
+            pid    : Pid whose working directory anchors a relative script path.
+            tokens : The process command line, split into arguments.
         """
         for token in tokens[1:]:
             if not token.endswith(".py"):
@@ -916,8 +992,7 @@ class ProcessManager:
         """Recovers the config overrides an adopted process was launched with.
 
         Args:
-            tokens: The process command line; everything after the script path
-                is parsed as --name value pairs, with a bare flag read as "True".
+            tokens : The process command line; everything after the script path is parsed as --name value pairs, with a bare flag read as "True".
         """
         args = []
         for index, token in enumerate(tokens):
@@ -956,8 +1031,8 @@ class ProcessManager:
         on the process's stdout is tailed when there is one.
 
         Args:
-            pid: Pid of the untracked process.
-            info: Candidate record from _orphan_candidates.
+            pid  : Pid of the untracked process.
+            info : Candidate record from _orphan_candidates.
         """
         overrides = self._orphan_overrides(info["tokens"])
         log       = self._pid_log_path(pid)
@@ -968,6 +1043,7 @@ class ProcessManager:
             "description"      : "",
             "interpreter"      : info["interpreter"],
             "overrides"        : overrides,
+            "request"          : {"overrides": self._without_pool_file(overrides), "follow_up": None},
             "detach"           : False,
             "status"           : "running",
             "pid"              : pid,
@@ -1035,53 +1111,80 @@ class ProcessManager:
     def stop(self, job_id: str) -> dict:
         """Cancels a queued or scheduled job, or sends SIGTERM to a running one's group.
 
+        The status is re-checked inside the same lock hold that writes the
+        cancellation, so a queue advance racing the stop cannot leave a job
+        cancelled on paper while its process runs: a record that already turned
+        pending or running is stopped as a running job instead.
+
         Args:
-            job_id: Job to stop.
+            job_id : Job to stop.
 
         Returns:
             Mapping with "ok" True once the job was cancelled or signalled, or
             "ok" False with an "error" when the job is unknown or already ended.
         """
+        pid = None
+
         with self.lock:
             record = self.jobs.get(job_id)
             stream = self.streams.get(job_id)
-        if record is None:
-            return {"ok": False, "error": "unknown job"}
+            status = record["status"] if record is not None else None
 
-        if record["status"] == "queued":
-            with self.lock:
+            if status in ("queued", "scheduled"):
                 record["status"] = "cancelled"
                 if job_id in self.launch_queue:
                     self.launch_queue.remove(job_id)
+            elif status in ("pending", "running"):
+                record["stopped"] = True
+                pid               = record["pid"]
+
+        if record is None:
+            return {"ok": False, "error": "unknown job"}
+
+        if status in ("queued", "scheduled"):
             if stream is not None:
                 stream.publish({"type": "status", "status": "cancelled", "code": None})
                 stream.publish({"type": "end"})
-            self.logger.warning(f"queued job {job_id} cancelled by user")
+            self.logger.warning(f"{status} job {job_id} cancelled by user")
             return {"ok": True}
 
-        if record["status"] == "scheduled":
-            with self.lock:
-                record["status"] = "cancelled"
-            if stream is not None:
-                stream.publish({"type": "status", "status": "cancelled", "code": None})
-                stream.publish({"type": "end"})
-            self.logger.warning(f"scheduled job {job_id} cancelled by user")
-            return {"ok": True}
-
-        if record["status"] != "running":
+        if status not in ("pending", "running"):
             return {"ok": False, "error": "job is not running"}
 
-        with self.lock:
-            self.jobs[job_id]["stopped"] = True
-        self._signal_group(record["pid"], signal.SIGTERM)
+        pid = pid if pid is not None else self._await_pid(job_id)
+        if pid is not None:
+            self._signal_group(pid, signal.SIGTERM)
         self.logger.warning(f"stop requested for job {job_id}")
         return {"ok": True}
+
+    def _await_pid(self, job_id: str) -> int | None:
+        """Waits briefly for a pending job's spawn to record its pid.
+
+        Args:
+            job_id : Job whose record is polled for the spawned pid.
+
+        Returns:
+            The pid once the spawn recorded it, or None when the job left the
+            pending and running states without ever getting one.
+        """
+        deadline = time.monotonic() + 5.0
+
+        while time.monotonic() < deadline:
+            with self.lock:
+                record = self.jobs.get(job_id)
+                if record is None or record["status"] not in ("pending", "running"):
+                    return None
+                if record["pid"] is not None:
+                    return record["pid"]
+            time.sleep(0.05)
+
+        return None
 
     def gpu_pool(self, job_id: str) -> dict:
         """Reads the live GPU pool a job dispatches over.
 
         Args:
-            job_id: Job whose pool file is read.
+            job_id : Job whose pool file is read.
 
         Returns:
             Mapping with "supported" False when the script has no pool, "live"
@@ -1114,7 +1217,7 @@ class ProcessManager:
         """Reads the fan-out progress snapshot a job writes beside its GPU pool.
 
         Args:
-            job_id: Job whose progress file is read.
+            job_id : Job whose progress file is read.
 
         Returns:
             Mapping with "supported" False when the script has no pool, "live"
@@ -1147,8 +1250,8 @@ class ProcessManager:
         """Looks up one unit of a fan-out job in its progress registry.
 
         Args:
-            job_id: Job whose unit registry is read.
-            index: Position of the unit in the registry.
+            job_id : Job whose unit registry is read.
+            index  : Position of the unit in the registry.
 
         Returns:
             Mapping with "ok" True, the "unit" record and its absolute log
@@ -1176,9 +1279,9 @@ class ProcessManager:
         """Returns whether a unit's log is still worth tailing.
 
         Args:
-            job_id: Job the unit belongs to.
-            index: Unit position in the registry.
-            stop: Event the viewer sets to abandon the tail.
+            job_id : Job the unit belongs to.
+            index  : Unit position in the registry.
+            stop   : Event the viewer sets to abandon the tail.
         """
         if stop.is_set():
             return False
@@ -1195,8 +1298,8 @@ class ProcessManager:
         """Opens a live stream over one fan-out unit's log.
 
         Args:
-            job_id: Job the unit belongs to.
-            index: Unit position in the registry.
+            job_id : Job the unit belongs to.
+            index  : Unit position in the registry.
 
         Returns:
             Mapping with "ok" True, the "stream" carrying the unit header and
@@ -1228,11 +1331,11 @@ class ProcessManager:
         """Tails one unit's log, then publishes its final status and closes the stream.
 
         Args:
-            job_id: Job the unit belongs to.
-            index: Unit position in the registry.
-            path: Log file to tail.
-            stream: Stream the output and closing events are published to.
-            stop: Event the viewer sets to end the tail early.
+            job_id : Job the unit belongs to.
+            index  : Unit position in the registry.
+            path   : Log file to tail.
+            stream : Stream the output and closing events are published to.
+            stop   : Event the viewer sets to end the tail early.
         """
         LogTailer(path, stream, partial(self._unit_live, job_id, index, stop)).follow()
 
@@ -1245,8 +1348,8 @@ class ProcessManager:
         """Reads the tail of a job's log file, or of one of its fan-out units.
 
         Args:
-            job_id: Job whose log is read.
-            unit: Unit index to read instead of the job's own log, or None.
+            job_id : Job whose log is read.
+            unit   : Unit index to read instead of the job's own log, or None.
 
         Returns:
             Mapping with "available" True and the flattened "text" of the last
@@ -1292,22 +1395,23 @@ class ProcessManager:
             "text"      : AnsiTranscript().flatten(raw.decode("utf-8", errors="replace")),
         }
 
-    def set_gpus(self, job_id: str, gpus, park: bool = False) -> dict:
-        """Rewrites a running job's live GPU pool, optionally parking it on none.
+    def set_gpus(self, job_id: str, gpus, park: bool = False, preempt=None) -> dict:
+        """Rewrites a running job's live GPU pool, optionally parking it or freeing devices at once.
 
-        Runs already in flight finish on their current device; the new pool only
-        governs what the job dispatches next.
+        Runs already in flight finish on their current device, except on the
+        devices listed in preempt: the scheduler stops those runs within one
+        poll, puts them back at the head of its queue and releases the device.
 
         Args:
-            job_id: Running job whose pool is rewritten.
-            gpus: Requested device indices, validated before being written.
-            park: Whether an empty selection is an intentional park rather than
-                a mistake.
+            job_id  : Running job whose pool is rewritten.
+            gpus    : Requested device indices, validated before being written.
+            park    : Whether an empty selection is an intentional park rather than a mistake.
+            preempt : Devices to free now, disjoint from gpus; None frees nothing.
 
         Returns:
-            Mapping with "ok" True, the written "gpus" and a "parked" flag, or
-            "ok" False with an "error" when the job is unknown, not running,
-            has no pool, or the selection is invalid.
+            Mapping with "ok" True, the written "gpus", the "preempted" devices
+            and a "parked" flag, or "ok" False with an "error" when the job is
+            unknown, not running, has no pool, or the selection is invalid.
         """
         with self.lock:
             record = self.jobs.get(job_id)
@@ -1327,21 +1431,27 @@ class ProcessManager:
             return {"ok": False, "error": "this job has no live GPU pool yet; the pool appears once a fan-out over trials or seeds starts dispatching"}
 
         try:
-            requested = GpuPoolFile.validate({"gpus": gpus})
+            edit = GpuPoolFile.parse({"gpus": gpus, "preempt": [] if preempt is None else preempt})
         except (ValueError, TypeError) as error:
             return {"ok": False, "error": str(error)}
 
-        if not requested and not park:
+        if not edit.gpus and not park:
             return {"ok": False, "error": "select at least one GPU, or confirm parking to hold the experiment"}
 
-        GpuPoolFile(pool, self.logger).write(requested)
+        try:
+            GpuPoolFile(pool, self.logger).write(edit.gpus, edit.preempt)
+        except OSError as exc:
+            return {"ok": False, "error": f"failed to write pool file: {exc}"}
 
-        if requested:
-            self.logger.ok(f"job {job_id} GPU pool set to {requested}")
+        if edit.preempt:
+            self.logger.warning(f"job {job_id} frees GPU {edit.preempt} now — the runs on them stop and restart from the head of the queue")
+
+        if edit.gpus:
+            self.logger.ok(f"job {job_id} GPU pool set to {edit.gpus}")
         else:
-            self.logger.warning(f"job {job_id} parked — no GPUs left in the pool, runs in flight will finish and nothing new starts")
+            self.logger.warning(f"job {job_id} parked — no GPUs left in the pool, nothing new starts until a device is added back")
 
-        return {"ok": True, "gpus": requested, "parked": not requested}
+        return {"ok": True, "gpus": edit.gpus, "parked": not edit.gpus, "preempted": edit.preempt}
 
     def clear_queue(self) -> int:
         """Cancels every queued job and returns how many were dropped."""
@@ -1364,8 +1474,7 @@ class ProcessManager:
         """Clears the queue and terminates every running job, escalating to SIGKILL.
 
         Args:
-            grace: Seconds to wait after SIGTERM before force-killing whatever
-                is still running.
+            grace : Seconds to wait after SIGTERM before force-killing whatever is still running.
 
         Returns:
             Number of jobs that were running when the stop began.
@@ -1415,8 +1524,8 @@ class ProcessManager:
         """Signals a job's whole process group, falling back to the single pid.
 
         Args:
-            pid: Session leader of the job, also used as the group id.
-            sig: Signal to deliver; a process that is already gone is ignored.
+            pid : Session leader of the job, also used as the group id.
+            sig : Signal to deliver; a process that is already gone is ignored.
         """
         try:
             os.killpg(pid, sig)
@@ -1454,8 +1563,8 @@ class ProcessNuke:
     """Emergency stop that kills every process this user owns except the server's own line.
 
     Attributes:
-        logger: Console logger for the signal and kill counts.
-        uid: Effective user id whose processes are targeted.
+        logger : Console logger for the signal and kill counts.
+        uid    : Effective user id whose processes are targeted.
     """
 
     def __init__(self, logger: WebLogger) -> None:
@@ -1477,6 +1586,10 @@ class ProcessNuke:
     def _targets(self, spared: set[int]) -> list[int]:
         """Returns this user's pids minus the spared ones."""
         return [pid for pid in self._user_pids() if pid not in spared]
+
+    def targets(self) -> list[int]:
+        """Returns every pid this user owns except the server's own ancestor line."""
+        return self._targets(self._spared_pids())
 
     def _user_pids(self) -> list[int]:
         """Returns every pid in /proc owned by this user."""
@@ -1511,14 +1624,13 @@ class ProcessNuke:
         """Terminates every process this user owns, escalating to SIGKILL after the grace period.
 
         Args:
-            grace: Seconds to wait after SIGTERM before force-killing survivors.
+            grace : Seconds to wait after SIGTERM before force-killing survivors.
 
         Returns:
             Mapping with "ok" True, the number "signalled" with SIGTERM and the
             number "killed" with SIGKILL.
         """
-        spared  = self._spared_pids()
-        targets = self._targets(spared)
+        targets = self.targets()
 
         if not targets:
             self.logger.muted("nuke requested, no processes to kill")
@@ -1541,41 +1653,58 @@ class ProcessNuke:
 
 
 class ServerDetacher:
-    """Moves the web server off its terminal without restarting it.
+    """Moves the web server off its terminal and login session without restarting it.
 
     The redirection itself must happen on the main thread, so a request thread
     only raises the request flag and waits for the main thread's wait loop to
-    apply it.
+    apply it. Beyond the stream redirection, applying the detach shields the
+    process against termination signals through logging handlers (never SIG_IGN,
+    which children would inherit across exec and become unstoppable) and escapes
+    the logind session by moving the process into its own transient systemd user
+    scope with lingering enabled, so session cleanup on logout cannot reap it.
+    Once shielded, only SIGKILL or the console's shutdown route stop the server.
+    The shutdown route also force-kills every other console serving the same
+    repository root, so keep-alive servers left behind by earlier launches do
+    not accumulate.
 
     Attributes:
-        paths: Project paths supplying the logs directory.
-        logger: Console logger, silenced once the server is detached.
-        log_path: File the server's output continues into after detaching.
-        requested: Set to ask the main thread to detach or to shut down.
-        applied: Set once the redirection has taken effect.
-        stopping: Set to make the wait loop return instead of detaching.
+        paths        : Project paths supplying the logs directory and the served root.
+        logger       : Console logger, silenced once the server is detached.
+        log_path     : File the server's output continues into after detaching.
+        scope        : Transient systemd user scope now holding the process, empty until the escape succeeded.
+        shield_error : Reason the session escape or lingering failed, empty when fully shielded.
+        requested    : Set to ask the main thread to detach or to shut down.
+        applied      : Set once the redirection has taken effect.
+        stopping     : Set to make the wait loop return instead of detaching.
     """
 
-    APPLY_TIMEOUT_S = 5.0
-    LOG_NAME        = "webui_server.log"
+    APPLY_TIMEOUT_S  = 30.0
+    ESCAPE_TIMEOUT_S = 5.0
+    WAKE_S           = 0.25
+    LOG_NAME         = "webui_server.log"
+    SCOPE_PREFIX     = "tomovic-webui"
+    SERVE_SCRIPT     = Path(__file__).resolve().with_name("serve.py")
+    SHIELDED_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGQUIT)
 
     def __init__(self, paths: ProjectPaths, logger: WebLogger) -> None:
         """Resolves the detached log path and creates the coordination events.
 
         Args:
-            paths: Project paths supplying the logs directory.
-            logger: Console logger, disabled once detaching is applied.
+            paths  : Project paths supplying the logs directory.
+            logger : Console logger, disabled once detaching is applied.
         """
-        self.paths     = paths
-        self.logger    = logger
-        self.log_path  = paths.logs_dir / self.LOG_NAME
-        self.requested = threading.Event()
-        self.applied   = threading.Event()
-        self.stopping  = threading.Event()
+        self.paths        = paths
+        self.logger       = logger
+        self.log_path     = paths.logs_dir / self.LOG_NAME
+        self.scope        = ""
+        self.shield_error = ""
+        self.requested    = threading.Event()
+        self.applied      = threading.Event()
+        self.stopping     = threading.Event()
 
     def state(self) -> dict:
-        """Returns whether the server has detached, its pid, and the log it writes to."""
-        return {"detached": self.applied.is_set(), "pid": os.getpid(), "log_path": str(self.log_path)}
+        """Returns the detach flag, pid, log file, holding scope and any shield failure."""
+        return {"detached": self.applied.is_set(), "pid": os.getpid(), "log_path": str(self.log_path), "scope": self.scope, "shield_error": self.shield_error}
 
     def detach(self) -> dict:
         """Asks the main thread to detach the server and waits for it to take effect.
@@ -1590,17 +1719,147 @@ class ServerDetacher:
                 return {"ok": False, "error": "detach was not applied by the main thread"}
         return {"ok": True, **self.state()}
 
+    def sibling_pids(self) -> list[int]:
+        """Returns the pids of every other console server of this user serving the same root.
+
+        A sibling is a process owned by this user whose command line runs the
+        console's serve.py on this server's repository root, given through
+        --root or implied by its absence. Consoles on other roots, such as test
+        servers under temporary roots, are not siblings.
+        """
+        own  = os.getpid()
+        uid  = os.getuid()
+        pids = []
+
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit() or int(entry) == own:
+                continue
+
+            pid = int(entry)
+            try:
+                if os.stat(f"/proc/{pid}").st_uid != uid:
+                    continue
+                argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            except OSError:
+                continue
+
+            if self._served_root(argv) == self.paths.repo_root:
+                pids.append(pid)
+
+        return sorted(pids)
+
+    def _served_root(self, argv: list[bytes]) -> Path | None:
+        """Returns the repository root a console command line serves, or None for any other process.
+
+        Args:
+            argv : Null-split /proc/<pid>/cmdline entries of the candidate process.
+        """
+        parts = [part.decode(errors="replace") for part in argv if part]
+        if not any(part.endswith("serve.py") and Path(part).resolve() == self.SERVE_SCRIPT for part in parts):
+            return None
+
+        for index, part in enumerate(parts):
+            if part == "--root" and index + 1 < len(parts):
+                return Path(parts[index + 1]).resolve()
+            if part.startswith("--root="):
+                return Path(part[len("--root="):]).resolve()
+
+        return self.SERVE_SCRIPT.parent.parent
+
+    def kill_siblings(self) -> list[int]:
+        """Force-kills every other console server on this root and returns the pids that received the signal.
+
+        SIGKILL is the one signal a detached sibling cannot shield, so the
+        siblings get no grace period. Their running jobs are their own session
+        leaders and survive, exactly as they do when this server exits.
+        """
+        killed = []
+
+        for pid in self.sibling_pids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed.append(pid)
+            except ProcessLookupError:
+                continue
+
+        if killed:
+            self.logger.warning(f"kill front end: SIGKILL sent to {len(killed)} other console server(s) on this root, pids {', '.join(map(str, killed))}")
+
+        return killed
+
     def shutdown(self) -> None:
         """Wakes the main thread's wait loop and asks it to return so the server can exit."""
         self.stopping.set()
         self.requested.set()
 
+    def _shield_handler(self, signum: int, frame) -> None:
+        """Logs and discards a termination signal instead of letting it stop the server.
+
+        Args:
+            signum : Number of the delivered signal.
+            frame  : Interrupted stack frame, unused.
+        """
+        self.logger.warning(f"{signal.Signals(signum).name} ignored by the keep-alive shield; stop the server through the console's kill front end button or SIGKILL")
+
+    def _escape_session(self) -> None:
+        """Moves the process into its own transient systemd user scope and enables lingering.
+
+        The scope takes the process out of the logind session cgroup, so the
+        SIGTERM/SIGKILL sweep that session cleanup runs on logout no longer
+        reaches it; lingering keeps the user manager, and with it the scope,
+        alive once the last login session ends. A failure of either step lands
+        in shield_error and is logged, never swallowed.
+        """
+        scope = f"{self.SCOPE_PREFIX}-{os.getpid()}.scope"
+        argv  = ["busctl", "--user", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", "StartTransientUnit", "ssa(sv)a(sa(sv))", scope, "fail", "2", "PIDs", "au", "1", str(os.getpid()), "CollectMode", "s", "inactive-or-failed", "0"]
+
+        try:
+            moved = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.shield_error = f"session escape failed: {exc}"
+            self.logger.error(self.shield_error)
+            return
+        if moved.returncode != 0:
+            self.shield_error = f"session escape failed: {moved.stderr.strip() or moved.stdout.strip() or f'busctl exited {moved.returncode}'}"
+            self.logger.error(self.shield_error)
+            return
+
+        deadline = time.monotonic() + self.ESCAPE_TIMEOUT_S
+        while True:
+            try:
+                cgroup_text = Path("/proc/self/cgroup").read_text()
+            except OSError as exc:
+                self.shield_error = f"failed to read /proc/self/cgroup: {exc}"
+                self.logger.error(self.shield_error)
+                return
+
+            if scope in cgroup_text:
+                break
+            if time.monotonic() > deadline:
+                self.shield_error = f"session escape did not land within {self.ESCAPE_TIMEOUT_S:.0f}s: process still in {cgroup_text.strip()}"
+                self.logger.error(self.shield_error)
+                return
+            time.sleep(0.1)
+
+        self.scope = scope
+
+        try:
+            linger = subprocess.run(["loginctl", "enable-linger"], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.shield_error = f"lingering could not be enabled: {exc}"
+            self.logger.error(self.shield_error)
+            return
+        if linger.returncode != 0:
+            self.shield_error = f"lingering could not be enabled: {linger.stderr.strip() or linger.stdout.strip() or f'loginctl exited {linger.returncode}'}"
+            self.logger.error(self.shield_error)
+
     def _apply(self) -> None:
-        """Redirects the server's standard streams to the log file and ignores SIGHUP."""
+        """Redirects the streams to the log file, shields the termination signals and escapes the login session."""
         self.paths.logs_dir.mkdir(parents=True, exist_ok=True)
         handle = open(self.log_path, "ab", buffering=0)
 
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        for signum in self.SHIELDED_SIGNALS:
+            signal.signal(signum, self._shield_handler)
         os.dup2(handle.fileno(), sys.stdout.fileno())
         os.dup2(handle.fileno(), sys.stderr.fileno())
         handle.close()
@@ -1609,16 +1868,22 @@ class ServerDetacher:
         os.dup2(devnull, sys.stdin.fileno())
         os.close(devnull)
 
+        self._escape_session()
         self.logger.enabled = False
 
     def wait_loop(self) -> None:
         """Parks the main thread until it is asked to detach the server or to shut down.
 
+        The kernel may hand a process-directed signal to any thread, while
+        Python runs signal handlers only on the main thread once it executes
+        bytecode again, so the wait wakes every WAKE_S seconds to run pending
+        shield handlers instead of leaving them queued until the next request.
         Returns once shutdown is requested; running jobs are their own session
         leaders and survive.
         """
         while True:
-            self.requested.wait()
+            if not self.requested.wait(self.WAKE_S):
+                continue
             self.requested.clear()
             if self.stopping.is_set():
                 self.logger.warning(f"front end shutdown requested from the console (pid {os.getpid()}); running jobs are their own session leaders and keep going")
@@ -1626,4 +1891,5 @@ class ServerDetacher:
             if not self.applied.is_set():
                 self._apply()
                 self.applied.set()
-                self.logger.warning(f"server detached from the terminal (pid {os.getpid()}), output continues in {self.log_path}")
+                shield = f"shielded in {self.scope}" if self.scope and not self.shield_error else f"shield incomplete: {self.shield_error}"
+                self.logger.warning(f"server detached from the terminal (pid {os.getpid()}), {shield}, output continues in {self.log_path}")

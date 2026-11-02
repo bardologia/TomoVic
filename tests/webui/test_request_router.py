@@ -23,8 +23,8 @@ from routers.system_router   import SystemRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 62
-SECTION_COUNT = 17
+ROUTE_COUNT   = 76
+SECTION_COUNT = 22
 
 RESOLUTIONS = [
     ("GET",  "/",                                StaticRouter),
@@ -41,13 +41,17 @@ RESOLUTIONS = [
     ("GET",  "/api/cubes/volume",                CubeRouter),
     ("GET",  "/api/slices/slice",                SliceRouter),
     ("POST", "/api/slices/collect",              SliceRouter),
+    ("GET",  "/api/slices/mail_settings",        SliceRouter),
+    ("POST", "/api/slices/mail",                 SliceRouter),
     ("GET",  "/api/repomap",                     ContentLibraryRouter),
     ("GET",  "/api/configs",                     ContentLibraryRouter),
     ("GET",  "/api/project",                     CatalogRouter),
     ("GET",  "/api/scripts/pre_process",         CatalogRouter),
     ("GET",  "/api/scripts/pre_process/config",  CatalogRouter),
     ("POST", "/api/run",                         JobRouter),
-    ("GET",  "/api/jobs/job-1/stream",           JobRouter),
+    ("GET",  "/api/stream",                      JobRouter),
+    ("POST", "/api/stream/ch-1/subscribe",       JobRouter),
+    ("POST", "/api/stream/ch-1/unsubscribe",     JobRouter),
     ("GET",  "/api/jobs/job-1/log",              JobRouter),
     ("POST", "/api/saved-runs/abc/delete",       SavedRunRouter),
     ("GET",  "/api/saved-runs",                  SavedRunRouter),
@@ -55,6 +59,11 @@ RESOLUTIONS = [
     ("GET",  "/api/run-config/runs",             RunConfigRouter),
     ("GET",  "/api/system",                      SystemRouter),
     ("POST", "/api/system/detach",               SystemRouter),
+    ("GET",  "/api/gpu-activity",                SystemRouter),
+    ("GET",  "/api/host-history",                SystemRouter),
+    ("GET",  "/api/server-log",                  SystemRouter),
+    ("POST", "/api/impact/arm",                  SystemRouter),
+    ("POST", "/api/impact/politeness",           SystemRouter),
 ]
 
 
@@ -145,14 +154,14 @@ def build_routers() -> list:
         ResultsRouter(None),
         DatasetRouter(None),
         CubeRouter(None),
-        SliceRouter(None),
+        SliceRouter(None, None),
         ContentLibraryRouter("/api/repomap",   None, "folders"),
         ContentLibraryRouter("/api/configs",   None, "groups"),
         CatalogRouter(None, None, None, None, None),
-        JobRouter(None, None, None),
+        JobRouter(None, None, None, None),
         SavedRunRouter(None, None, None),
         RunConfigRouter(None),
-        SystemRouter(None, None, None, None, None),
+        SystemRouter(None, None, None, None, None, None, None, None),
     ]
 
 

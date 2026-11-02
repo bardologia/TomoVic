@@ -120,13 +120,13 @@ class HttpExchange:
         """Sends a 404 JSON response."""
         self.send_json({"error": "not found"}, 404)
 
-    def send_png(self, png: bytes | None) -> None:
-        """Sends PNG bytes uncached, or 404 when the renderer produced nothing."""
+    def send_png(self, png: bytes | None, headers: dict | None = None) -> None:
+        """Sends PNG bytes uncached with optional extra headers, or 404 when the renderer produced nothing."""
         if png is None:
             self.not_found()
             return
 
-        self.send_payload("image/png", png, "no-cache")
+        self.send_payload("image/png", png, "no-cache", headers)
 
     def send_bytes(self, blob: bytes | None) -> None:
         """Sends a binary blob uncached, or 404 when the producer returned nothing."""
@@ -141,14 +141,16 @@ class HttpExchange:
         data = target.read_bytes()
         self.send_payload(mimetypes.guess_type(str(target))[0] or "application/octet-stream", data, cache)
 
-    def send_payload(self, content_type: str, data: bytes, cache: str) -> None:
-        """Writes a 200 response carrying `data` under the given content type and cache policy."""
+    def send_payload(self, content_type: str, data: bytes, cache: str, headers: dict | None = None) -> None:
+        """Writes a 200 response carrying `data` under the given content type, cache policy and any extra headers."""
         self.status = 200
 
         self.handler.send_response(200)
         self.handler.send_header("Content-Type", content_type)
         self.handler.send_header("Content-Length", str(len(data)))
         self.handler.send_header("Cache-Control", cache)
+        for name, value in (headers or {}).items():
+            self.handler.send_header(name, value)
         self.handler.end_headers()
         self.handler.wfile.write(data)
 

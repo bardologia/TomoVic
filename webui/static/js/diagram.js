@@ -2,14 +2,14 @@
 
 class ModelDiagram {
   static C = {
-    accent: "#1d4fd8",
-    accent2: "#0f766e",
-    boxStroke: "#1d4fd8",
-    boxFill: "rgba(29,79,216,0.06)",
-    ioStroke: "#9aa196",
-    ioFill: "#ffffff",
-    flow: "rgba(125,133,139,0.85)",
-    skip: "rgba(15,118,110,0.55)",
+    accent: "#6f9bff",
+    accent2: "#2dd4bf",
+    boxStroke: "#6f9bff",
+    boxFill: "rgba(111,155,255,0.10)",
+    ioStroke: "#8b9ba8",
+    ioFill: "rgba(16,22,28,0.9)",
+    flow: "rgba(180,193,201,0.85)",
+    skip: "rgba(45,212,191,0.6)",
   };
 
   static render(model) {
@@ -87,15 +87,15 @@ class ModelDiagram {
     const isLat  = variant === "latent";
     const isLoss = variant === "loss";
     const isProc = variant === "proc";
-    const stroke = variant === "io" ? C.ioStroke : isLat ? C.accent : isLoss ? C.accent2 : isProc ? "#9aa196" : C.boxStroke;
-    const fill   = variant === "io" ? C.ioFill   : isLat ? C.accent : isLoss ? "rgba(15,118,110,0.10)" : isProc ? "rgba(125,133,139,0.07)" : C.boxFill;
+    const stroke = variant === "io" ? C.ioStroke : isLat ? C.accent : isLoss ? C.accent2 : isProc ? "#8b9ba8" : C.boxStroke;
+    const fill   = variant === "io" ? C.ioFill   : isLat ? C.accent : isLoss ? "rgba(45,212,191,0.12)" : isProc ? "rgba(180,193,201,0.08)" : C.boxFill;
     const sw     = isLat ? 1.7 : 1.4;
     const cx = x + w / 2;
     const delay = t.toFixed(2);
-    const mainStyle = isLat ? ` style="fill:#ffffff"` : "";
+    const mainStyle = isLat ? ` style="fill:#0b0f13"` : "";
     const subParts = [];
     if (subT != null) subParts.push(`animation-delay:${subT.toFixed(2)}s`);
-    if (isLat) subParts.push("fill:rgba(255,255,255,0.86)");
+    if (isLat) subParts.push("fill:rgba(11,15,19,0.86)");
     const subStyle = subParts.length ? ` style="${subParts.join(";")}"` : "";
     let text;
     if (sub) {

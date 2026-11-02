@@ -678,7 +678,12 @@ class TomogramCloud {
   }
 
   _onCutPos() {
-    this._draw();
+    if (!this._cutRaf) {
+      this._cutRaf = requestAnimationFrame(() => {
+        this._cutRaf = null;
+        this._draw();
+      });
+    }
   }
 
   _onCutSweep() {
@@ -817,7 +822,12 @@ class TomogramCloud {
     this.yaw += (ev.clientX - this.dragging.x) * 0.008;
     this.pitch = Math.min(1.55, Math.max(0.05, this.pitch + (ev.clientY - this.dragging.y) * 0.006));
     this.dragging = { x: ev.clientX, y: ev.clientY };
-    this._draw();
+    if (!this._dragRaf) {
+      this._dragRaf = requestAnimationFrame(() => {
+        this._dragRaf = null;
+        this._draw();
+      });
+    }
   }
 
   _onWheel(ev) {
@@ -1190,6 +1200,406 @@ class TomogramPasses {
   }
 }
 
+class TomogramPauli {
+  static MODE_LABELS = { rgb: "Pauli composite", surface: "surface power", double: "double-bounce power", volume: "volume power", dominant: "dominant mechanism" };
+  static HINT = "Hover the map to read the mechanism balance under the cursor; click to lock a pixel.";
+  static ASPECTS = ["px", "slant", "ground"];
+  static ASPECT_KEY = "cube-pauli-aspect";
+
+  constructor(refs, host) {
+    this.host = host;
+    this.modeEl = refs.mode;
+    this.stretchEl = refs.stretch;
+    this.winAz = refs.winAz;
+    this.winRg = refs.winRg;
+    this.aspectEl = refs.aspect;
+    this.atEl = refs.at;
+    this.media = refs.media;
+    this.canvas = refs.canvas;
+    this.cross = refs.cross;
+    this.cbar = refs.cbar;
+    this.minEl = refs.min;
+    this.maxEl = refs.max;
+    this.classesEl = refs.classes;
+    this.noteEl = refs.note;
+    this.summaryEl = refs.summary;
+    this.coordsEl = refs.coords;
+    this.readoutEl = refs.readout;
+    this.downloadBtn = refs.download;
+
+    this.meta = null;
+    this.mode = "rgb";
+    this.stretch = "channel";
+    this.aspect = "px";
+    this.win = null;
+    this.summary = null;
+    this.picked = null;
+    this.adopted = -1;
+    this.token = 0;
+    this.hoverQueued = null;
+    this.hoverFetching = false;
+
+    this.modeEl.querySelectorAll(".cube-space").forEach((btn) => btn.addEventListener("click", () => this._setMode(btn.dataset.mode)));
+    this.stretchEl.querySelectorAll(".cube-space").forEach((btn) => btn.addEventListener("click", () => this._setStretch(btn.dataset.stretch)));
+    this.aspectEl.querySelectorAll(".cube-space").forEach((btn) => btn.addEventListener("click", () => this._setAspect(btn.dataset.aspect)));
+    this.winAz.addEventListener("change", () => this.render());
+    this.winRg.addEventListener("change", () => this.render());
+    this.media.addEventListener("mousemove", (ev) => this._onHover(ev));
+    this.media.addEventListener("mouseleave", () => this._onLeave());
+    this.media.addEventListener("click", (ev) => this._onClick(ev));
+    this.downloadBtn.addEventListener("click", () => this._download());
+  }
+
+  get available() {
+    return !!this.meta;
+  }
+
+  configure(meta) {
+    this.meta = meta.pauli || null;
+    this.mode = "rgb";
+    this.stretch = "channel";
+    this.win = null;
+    this.summary = null;
+    this.picked = null;
+    this.adopted = -1;
+    this.cross.hidden = true;
+    this.readoutEl.innerHTML = "";
+    this.summaryEl.innerHTML = "";
+    this.noteEl.textContent = "";
+    this.coordsEl.textContent = TomogramPauli.HINT;
+    if (!this.meta) return;
+
+    this.winAz.max = this.meta.window_max;
+    this.winRg.max = this.meta.window_max;
+    this.winAz.value = this.meta.window[0];
+    this.winRg.value = this.meta.window[1];
+    this.win = { az: this.meta.window[0], rg: this.meta.window[1] };
+
+    const offered = this._aspects();
+    let stored = null;
+    try { stored = localStorage.getItem(TomogramPauli.ASPECT_KEY); } catch (e) { stored = null; }
+    this.aspect = offered.includes(stored) ? stored : offered[offered.length - 1];
+    this.aspectEl.querySelectorAll(".cube-space").forEach((btn) => { btn.hidden = !offered.includes(btn.dataset.aspect); });
+    this._applyAspect();
+  }
+
+  _aspects() {
+    const spacing = this.host.meta.spacing;
+    const offered = ["px"];
+    if (spacing) offered.push("slant");
+    if (spacing && spacing.ground_rg) offered.push("ground");
+    return offered;
+  }
+
+  _setAspect(aspect) {
+    if (aspect === this.aspect || !this._aspects().includes(aspect)) return;
+    this.aspect = aspect;
+    try { localStorage.setItem(TomogramPauli.ASPECT_KEY, aspect); } catch (e) { return; }
+    this._syncBtns();
+    this._applyAspect();
+    this._syncAt();
+  }
+
+  _rangeSpacing() {
+    const spacing = this.host.meta.spacing;
+    if (!spacing || this.aspect === "px") return null;
+    return this.aspect === "ground" ? spacing.ground_rg : spacing.rg;
+  }
+
+  _applyAspect() {
+    const rg = this._rangeSpacing();
+    const meta = this.host.meta;
+    this.canvas.style.aspectRatio = rg ? `${meta.n_rg * rg} / ${meta.n_az * meta.spacing.az}` : "";
+  }
+
+  _syncAt() {
+    if (!this.meta || !this.win) return;
+    const meta = this.host.meta;
+    const rg = this._rangeSpacing();
+    let extent = " · pixel grid";
+    if (rg && this.aspect === "slant") extent = ` · ${Math.round(meta.n_az * meta.spacing.az)} m az × ${Math.round(meta.n_rg * rg)} m slant rg`;
+    if (rg && this.aspect === "ground") extent = ` · ${Math.round(meta.n_az * meta.spacing.az)} m az × ${Math.round(meta.n_rg * rg)} m ground rg · incidence ${meta.spacing.incidence_deg.toFixed(0)}°`;
+    this.atEl.textContent = `${TomogramPauli.MODE_LABELS[this.mode]} · window ${this.win.az} × ${this.win.rg} px${extent}`;
+  }
+
+  applyState(state) {
+    if (!this.meta) return;
+    let changed = false;
+
+    if (state.pwin) {
+      const [az, rg] = state.pwin.split("x").map(Number);
+      if (Number.isFinite(az) && Number.isFinite(rg)) {
+        this.winAz.value = az;
+        this.winRg.value = rg;
+        changed = true;
+      }
+    }
+    if (this.meta.modes.includes(state.pmode) && state.pmode !== this.mode) {
+      this.mode = state.pmode;
+      changed = true;
+    }
+    if (["channel", "shared"].includes(state.pstretch) && state.pstretch !== this.stretch) {
+      this.stretch = state.pstretch;
+      changed = true;
+    }
+
+    if (changed && this.host.view === "pauli") this.render();
+  }
+
+  render() {
+    if (!this.meta) return;
+    this._syncBtns();
+    this._fetch();
+  }
+
+  leave() {
+    this.hoverQueued = null;
+  }
+
+  _setMode(mode) {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.render();
+  }
+
+  _setStretch(stretch) {
+    if (stretch === this.stretch) return;
+    this.stretch = stretch;
+    this.render();
+  }
+
+  _syncBtns() {
+    this.modeEl.querySelectorAll(".cube-space").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.mode === this.mode));
+    this.stretchEl.querySelectorAll(".cube-space").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.stretch === this.stretch));
+    this.aspectEl.querySelectorAll(".cube-space").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.aspect === this.aspect));
+    this.stretchEl.hidden = this.mode === "dominant";
+  }
+
+  _window() {
+    const clamp = (el) => Math.min(this.meta.window_max, Math.max(1, Math.floor(Number(el.value)) || 1));
+    return { az: clamp(this.winAz), rg: clamp(this.winRg) };
+  }
+
+  _query(win) {
+    return `id=${encodeURIComponent(this.host.selectedId)}&win_az=${win.az}&win_rg=${win.rg}&stretch=${this.stretch}`;
+  }
+
+  _url(win) {
+    return `/api/cubes/pauli_map?${this._query(win)}&mode=${this.mode}`;
+  }
+
+  async _fetch() {
+    this.token += 1;
+    const token = this.token;
+    const win = this._window();
+    this.winAz.value = win.az;
+    this.winRg.value = win.rg;
+    this.atEl.textContent = `${TomogramPauli.MODE_LABELS[this.mode]} · window ${win.az} × ${win.rg} px`;
+
+    const [summary, bitmap] = await Promise.all([
+      Api.get(`/api/cubes/pauli_summary?${this._query(win)}`),
+      this.host.cacheBitmap(this._url(win)),
+    ]);
+    if (token !== this.token || !bitmap) return;
+
+    this.win = win;
+    this.summary = summary && summary.ok ? summary : null;
+    if (this.canvas.width !== bitmap.width || this.canvas.height !== bitmap.height) {
+      this.canvas.width = bitmap.width;
+      this.canvas.height = bitmap.height;
+    }
+    this.canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    this._applyAspect();
+    this._syncAt();
+
+    this._legend();
+    this._summaryTable();
+    this._adoptFocus();
+  }
+
+  _swatches(keys, range = () => "") {
+    return keys.map((key) => {
+      const component = this.meta.components.find((item) => item.key === key);
+      return `<span class="cube-cat"><i style="background:${component.color}"></i>${SharedCharts.esc(component.label)}${range(key)}</span>`;
+    }).join("");
+  }
+
+  _legend() {
+    const single = this.mode !== "rgb" && this.mode !== "dominant";
+    this.cbar.hidden = !single;
+    this.minEl.hidden = !single;
+    this.maxEl.hidden = !single;
+    this.classesEl.hidden = single;
+
+    if (single) {
+      this.cbar.src = "/api/cubes/cbar?cmap=viridis";
+      const bounds = this.summary ? this.summary.bounds[this.mode] : null;
+      this.minEl.textContent = bounds ? `${bounds[0].toFixed(1)} dB` : "";
+      this.maxEl.textContent = bounds ? `${bounds[1].toFixed(1)} dB` : "";
+      this.classesEl.innerHTML = "";
+      return;
+    }
+
+    const order = this.mode === "rgb" ? ["double", "volume", "surface"] : ["surface", "double", "volume"];
+    const prefix = this.mode === "rgb" ? `<span class="cube-cat">red · green · blue =</span>` : "";
+    const bounds = this.mode === "rgb" && this.summary ? this.summary.bounds : null;
+    const shared = !!bounds && this.stretch === "shared";
+    const span = (key) => ` ${bounds[key][0].toFixed(1)} to ${bounds[key][1].toFixed(1)} dB`;
+    const range = bounds && !shared ? span : () => "";
+    const scale = shared ? `<span class="cube-cat">one scale${span("surface")}</span>` : "";
+    this.classesEl.innerHTML = prefix + this._swatches(order, range) + scale;
+  }
+
+  _summaryTable() {
+    if (!this.summary) {
+      this.summaryEl.innerHTML = "";
+      this.noteEl.textContent = "";
+      return;
+    }
+
+    const pct = (value) => `${(100 * value).toFixed(1)}%`;
+    let html = `<table class="cube-metrics cube-metrics--params"><thead><tr><th scope="col">mechanism</th><th scope="col" title="Share of the scene's summed span this mechanism carries: its power summed over every pixel holding data, divided by the summed span; independent of the multilook window">span share</th><th scope="col" title="Share of the pixels holding data where this mechanism has the largest multilooked power">dominant</th></tr></thead><tbody>`;
+    this.meta.components.forEach((component) => {
+      html += `<tr><th scope="row">${SharedCharts.esc(component.label)}</th><td>${pct(this.summary.scene_share[component.key])}</td><td>${pct(this.summary.dominant_share[component.key])}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    this.summaryEl.innerHTML = html;
+    const scale = this.stretch === "shared" ? "one dB scale for all components" : "each component on its own dB scale";
+    const nodata = this.summary.n_nodata > 0 ? ` · ${this.summary.n_nodata.toLocaleString()} no-data pixels left out` : "";
+    const ratios = `span ${this.summary.span_db.toFixed(1)} dB · HH/VV ${this.summary.hh_vv_db.toFixed(1)} dB · HV/HH ${this.summary.hv_hh_db.toFixed(1)} dB`;
+    this.noteEl.textContent = `${this.summary.n_pixels.toLocaleString()} pixels · multilook ${this.summary.window[0]} × ${this.summary.window[1]} px · ${scale} · scene means ${ratios}${nodata} · span share = summed power / summed span · dominant = share of pixels won`;
+  }
+
+  _pointFromEvent(ev) {
+    const rect = this.canvas.getBoundingClientRect();
+    const fx = (ev.clientX - rect.left) / rect.width;
+    const fy = (ev.clientY - rect.top) / rect.height;
+    return {
+      az: Math.min(this.host.meta.n_az - 1, Math.max(0, Math.floor(fy * this.host.meta.n_az))),
+      rg: Math.min(this.host.meta.n_rg - 1, Math.max(0, Math.floor(fx * this.host.meta.n_rg))),
+      fx,
+      fy,
+    };
+  }
+
+  _onHover(ev) {
+    if (!this.meta || !this.host.meta || this.picked) return;
+    this.hoverQueued = this._pointFromEvent(ev);
+    this._hoverPump();
+  }
+
+  _onLeave() {
+    if (this.picked) return;
+    this.hoverQueued = null;
+    this.coordsEl.textContent = TomogramPauli.HINT;
+  }
+
+  async _hoverPump() {
+    if (this.hoverFetching) return;
+    this.hoverFetching = true;
+
+    while (this.hoverQueued) {
+      const { az, rg } = this.hoverQueued;
+      this.hoverQueued = null;
+      const data = await this._valueAt(az, rg);
+      if (data && !this.picked) this.coordsEl.textContent = `az = ${data.az} · rg = ${data.rg} · ${this._balance(data)}`;
+    }
+
+    this.hoverFetching = false;
+  }
+
+  _valueAt(az, rg) {
+    return Api.get(`/api/cubes/pauli_at?${this._query(this.win)}&az=${az}&rg=${rg}`).then((data) => (data && data.ok ? data : null));
+  }
+
+  _balance(data) {
+    if (!data.valid) return "no data under this window";
+    const parts = this.meta.components.map((component) => `${component.key} ${(100 * data.fractions[component.key]).toFixed(0)}%`);
+    return `span share ${parts.join(" · ")} · dominant ${data.dominant}`;
+  }
+
+  _onClick(ev) {
+    if (!this.meta || !this.host.meta) return;
+
+    if (this.picked) {
+      this.picked = null;
+      this.cross.hidden = true;
+      this.readoutEl.innerHTML = "";
+      this.coordsEl.textContent = TomogramPauli.HINT;
+      return;
+    }
+
+    const point = this._pointFromEvent(ev);
+    this.host.setFocus(point.az, point.rg);
+    this.adopted = this.host.focusSeq;
+    this._lock(point);
+  }
+
+  _lock(point) {
+    this.picked = point;
+    this.cross.hidden = false;
+    this.cross.style.left = `${point.fx * 100}%`;
+    this.cross.style.top = `${point.fy * 100}%`;
+    this.coordsEl.textContent = `locked at az = ${point.az} · rg = ${point.rg} · click again to unlock`;
+    this._fetchReadout(point.az, point.rg);
+  }
+
+  _adoptFocus() {
+    if (this.host.focusSeq === this.adopted) {
+      if (this.picked) this._fetchReadout(this.picked.az, this.picked.rg);
+      return;
+    }
+
+    const point = this.host.focusPoint();
+    if (!point) return;
+    this.adopted = this.host.focusSeq;
+    this._lock(point);
+  }
+
+  async _fetchReadout(az, rg) {
+    const data = await this._valueAt(az, rg);
+    if (!data || !this.picked || this.picked.az !== az || this.picked.rg !== rg) return;
+
+    if (!data.valid) {
+      this.readoutEl.innerHTML = `<p class="cube-hint">no data under this window</p>`;
+      return;
+    }
+
+    let html = `<table class="cube-metrics cube-metrics--params"><thead><tr><th scope="col">mechanism</th><th scope="col" title="Multilooked power of the Pauli component">power</th><th scope="col" title="Share of this pixel's span the component carries">span share</th></tr></thead><tbody>`;
+    this.meta.components.forEach((component) => {
+      const dominant = component.key === data.dominant;
+      html += `<tr${dominant ? ' class="is-dominant"' : ""}><th scope="row">${SharedCharts.esc(component.label)}</th><td>${data.db[component.key].toFixed(1)} dB</td><td>${(100 * data.fractions[component.key]).toFixed(1)}%</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    const ratios = [
+      ["span", "Total power |HH|² + 2|HV|² + |VV|²", data.span_db],
+      ["HH/VV", "Co-polar ratio of the multilooked powers", data.hh_vv_db],
+      ["HV/HH", "Cross-polar ratio of the multilooked powers", data.hv_hh_db],
+    ];
+    html += `<table class="cube-metrics cube-metrics--params"><thead><tr><th scope="col">channel</th><th scope="col">dB</th></tr></thead><tbody>`;
+    ratios.forEach(([label, title, value]) => {
+      html += `<tr><th scope="row" title="${title}">${label}</th><td>${value.toFixed(1)} dB</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    this.readoutEl.innerHTML = html;
+  }
+
+  async _download() {
+    if (!this.meta || !this.host.selectedId) return;
+    const win = this.win;
+    const res = await fetch(this._url(win));
+    if (!res.ok) {
+      Toast.show("Pauli map download failed.", "warn");
+      return;
+    }
+    const scale = this.mode === "dominant" ? "" : `_${this.stretch}`;
+    FigureExport.download(`${this.host.fileTag()}_pauli_${this.mode}_w${win.az}x${win.rg}${scale}.png`, await res.blob());
+  }
+}
+
 class TomogramFigures {
   constructor(refs, host) {
     this.host = host;
@@ -1199,7 +1609,7 @@ class TomogramFigures {
 
   configure() {
     this.loadedFor = null;
-    this.root.innerHTML = `<p class="cube-hint">Loading figures…</p>`;
+    this.root.innerHTML = ThinkingOrb.panel("composing", "Loading figures…");
   }
 
   async render() {
@@ -1254,6 +1664,7 @@ class TomogramView {
     this.strip = refs.strip;
     this.pickEl = refs.strip ? refs.strip.closest(".cube-pick") : null;
     this.stage = refs.stage;
+    this.page = refs.stage.closest(".page");
     this.deck = refs.deck;
     this.topdown = refs.topdown;
     this.cross = refs.cross;
@@ -1299,6 +1710,9 @@ class TomogramView {
     this.point = null;
     this.mode = "map";
     this.locked = null;
+    this.focus = null;
+    this.focusSeq = 0;
+    this.cutsAdopted = 0;
     this.holdTimer = null;
     this.holdHintTimer = null;
     this.holdHintOn = false;
@@ -1330,6 +1744,7 @@ class TomogramView {
     this.globe = refs.globe ? new TomogramGlobe(refs.globe, this) : null;
     this.figures = refs.figures && refs.figures.root ? new TomogramFigures(refs.figures, this) : null;
     this.passes = refs.passes && refs.passes.canvas ? new TomogramPasses(refs.passes, this) : null;
+    this.pauli = refs.pauli && refs.pauli.canvas ? new TomogramPauli(refs.pauli, this) : null;
     this.volume = refs.volume && refs.volume.canvas && window.TomogramVolume ? new window.TomogramVolume(refs.volume, this) : null;
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
@@ -1484,6 +1899,7 @@ class TomogramView {
     if (this.cloud) this.cloud.leave();
     if (this.globe) this.globe.leave();
     if (this.passes) this.passes.leave();
+    if (this.pauli) this.pauli.leave();
   }
 
   async enter(param = null) {
@@ -1507,14 +1923,17 @@ class TomogramView {
       const query = new URLSearchParams(decodeURIComponent(param));
       if (!query.get("id")) return null;
       return {
-        id     : query.get("id"),
-        view   : query.get("view"),
-        az     : query.has("az") ? Number(query.get("az")) : null,
-        rg     : query.has("rg") ? Number(query.get("rg")) : null,
-        source : query.get("source"),
-        tag    : query.get("tag") ?? "",
-        space  : query.get("space"),
-        cmap   : query.get("cmap"),
+        id       : query.get("id"),
+        view     : query.get("view"),
+        az       : query.has("az") ? Number(query.get("az")) : null,
+        rg       : query.has("rg") ? Number(query.get("rg")) : null,
+        source   : query.get("source"),
+        tag      : query.get("tag") ?? "",
+        space    : query.get("space"),
+        cmap     : query.get("cmap"),
+        pmode    : query.get("pmode"),
+        pstretch : query.get("pstretch"),
+        pwin     : query.get("pwin"),
       };
     } catch (e) {
       return null;
@@ -1534,6 +1953,11 @@ class TomogramView {
     if (point) {
       query.set("az", String(point.az));
       query.set("rg", String(point.rg));
+    }
+    if (this.view === "pauli" && this.pauli && this.pauli.available) {
+      query.set("pmode", this.pauli.mode);
+      query.set("pstretch", this.pauli.stretch);
+      query.set("pwin", `${this.pauli.win.az}x${this.pauli.win.rg}`);
     }
 
     return encodeURIComponent(query.toString());
@@ -1592,7 +2016,12 @@ class TomogramView {
       this._enterSlices(point);
     }
 
-    if (state.view) this._setView(state.view);
+    if (this.pauli) this.pauli.applyState(state);
+    if (state.view) {
+      const btn = this.modeBtns.find((candidate) => candidate.dataset.view === state.view);
+      if (btn && !btn.hidden) this._setView(state.view);
+      else if (btn) Toast.show(`This cube has no ${btn.textContent.trim()} view; the link opened without it.`, "warn");
+    }
   }
 
   _copyLink() {
@@ -1784,8 +2213,7 @@ class TomogramView {
 
   async refresh() {
     this.hint.hidden = false;
-    this.hint.textContent = "Loading saved cubes…";
-    this.hint.classList.add("is-loading");
+    this.hint.innerHTML = ThinkingOrb.busy("searching", "Loading saved cubes…");
 
     const data = await Api.get(`/api/cubes?base=${encodeURIComponent(ResultsSources.runs())}`);
 
@@ -1802,7 +2230,7 @@ class TomogramView {
     if (!this.cubes.length) {
       this.hint.textContent = data.error || "No saved cubes found under the runs directory.";
       this.hint.hidden = false;
-      this.stage.hidden = true;
+      this._showStage(false);
       return;
     }
 
@@ -1833,6 +2261,8 @@ class TomogramView {
     this.meta = null;
     this.point = null;
     this.locked = null;
+    this.focus = null;
+    this.cutsAdopted = this.focusSeq;
     this.mode = "map";
     this.panels.forEach((panel) => {
       this._releasePanel(panel);
@@ -1852,7 +2282,7 @@ class TomogramView {
     this.profAt.textContent = "Hover a slice to read the profiles at that position.";
     if (this.atLabels.range)   this.atLabels.range.textContent   = "";
     if (this.atLabels.azimuth) this.atLabels.azimuth.textContent = "";
-    this.stage.hidden = true;
+    this._showStage(false);
     this.slicesEl.hidden = true;
     this.slicesEl.classList.remove("is-in");
     this.hint.hidden = true;
@@ -2005,7 +2435,7 @@ class TomogramView {
     this._applyVisibility();
 
     this.hint.hidden = true;
-    this.stage.hidden = false;
+    this._showStage(true);
     this.mapWrap.classList.add("is-loading");
     this.topdown.src = `/api/cubes/primary?id=${encodeURIComponent(this.selectedId)}`;
 
@@ -2042,6 +2472,14 @@ class TomogramView {
       if (passesBtn) passesBtn.hidden = !this.passes.available;
       if (!this.passes.available && this.view === "passes") this._setView("explorer");
       else if (this.view === "passes") this.passes.render();
+    }
+
+    if (this.pauli) {
+      this.pauli.configure(meta);
+      const pauliBtn = this.modeBtns.find((btn) => btn.dataset.view === "pauli");
+      if (pauliBtn) pauliBtn.hidden = !this.pauli.available;
+      if (!this.pauli.available && this.view === "pauli") this._setView("explorer");
+      else if (this.view === "pauli") this.pauli.render();
     }
 
     if (this.figures) {
@@ -2119,7 +2557,7 @@ class TomogramView {
   }
 
   _setView(view) {
-    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "volume", "globe", "figures", "passes"].includes(view) || view === this.view) return;
+    if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "volume", "globe", "figures", "passes", "pauli"].includes(view) || view === this.view) return;
 
     this._stopSweeps();
     this.view = view;
@@ -2153,6 +2591,17 @@ class TomogramView {
       this.passes.render();
       return;
     }
+    if (view === "pauli" && this.pauli && this.meta) {
+      this.pauli.render();
+      return;
+    }
+
+    if (view === "explorer" && this.meta && this.focus && this.cutsAdopted !== this.focusSeq) {
+      const point = this.focusPoint();
+      this._follow(point, true);
+      this._enterSlices(point);
+      return;
+    }
 
     const sweep = this._sweepFor(view);
     if (sweep && this.meta) sweep.play();
@@ -2168,6 +2617,20 @@ class TomogramView {
     const collapsed = this.view === "globe";
     if (this.pickEl) this.pickEl.hidden = collapsed;
     this.stage.classList.toggle("is-globe", collapsed);
+    this._syncStageChrome();
+  }
+
+  _showStage(shown) {
+    this.stage.hidden = !shown;
+    this._syncStageChrome();
+  }
+
+  _syncStageChrome() {
+    const staged = !this.stage.hidden;
+    const globe  = staged && this.stage.classList.contains("is-globe");
+    this.page.classList.toggle("is-staged", staged);
+    this.page.classList.toggle("is-globe-stage", globe);
+    document.body.classList.toggle("is-globe-stage", globe);
   }
 
   _sweepFor(view) {
@@ -2382,7 +2845,7 @@ class TomogramView {
     this.holdHintOn = true;
 
     const { az, rg } = this.point;
-    this.coords.textContent = `saving slice figures at az = ${az} · rg = ${rg}…`;
+    this.coords.innerHTML = ThinkingOrb.busy("composing", `saving slice figures at az = ${az} · rg = ${rg}…`);
 
     await this._saveSlices(az, rg);
 
@@ -2443,9 +2906,23 @@ class TomogramView {
     if (this.jumpRgRange) this.jumpRgRange.textContent = `0–${this.meta.n_rg - 1}`;
   }
 
+  setFocus(az, rg) {
+    this.focus = { az, rg };
+    this.focusSeq += 1;
+  }
+
+  focusPoint() {
+    if (!this.focus || !this.meta) return null;
+    const az = Math.max(0, Math.min(this.meta.n_az - 1, this.focus.az));
+    const rg = Math.max(0, Math.min(this.meta.n_rg - 1, this.focus.rg));
+    return { az, rg, fx: (rg + 0.5) / this.meta.n_rg, fy: (az + 0.5) / this.meta.n_az };
+  }
+
   _enterSlices(point) {
     this.mode = "slices";
     this.locked = { az: point.az, rg: point.rg };
+    this.setFocus(point.az, point.rg);
+    this.cutsAdopted = this.focusSeq;
     this.deck.dataset.mode = "slices";
     this.back.hidden = false;
     this.slicesAt.textContent = `locked at az = ${point.az} · rg = ${point.rg} · hover a slice for profiles · Esc to go back`;
@@ -2727,7 +3204,7 @@ class TomogramView {
     const xAt = (value) => padL + (value / vMax) * innerW * 0.96;
     const yAt = (height) => padT + (1 - (height - hMin) / span) * innerH;
 
-    ctx.strokeStyle = "rgba(20, 25, 30, 0.07)";
+    ctx.strokeStyle = "rgba(220, 235, 245, 0.1)";
     ctx.lineWidth = 1;
     for (let i = 1; i <= 3; i++) {
       const x = padL + (innerW * i) / 4;
@@ -2774,8 +3251,8 @@ class TomogramView {
       ctx.fillText(`peak ${this._fmt(values[peak])} @ ${this._fmt(heights[peak])}`, w - 4, padT - 5 + order * 11);
     });
 
-    ctx.fillStyle = "rgba(20, 25, 30, 0.55)";
-    ctx.font = "9.5px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "rgba(220, 235, 245, 0.86)";
+    ctx.font = "600 9.5px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";
     ctx.fillText(this._fmt(hMax), padL + 2, padT - 5);
     ctx.fillText(this._fmt(hMin), padL + 2, h - padB - 3);

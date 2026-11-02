@@ -58,15 +58,12 @@ class App {
   }
 
   _initScenes() {
+    const orb   = document.getElementById("backdrop-orb");
     const radar = document.getElementById("radar");
-    const server = document.getElementById("server-anim");
 
+    if (orb) this.scenes.push(new window.BackdropOrb(orb));
     if (radar) this.scenes.push(new window.TomoScene(radar));
-
-    if (server) {
-      window.serverScene = new window.ServerScene(server);
-      this.scenes.push(window.serverScene);
-    }
+    for (const mast of document.querySelectorAll(".mast--flanked")) this.scenes.push(new window.MastFigures(mast));
   }
 
   async _loadProject() {
@@ -104,6 +101,7 @@ class App {
     const text = document.getElementById("status-text");
     wrap.classList.toggle("is-ok", ok);
     wrap.classList.toggle("is-down", !ok);
+    wrap.querySelector("thinking-orb").setAttribute("state", ok ? "listening" : "connecting");
     text.textContent = ok ? "backend live" : "offline";
   }
 
@@ -135,6 +133,7 @@ class App {
     window.scriptPanel = this.scriptPanel;
 
     this.launchView = new window.LaunchView(this.runConsole, this.project || {});
+    this.runConsole.launchView = this.launchView;
 
     this.savedRunsView = new window.SavedRunsView(this.runConsole, document.getElementById("saved-grid"));
 
@@ -163,12 +162,10 @@ class App {
       hint          : document.getElementById("cube-hint"),
       slices        : document.getElementById("cube-slices"),
       slicesAt      : document.getElementById("cube-slices-at"),
-      sources       : document.getElementById("cube-sources"),
       profiles      : document.getElementById("cube-profiles"),
       profAt        : document.getElementById("cube-prof-at"),
       profMixWrap   : document.getElementById("cube-prof-mix-wrap"),
       profMix       : document.getElementById("cube-prof-mix"),
-      profMetrics   : document.getElementById("cube-prof-metrics"),
       progress      : document.getElementById("cube-progress"),
       progressFill  : document.getElementById("cube-progress-fill"),
       progressLabel : document.getElementById("cube-progress-label"),
@@ -202,7 +199,6 @@ class App {
         })),
       },
       cloud         : {
-        source    : document.getElementById("cube-cloud-source"),
         color     : document.getElementById("cube-cloud-color"),
         thr       : document.getElementById("cube-cloud-thr"),
         thrLabel  : document.getElementById("cube-cloud-thr-label"),
@@ -229,7 +225,6 @@ class App {
         canvas   : document.getElementById("cube-volume-canvas"),
       },
       globe         : {
-        source    : document.getElementById("cube-globe-source"),
         color     : document.getElementById("cube-globe-color"),
         thr       : document.getElementById("cube-globe-thr"),
         thrLabel  : document.getElementById("cube-globe-thr-label"),
@@ -242,6 +237,11 @@ class App {
         lift      : document.getElementById("cube-globe-lift"),
         clamp     : document.getElementById("cube-globe-clamp"),
         points    : document.getElementById("cube-globe-points"),
+        metric      : document.getElementById("cube-globe-metric"),
+        metricLayer : document.getElementById("cube-globe-metric-layer"),
+        pauliStretch : document.getElementById("cube-globe-pauli-stretch"),
+        pauliCmap    : document.getElementById("cube-globe-pauli-cmap"),
+        pauliPoints  : document.getElementById("cube-globe-pauli-points"),
         tracks    : document.getElementById("cube-globe-tracks"),
         fly       : document.getElementById("cube-globe-fly"),
         reframe   : document.getElementById("cube-globe-reframe"),
@@ -268,6 +268,26 @@ class App {
         cbar   : document.getElementById("cube-pass-cbar"),
         min    : document.getElementById("cube-pass-min"),
         max    : document.getElementById("cube-pass-max"),
+      },
+      pauli         : {
+        mode     : document.getElementById("cube-pauli-mode"),
+        stretch  : document.getElementById("cube-pauli-stretch"),
+        winAz    : document.getElementById("cube-pauli-win-az"),
+        winRg    : document.getElementById("cube-pauli-win-rg"),
+        aspect   : document.getElementById("cube-pauli-aspect"),
+        download : document.getElementById("cube-pauli-download"),
+        at       : document.getElementById("cube-pauli-at"),
+        media    : document.getElementById("cube-pauli-media"),
+        canvas   : document.getElementById("cube-pauli-canvas"),
+        cross    : document.getElementById("cube-pauli-cross"),
+        cbar     : document.getElementById("cube-pauli-cbar"),
+        min      : document.getElementById("cube-pauli-min"),
+        max      : document.getElementById("cube-pauli-max"),
+        classes  : document.getElementById("cube-pauli-classes"),
+        note     : document.getElementById("cube-pauli-note"),
+        summary  : document.getElementById("cube-pauli-summary"),
+        coords   : document.getElementById("cube-pauli-coords"),
+        readout  : document.getElementById("cube-pauli-readout"),
       },
       linkBtn       : document.getElementById("cube-link"),
       story         : {
@@ -334,8 +354,6 @@ class App {
       azRange     : document.getElementById("sc-az-range"),
       rgRange     : document.getElementById("sc-rg-range"),
       addBtn      : document.getElementById("sc-add"),
-      clearBtn    : document.getElementById("sc-clear"),
-      points      : document.getElementById("sc-points"),
       axesWrap    : document.getElementById("sc-axes"),
       sourcesWrap : document.getElementById("sc-sources"),
       spaceWrap   : document.getElementById("sc-space"),
@@ -345,6 +363,20 @@ class App {
       collectBtn  : document.getElementById("sc-collect"),
       msg         : document.getElementById("sc-msg"),
       rows        : document.getElementById("sc-rows"),
+      mapRunSel   : document.getElementById("sc-map-run"),
+      mapWrap     : document.getElementById("sc-map-wrap"),
+      mapImg      : document.getElementById("sc-map-img"),
+      cross       : document.getElementById("sc-cross"),
+      marks       : document.getElementById("sc-marks"),
+      coords      : document.getElementById("sc-coords"),
+      basketSum   : document.getElementById("sc-basket-sum"),
+      basketBody  : document.getElementById("sc-basket-body"),
+      basketTog   : document.getElementById("sc-basket-toggle"),
+      basketClear : document.getElementById("sc-basket-clear"),
+      basketCount : document.getElementById("sc-basket-count"),
+      mailTo      : document.getElementById("sc-mail-to"),
+      mailNote    : document.getElementById("sc-mail-note"),
+      mailBtn     : document.getElementById("sc-mail"),
     });
 
     this.figureDock = new window.FigureDock();

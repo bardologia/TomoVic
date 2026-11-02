@@ -2,8 +2,9 @@
 
 Walks the parsed configuration tree and asserts each section, class and field
 carries a description, that no description survives for a class or field that
-was removed, that collection re-parses only when the tree signature changes, and
-that the text stays within plain ASCII the frontend can render.
+was removed, that an undescribed field raises KeyError, that collection re-parses
+only when the tree signature changes, and that the text stays within plain ASCII
+the frontend can render.
 """
 
 from __future__ import annotations
@@ -56,6 +57,18 @@ def test_every_field_has_a_description(groups):
     for _group, cls in _classes(groups):
         for field in cls["fields"]:
             assert field.get("desc"), f"{cls['module']}::{cls['name']}.{field['name']} has no description"
+
+
+def test_an_undescribed_field_raises_key_error():
+    """Checks attaching descriptions to a class with an unclaimed field raises KeyError."""
+    fresh  = ConfigRegistry(ProjectPaths())
+    key    = next(iter(fresh.descriptions["configs"]))
+    module = key.split("::")[0]
+    name   = key.split("::")[1]
+    cls    = {"module": module, "name": name, "fields": [{"name": "undescribed_field"}]}
+
+    with pytest.raises(KeyError):
+        fresh._attach_descriptions(cls)
 
 
 def test_no_stale_config_entries(registry):

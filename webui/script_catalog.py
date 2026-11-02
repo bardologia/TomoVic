@@ -30,6 +30,11 @@ class ScriptCatalog:
             "category"  : "Data",
             "purpose"   : "Fit per-pixel Gaussian mixtures to the focused tomogram, producing the parametrized tomogram stored as a parameter run inside each dataset. Sweeps every permutation of the selected datasets, K values, lambda values, and fit modes.",
         },
+        "extract_polarimetry": {
+            "title"     : "Extract Polarimetry",
+            "category"  : "Data",
+            "purpose"   : "Read the primary pass of each selected dataset again in every polarisation through PyRat, over the dataset's own crop, symmetrise the cross-polar channels, check the result against the dataset's single-polarisation primary, and store it as the Pauli-ready polarimetric primary the Cube tab decomposes into surface, double-bounce and volume scattering.",
+        },
         "analyze_preprocessing": {
             "title"     : "Analyze Preprocessing",
             "category"  : "Analysis",

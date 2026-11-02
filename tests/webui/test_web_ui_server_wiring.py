@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+from gpu_activity            import GpuActivityLog
+from host_history            import HostHistoryLog
 from request_router          import RequestRouter
 from routers.library_routers import ContentLibraryRouter
 from system_monitor          import ActiveUsers, SystemHistory, SystemMonitor
@@ -20,15 +22,17 @@ FRONTEND_PATHS = [
 @pytest.fixture(scope="module")
 def server():
     """Returns a server whose background sampling loops are disabled."""
-    original = (SystemMonitor._du_loop, SystemHistory.sample_loop, ActiveUsers.sample_loop)
+    original = (SystemMonitor._du_loop, SystemHistory.sample_loop, ActiveUsers.sample_loop, GpuActivityLog.sample_loop, HostHistoryLog.sample_loop)
 
     SystemMonitor._du_loop      = lambda self: None
     SystemHistory.sample_loop   = lambda self: None
     ActiveUsers.sample_loop     = lambda self: None
+    GpuActivityLog.sample_loop  = lambda self: None
+    HostHistoryLog.sample_loop  = lambda self: None
     try:
         yield WebUIServer(host="127.0.0.1", port=0)
     finally:
-        SystemMonitor._du_loop, SystemHistory.sample_loop, ActiveUsers.sample_loop = original
+        SystemMonitor._du_loop, SystemHistory.sample_loop, ActiveUsers.sample_loop, GpuActivityLog.sample_loop, HostHistoryLog.sample_loop = original
 
 
 def _get(server: WebUIServer, path: str) -> tuple[int, object]:
@@ -74,11 +78,11 @@ def test_every_library_router_is_bound_to_a_real_library(server):
 
 
 def test_the_script_catalog_lists_every_console_entry(server):
-    """The catalog endpoint lists exactly the five console entry points."""
+    """The catalog endpoint lists exactly the six console entry points."""
     status, payload = _get(server, "/api/scripts")
 
     assert status == 200
-    assert {entry["key"] for entry in payload["scripts"]} == {"pre_process", "extract_params", "analyze_preprocessing", "analyze_param_extraction", "compare_preprocessing_trials"}
+    assert {entry["key"] for entry in payload["scripts"]} == {"pre_process", "extract_params", "extract_polarimetry", "analyze_preprocessing", "analyze_param_extraction", "compare_preprocessing_trials"}
 
 
 def test_an_unknown_endpoint_is_still_a_404(server):

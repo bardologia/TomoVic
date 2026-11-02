@@ -18,7 +18,8 @@ class NumberField {
     this.view    = view;
     this.leaf    = leaf;
     this.short   = short || leaf.path.split(".").pop();
-    this.integer = leaf.type === "int";
+    this.integer = leaf.type === "int" || Boolean(spec && spec.int);
+    this.unset   = leaf.value === "None";
     this.default = Number.isFinite(Number(leaf.value)) ? Number(leaf.value) : 0;
     this.log     = false;
     this.range   = this._resolve(spec);
@@ -49,7 +50,7 @@ class NumberField {
       input.title = raw !== "" && invalid ? "not a whole number; this field takes an integer" : "";
 
       if (raw === "" || invalid) this.view._unsetValue(this.leaf);
-      else this.view._setValue(this.leaf, Number(raw) === this.default ? this.leaf.value : raw);
+      else this.view._setValue(this.leaf, !this.unset && Number(raw) === this.default ? this.leaf.value : raw);
       this._mark();
     });
     top.appendChild(input);
@@ -70,9 +71,11 @@ class NumberField {
       : this._fallback();
 
     this.log = r.log;
-    r.min = Math.min(r.min, this.default);
-    r.max = Math.max(r.max, this.default);
-    r.presets.push(this.default);
+    if (!this.unset) {
+      r.min = Math.min(r.min, this.default);
+      r.max = Math.max(r.max, this.default);
+      r.presets.push(this.default);
+    }
     r.presets = this._cleanPresets(r.presets, r);
     return r;
   }
@@ -127,7 +130,7 @@ class NumberField {
     chip.title       = `set ${this.short} = ${this._fmt(value)}`;
     chip.addEventListener("click", () => {
       this.input.value = this._fmt(value);
-      const out = value === this.default ? this.leaf.value : this._fmt(value);
+      const out = !this.unset && value === this.default ? this.leaf.value : this._fmt(value);
       this.view._setValue(this.leaf, out);
       this._mark();
     });

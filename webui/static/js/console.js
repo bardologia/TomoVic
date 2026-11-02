@@ -51,7 +51,7 @@ class TileLogPanel {
   }
 
   async load() {
-    this.note.textContent = "reading…";
+    this.note.innerHTML = ThinkingOrb.busy("listening", "reading…");
 
     const suffix = this.tile.selectedUnit != null ? `?unit=${this.tile.selectedUnit}` : "";
     const probe = await Api.probe(`/api/jobs/${this.tile.job.job_id}/log${suffix}`);
@@ -124,7 +124,8 @@ class TileLogPanel {
 }
 
 class TileUnitPicker {
-  static FILTER_MIN = 8;
+  static FILTER_MIN  = 8;
+  static MENU_MARGIN = 10;
 
   constructor(tile) {
     this.tile  = tile;
@@ -157,6 +158,7 @@ class TileUnitPicker {
     this.filter.className = "console-tile__unitfilter";
     this.filter.type = "text";
     this.filter.placeholder = "filter sub-runs…";
+    this.filter.setAttribute("aria-label", "Filter sub-runs");
     this.filter.spellcheck = false;
     this.filter.autocomplete = "off";
     this.filter.hidden = true;
@@ -333,8 +335,16 @@ class TileUnitPicker {
     this.menu.hidden = false;
     this.btn.classList.add("is-open");
     this._renderMenu();
+    this.fitMenu();
     document.addEventListener("mousedown", this._docClick);
     if (!this.filter.hidden) this.filter.focus();
+  }
+
+  fitMenu() {
+    if (this.menu.hidden) return;
+
+    const room = this.tile.root.getBoundingClientRect().bottom - this.menu.getBoundingClientRect().top - TileUnitPicker.MENU_MARGIN;
+    this.menu.style.setProperty("--menu-room", `${Math.max(0, Math.floor(room))}px`);
   }
 
   _closeMenu() {
@@ -345,13 +355,93 @@ class TileUnitPicker {
 }
 
 
+class TerminalGauge {
+  static PASSES = 3;
+
+  constructor(options) {
+    this.host = document.createElement("div");
+    this.host.className = "console-tile__out console-gauge";
+    this.host.setAttribute("aria-hidden", "true");
+    this.host.style.cssText = "position:absolute; left:-10000px; top:0; visibility:hidden; pointer-events:none;";
+    document.body.appendChild(this.host);
+
+    this.term = new Terminal({ ...options, cols: 2, rows: 2 });
+    this.fit  = new FitAddon.FitAddon();
+    this.term.loadAddon(this.fit);
+    this.term.open(this.host);
+  }
+
+  propose(font, width, height) {
+    this.host.style.width  = `${width}px`;
+    this.host.style.height = `${height}px`;
+    if (this.term.options.fontSize !== font) this.term.options.fontSize = font;
+
+    let dims = this.fit.proposeDimensions();
+    for (let pass = 0; pass < TerminalGauge.PASSES && dims && dims.cols && dims.rows; pass++) {
+      const cols = Math.min(ConsoleTile.MAX_COLS, dims.cols);
+      const rows = Math.max(2, dims.rows);
+      if (this.term.cols === cols && this.term.rows === rows) break;
+      this.term.resize(cols, rows);
+      dims = this.fit.proposeDimensions();
+    }
+    return dims;
+  }
+}
+
+
 class ConsoleTile {
   static POLL_MS = 4000;
+  static LIVE_STATUSES = new Set(["pending", "running", "queued", "scheduled"]);
+  static MAX_COLS = 120;
+  static FONT_STEP = 0.25;
+  static TERMINAL_OPTIONS = {
+    cols: 120,
+    rows: 24,
+    convertEol: true,
+    disableStdin: true,
+    cursorBlink: false,
+    cursorInactiveStyle: "none",
+    scrollback: 10000,
+    allowTransparency: true,
+    fontFamily: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace',
+    fontSize: 12,
+    fontWeight: 600,
+    fontWeightBold: 800,
+    lineHeight: 1.25,
+    minimumContrastRatio: 7,
+    theme: {
+      background: "rgba(0, 0, 0, 0)",
+      foreground: "#f4f7f8",
+      cursor: "rgba(0, 0, 0, 0)",
+      selectionBackground: "#2a3a52",
+      black: "#6b7280",
+      red: "#ff8b8b",
+      green: "#86efac",
+      yellow: "#fde68a",
+      blue: "#93c5fd",
+      magenta: "#f0abfc",
+      cyan: "#67e8f9",
+      white: "#f4f7f8",
+      brightBlack: "#b6bfc8",
+      brightRed: "#fca5a5",
+      brightGreen: "#bbf7d0",
+      brightYellow: "#fef08a",
+      brightBlue: "#bfdbfe",
+      brightMagenta: "#f5d0fe",
+      brightCyan: "#a5f3fc",
+      brightWhite: "#ffffff",
+    },
+  };
+
+  static quantize(font) {
+    return Math.round(font / ConsoleTile.FONT_STEP) * ConsoleTile.FONT_STEP;
+  }
+
 
   constructor(job, manager, host) {
     this.job = job;
     this.manager = manager;
-    this.source = null;
+    this.sub = null;
     this.opened = false;
 
     this.root = document.createElement("div");
@@ -387,12 +477,18 @@ class ConsoleTile {
     this.stopBtn.className = "btn btn--mini btn--danger";
     this.stopBtn.addEventListener("click", () => this._stop());
 
+    this.retryBtn = document.createElement("button");
+    this.retryBtn.className = "btn btn--mini";
+    this.retryBtn.textContent = "Retry";
+    this.retryBtn.title = "Reopen the launch page with this job's overrides, interpreter and run mode filled in, ready to adjust and launch again";
+    this.retryBtn.addEventListener("click", () => this.manager.retry(this.job));
+
     this.closeBtn = document.createElement("button");
     this.closeBtn.className = "btn btn--mini";
     this.closeBtn.textContent = "Close";
     this.closeBtn.addEventListener("click", () => this.manager.close(this.job.job_id));
 
-    bar.append(this.nameEl, this.metaEl, this.badgeEl, this.logBtn, this.stopBtn, this.closeBtn);
+    bar.append(this.nameEl, this.metaEl, this.badgeEl, this.logBtn, this.stopBtn, this.retryBtn, this.closeBtn);
 
     this.pollTimer = null;
 
@@ -417,7 +513,7 @@ class ConsoleTile {
     this.selectedUnit = null;
     this.unitTerm = null;
     this.unitFit = null;
-    this.unitSource = null;
+    this.unitSub = null;
     this.unitOpened = false;
     this.picker = new TileUnitPicker(this);
 
@@ -437,6 +533,11 @@ class ConsoleTile {
     this.term = main.term;
     this.fitAddon = main.fit;
 
+    this.streamLost = false;
+    this.resizer = new ResizeObserver(() => this.manager.queueFit());
+    this.resizer.observe(this.outEl);
+    this.resizer.observe(this.unitEl);
+
     this.logBtn.hidden = !job.log_path;
 
     this.setStatus(job.status);
@@ -445,51 +546,50 @@ class ConsoleTile {
   }
 
   _makeTerm() {
-    const term = new Terminal({
-      cols: 120,
-      rows: 24,
-      convertEol: true,
-      disableStdin: true,
-      cursorBlink: false,
-      cursorInactiveStyle: "none",
-      scrollback: 10000,
-      fontFamily: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace',
-      fontSize: 12,
-      lineHeight: 1.25,
-      theme: {
-        background: "#0e1216",
-        foreground: "#dde4e7",
-        cursor: "#0e1216",
-        selectionBackground: "#2a3a52",
-      },
-    });
+    const term = new Terminal(ConsoleTile.TERMINAL_OPTIONS);
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     return { term, fit };
   }
 
   _connect() {
-    this.source = new EventSource(`/api/jobs/${this.job.job_id}/stream`);
-    this.source.onmessage = (ev) => this._onEvent(ev);
-    this.source.onerror = () => this._disconnect();
+    this.sub = StreamHub.instance().subscribe(this.job.job_id, null, (data) => this._onEvent(data));
+  }
+
+  get streamOpen() {
+    return this.sub !== null && !this.sub.closed && StreamHub.instance().connected;
   }
 
   _disconnect() {
-    if (this.source) {
-      this.source.close();
-      this.source = null;
+    if (this.sub) {
+      this.sub.close();
+      this.sub = null;
     }
   }
 
-  _onEvent(ev) {
-    let data;
-    try {
-      data = JSON.parse(ev.data);
-    } catch (e) {
-      return;
+  _linkEvent(data, term) {
+    if (data.type === "link") {
+      if (data.state === "lost" && !this.streamLost) {
+        this.streamLost = true;
+        this._note("live stream interrupted, reconnecting — the job list keeps the status current meanwhile", "33", term);
+      }
+      return true;
     }
+    if (data.type === "truncated") {
+      this._note(`stream truncated: ${data.dropped} event(s) dropped, this page could not keep up; the on-disk log is complete`, "31", term);
+      return true;
+    }
+    return false;
+  }
 
-    if (data.type === "chunk") {
+  _onEvent(data) {
+    if (this._linkEvent(data, this.term)) return;
+    this.streamLost = false;
+
+    if (data.type === "unavailable") {
+      this._note(`live stream unavailable: ${data.error}`, "33");
+      this._disconnect();
+    } else if (data.type === "chunk") {
       this.term.write(data.data);
     } else if (data.type === "line") {
       this.term.writeln(data.text);
@@ -561,6 +661,7 @@ class ConsoleTile {
     this.badgeEl.textContent = status;
     this.stopBtn.textContent = status === "scheduled" || status === "queued" ? "Cancel" : "Stop";
     this.stopBtn.disabled = status !== "running" && status !== "scheduled" && status !== "queued";
+    this.retryBtn.hidden = ConsoleTile.LIVE_STATUSES.has(status);
 
     if (this.units.length) {
       this.unitsSig = null;
@@ -571,8 +672,32 @@ class ConsoleTile {
     else {
       const hadTimer = Boolean(this.pollTimer);
       this._unwatchProgress();
-      if (hadTimer) this._pollProgress();
+      if (hadTimer && status !== "untracked") this._pollProgress();
     }
+  }
+
+  syncFromList(job) {
+    if (job.pid && job.pid !== this.job.pid) {
+      this.job.pid = job.pid;
+      this.metaEl.textContent = this._meta(this._baseMeta(job));
+    }
+    if (job.log_path && !this.job.log_path) {
+      this.job.log_path = job.log_path;
+      this.logBtn.hidden = false;
+    }
+    if (job.status === this.job.status || this.streamOpen) return;
+
+    this._note(`process ${job.status} — reported by the job list, the live stream missed it`, job.status === "finished" ? "36" : "31");
+    this.setStatus(job.status);
+  }
+
+  markUntracked() {
+    if (this.job.status === "untracked") return;
+
+    this._disconnect();
+    this._closeUnitStream();
+    this._note("the console no longer tracks this job (it restarted or pruned its history); a process still running reappears in the job list as an adopted job", "33");
+    this.setStatus("untracked");
   }
 
   _watchProgress() {
@@ -597,7 +722,15 @@ class ConsoleTile {
   }
 
   _renderUnits(units) {
+    const selected = this.selectedUnit != null ? this.units[this.selectedUnit] : null;
     this.units = units;
+
+    if (selected) {
+      const index = units.findIndex((u) => u.log === selected.log);
+      if (index < 0) this._selectUnit(null);
+      else this.selectedUnit = index;
+    }
+
     const sig = units.map((u) => `${u.log}\u0000${u.status}`).join("\u0001");
     if (sig === this.unitsSig) return;
     this.unitsSig = sig;
@@ -633,29 +766,26 @@ class ConsoleTile {
     }
 
     this.unitTerm.reset();
-    this.unitSource = new EventSource(`/api/jobs/${this.job.job_id}/stream?unit=${index}`);
-    this.unitSource.onmessage = (ev) => this._onUnitEvent(ev);
-    this.unitSource.onerror = () => this._closeUnitStream();
+    this.unitSub = StreamHub.instance().subscribe(this.job.job_id, index, (data) => this._onUnitEvent(data));
   }
 
   _closeUnitStream() {
-    if (this.unitSource) {
-      this.unitSource.close();
-      this.unitSource = null;
+    if (this.unitSub) {
+      this.unitSub.close();
+      this.unitSub = null;
     }
   }
 
-  _onUnitEvent(ev) {
-    let data;
-    try {
-      data = JSON.parse(ev.data);
-    } catch (e) {
-      return;
-    }
+  _onUnitEvent(data) {
+    if (this._linkEvent(data, this.unitTerm)) return;
 
-    if (data.type === "chunk") {
+    if (data.type === "unavailable") {
+      this._note(`sub-run stream unavailable: ${data.error}`, "33", this.unitTerm);
+      this._closeUnitStream();
+    } else if (data.type === "chunk") {
       this.unitTerm.write(data.data);
     } else if (data.type === "unit") {
+      this.unitTerm.reset();
       this._note(`${data.name} — following ${data.log}`, "36", this.unitTerm);
     } else if (data.type === "status") {
       if (data.missing) this._note("not started yet — no log file, reopen once it is running", "33", this.unitTerm);
@@ -681,6 +811,7 @@ class ConsoleTile {
   }
 
   fit() {
+    this.picker.fitMenu();
     if (this.log.showing) return;
 
     if (this.selectedUnit == null) this._fitInto(this.term, this.fitAddon, this.outEl, "opened");
@@ -692,27 +823,30 @@ class ConsoleTile {
     const h = host.clientHeight;
     if (!w || !h) return;
 
+    const gauge = this.manager.gauge;
+    let font = ConsoleTile.quantize(Math.max(8, Math.min(16, (w - 16) / 72)));
+    let dims = gauge.propose(font, w, h);
+    if (dims && dims.cols && dims.cols < ConsoleTile.MAX_COLS) {
+      font = ConsoleTile.quantize(Math.max(7, (font * dims.cols) / ConsoleTile.MAX_COLS));
+      dims = gauge.propose(font, w, h);
+    }
+    if (!dims || !dims.cols || !dims.rows) return;
+
+    if (term.options.fontSize !== font) term.options.fontSize = font;
+    term.resize(Math.min(ConsoleTile.MAX_COLS, dims.cols), Math.max(2, dims.rows));
+
     if (!this[openedFlag]) {
       term.open(host);
       this[openedFlag] = true;
     }
 
-    let font = Math.max(8, Math.min(16, (w - 16) / 72));
-    term.options.fontSize = font;
-
-    let dims = fitAddon.proposeDimensions();
-    if (dims && dims.cols && dims.cols < 120) {
-      font = Math.max(7, (font * dims.cols) / 120);
-      term.options.fontSize = font;
-      dims = fitAddon.proposeDimensions();
-    }
-    if (!dims || !dims.cols || !dims.rows) return;
-
-    term.resize(Math.min(120, dims.cols), Math.max(2, dims.rows));
+    const check = fitAddon.proposeDimensions();
+    if (check && check.cols && check.rows) term.resize(Math.min(ConsoleTile.MAX_COLS, check.cols), Math.max(2, check.rows));
     term.scrollToBottom();
   }
 
   dispose() {
+    this.resizer.disconnect();
     this._disconnect();
     this.picker._closeMenu();
     this._closeUnitStream();
@@ -726,6 +860,7 @@ class ConsoleTile {
 
 class RunConsole {
   static LIST_POLL_MS = 5000;
+  static ORB_STATES   = { running: "working", queued: "breathing", scheduled: "breathing" };
 
   constructor(refs) {
     this.listEl = refs.list;
@@ -735,17 +870,25 @@ class RunConsole {
     this.listError = null;
     this.tiles = new Map();
     this.dismissed = new Set();
+    this.launchView = null;
+    this._gauge = null;
     this._fitTimer = null;
+    this._fitFrame = 0;
 
-    window.addEventListener("resize", () => this._queueFit());
+    window.addEventListener("resize", () => this.queueFit());
+    document.fonts.ready.then(() => this.queueFit());
     setInterval(() => {
       if (document.hidden) return;
-      if (this.listError || this.jobs.some((j) => RunConsole.isLive(j))) this.refresh();
+      if (this.listError || this.jobs.some((j) => RunConsole.isLive(j)) || this._hasLiveTile()) this.refresh();
     }, RunConsole.LIST_POLL_MS);
   }
 
   static isLive(job) {
     return job.status === "running";
+  }
+
+  _hasLiveTile() {
+    return Array.from(this.tiles.values()).some((tile) => RunConsole.isLive(tile.job));
   }
 
   async refresh() {
@@ -759,10 +902,20 @@ class RunConsole {
 
     this.listError = null;
     this.jobs = data.jobs;
+    this._syncTiles();
     this.jobs
       .filter((j) => RunConsole.isLive(j) && !this.dismissed.has(j.job_id) && !this.tiles.has(j.job_id))
       .forEach((j) => this.open(j.job_id));
     this._renderList();
+  }
+
+  _syncTiles() {
+    const listed = new Map(this.jobs.map((j) => [j.job_id, j]));
+    this.tiles.forEach((tile, jobId) => {
+      const job = listed.get(jobId);
+      if (job) tile.syncFromList(job);
+      else tile.markUntracked();
+    });
   }
 
   async launch(scriptKey, interpreter, label, overrides, followUp, detach, queue) {
@@ -803,14 +956,25 @@ class RunConsole {
     else this.open(jobId);
   }
 
+  retry(job) {
+    this.launchView.pendingImport = {
+      name      : `${job.script} · ${job.started.replace("T", " ")}`,
+      script    : job.script,
+      overrides : job.request.overrides,
+      launch    : { interpreter: job.interpreter, detach: job.detach },
+    };
+    window.router.go(`launch/${job.script}`);
+  }
+
   async stop(jobId) {
     const res = await Api.post(`/api/jobs/${jobId}/stop`, {});
     if (res.ok) Toast.show("Stop signal sent", "ok");
     else Toast.show(res.error || "Could not stop", "error");
+    setTimeout(() => this.refresh(), 1500);
   }
 
   onShow() {
-    this._queueFit();
+    this.queueFit();
   }
 
   _layout() {
@@ -820,12 +984,24 @@ class RunConsole {
     const rows = Math.max(1, Math.ceil(n / cols));
     this.tilesEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     this.tilesEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-    this._queueFit();
+    this.queueFit();
   }
 
-  _queueFit() {
+  get gauge() {
+    if (!this._gauge) this._gauge = new TerminalGauge(ConsoleTile.TERMINAL_OPTIONS);
+    return this._gauge;
+  }
+
+  queueFit() {
     clearTimeout(this._fitTimer);
-    this._fitTimer = setTimeout(() => this.tiles.forEach((t) => t.fit()), 120);
+    cancelAnimationFrame(this._fitFrame);
+    this._fitTimer = setTimeout(() => this._fitInTurns([...this.tiles.keys()]), 120);
+  }
+
+  _fitInTurns(pending) {
+    const tile = this.tiles.get(pending.shift());
+    if (tile) tile.fit();
+    if (pending.length) this._fitFrame = requestAnimationFrame(() => this._fitInTurns(pending));
   }
 
   _renderList() {
@@ -862,7 +1038,7 @@ class RunConsole {
         : "";
       item.innerHTML =
         `<div class="job-item__top"><span class="job-item__name">${SharedCharts.esc(job.script)}</span>` +
-        `<span class="badge badge--${SharedCharts.esc(job.status)}">${SharedCharts.esc(job.status)}</span></div>` +
+        `<span class="job-item__live">${RunConsole.ORB_STATES[job.status] ? ThinkingOrb.html(RunConsole.ORB_STATES[job.status], 20, job.status) : ""}<span class="badge badge--${SharedCharts.esc(job.status)}">${SharedCharts.esc(job.status)}</span></span></div>` +
         (job.description ? `<div class="job-item__desc" title="${SharedCharts.esc(job.description)}">${SharedCharts.esc(job.description)}</div>` : "") +
         progLine +
         `<div class="job-item__meta">${SharedCharts.esc(job.started.replace("T", " "))}${job.pid ? ` · pid ${SharedCharts.esc(String(job.pid))}` : ""}</div>`;

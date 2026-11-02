@@ -1,13 +1,13 @@
 """API routes for browsing entry points, launching runs and replaying saved runs.
 
 Covers the project/script catalog with resolved configuration layouts, the job
-list with log streaming, and the saved-run store.
+list with log streaming over the page-wide live-output channel the job streams
+are multiplexed over, and the saved-run store.
 """
 
 from __future__ import annotations
 
 import json
-import queue
 
 from launch_layout          import LaunchLayout, LayoutError
 from process_manager        import ProcessManager
@@ -18,6 +18,7 @@ from run_launcher           import RunLauncher
 from saved_run_store        import SavedRunStore
 from script_catalog         import ScriptCatalog
 from script_config_resolver import ScriptConfigResolver
+from stream_hub             import StreamChannel, StreamHub
 
 
 class CatalogRouter(SubRouter):
@@ -140,32 +141,41 @@ class RunConfigRouter(SubRouter):
 
 
 class JobRouter(SubRouter):
-    """Serves the job list and the per-job control endpoints of the process manager.
+    """Serves the job list, the per-job control endpoints of the process manager and the live-output channel.
+
+    A page follows any number of jobs over one server-sent-events channel,
+    subscribing and unsubscribing streams through the channel's POST routes.
 
     Attributes:
-        paths: Project paths used to validate entry-point keys.
-        processes: Local process manager.
-        launcher: Run launcher executing and queueing local runs.
+        paths     : Project paths used to validate entry-point keys.
+        processes : Local process manager.
+        launcher  : Run launcher executing and queueing local runs.
+        hub       : Stream hub multiplexing job streams onto page channels.
     """
 
-    def __init__(self, paths: ProjectPaths, processes: ProcessManager, launcher: RunLauncher) -> None:
-        """Stores the job backend and launcher, then declares the routes."""
+    KEEPALIVE_S = 15.0
+
+    def __init__(self, paths: ProjectPaths, processes: ProcessManager, launcher: RunLauncher, hub: StreamHub) -> None:
+        """Stores the job backend, launcher and stream hub, then declares the routes."""
         self.paths     = paths
         self.processes = processes
         self.launcher  = launcher
+        self.hub       = hub
 
-        super().__init__(("/api/run", "/api/jobs"))
+        super().__init__(("/api/run", "/api/jobs", "/api/stream"))
 
     def declare(self, table: RouteTable) -> None:
-        """Registers the job listing, launch and per-job control routes."""
-        table.add("GET",  "/api/jobs", self.jobs)
-        table.add("POST", "/api/run",  self.run)
-        table.wildcard("GET",  "/api/jobs/", "/gpus",     self.gpu_pool)
-        table.wildcard("GET",  "/api/jobs/", "/progress", self.progress)
-        table.wildcard("GET",  "/api/jobs/", "/log",      self.log)
-        table.wildcard("GET",  "/api/jobs/", "/stream",   self.stream)
-        table.wildcard("POST", "/api/jobs/", "/stop",     self.stop)
-        table.wildcard("POST", "/api/jobs/", "/gpus",     self.set_gpus)
+        """Registers the job listing, launch, per-job control and stream channel routes."""
+        table.add("GET",  "/api/jobs",   self.jobs)
+        table.add("POST", "/api/run",    self.run)
+        table.add("GET",  "/api/stream", self.stream)
+        table.wildcard("GET",  "/api/jobs/",   "/gpus",        self.gpu_pool)
+        table.wildcard("GET",  "/api/jobs/",   "/progress",    self.progress)
+        table.wildcard("GET",  "/api/jobs/",   "/log",         self.log)
+        table.wildcard("POST", "/api/jobs/",   "/stop",        self.stop)
+        table.wildcard("POST", "/api/jobs/",   "/gpus",        self.set_gpus)
+        table.wildcard("POST", "/api/stream/", "/subscribe",   self.subscribe)
+        table.wildcard("POST", "/api/stream/", "/unsubscribe", self.unsubscribe)
 
     def jobs(self, exchange: HttpExchange) -> None:
         """Adopts orphaned processes and answers with the local jobs, newest first."""
@@ -202,35 +212,6 @@ class JobRouter(SubRouter):
 
         exchange.send_result(self.processes.job_log(job_id, unit))
 
-    def stream(self, exchange: HttpExchange, job_id: str) -> None:
-        """Streams one job's log as server-sent events until it ends or the client leaves.
-
-        Args:
-            exchange: Request being answered.
-            job_id: Job identifier taken from the wildcard path segment.
-
-        Returns:
-            None. Answers 404 when the job or the requested sub-unit has no open stream.
-        """
-        unit = self._unit_index(exchange)
-        if unit == "invalid":
-            return
-
-        if unit is not None:
-            opened = self.processes.unit_stream(job_id, unit)
-            if not opened.get("ok"):
-                exchange.send_json(opened, 404)
-                return
-            self._pump_stream(exchange, opened["stream"], opened["stop"])
-            return
-
-        stream = self.processes.get_stream(job_id)
-        if stream is None:
-            exchange.send_json({"error": "unknown job"}, 404)
-            return
-
-        self._pump_stream(exchange, stream, None)
-
     def _unit_index(self, exchange: HttpExchange) -> int | str | None:
         """Returns the requested sub-unit index, None when absent, "invalid" after answering 400."""
         raw = exchange.text("unit")
@@ -243,46 +224,130 @@ class JobRouter(SubRouter):
             exchange.send_json({"ok": False, "error": f"invalid unit index '{raw}'"}, 400)
             return "invalid"
 
-    def _pump_stream(self, exchange: HttpExchange, stream, stop) -> None:
-        """Forwards events from a log stream to the client as server-sent events.
+    def stream(self, exchange: HttpExchange) -> None:
+        """Opens the page's live-output channel and pumps its events as server-sent events.
 
-        Sends a keepalive comment every 15 seconds of silence, stops on the stream's end
-        event or a broken connection, and always unsubscribes and sets `stop`.
+        The page names its channel with the ``channel`` query parameter and
+        subscribes jobs to it through the channel's POST routes. The first frame
+        is a ``hello`` carrying the server's boot token, so a page that reconnects
+        can tell a restarted server, whose event ids started over, from a dropped
+        connection. A keepalive comment goes out after every KEEPALIVE_S seconds
+        of silence. The channel is released when the client leaves, unless a
+        reconnect has already replaced it.
 
         Args:
-            exchange: Request being answered, carrying the raw handler.
-            stream: Event stream to subscribe to.
-            stop: Event set on teardown to release a sub-unit tail, or None.
+            exchange : Request being answered.
+
+        Returns:
+            None. Answers 400 when the channel parameter is missing.
         """
+        channel_id = exchange.text("channel")
+
+        if not channel_id:
+            exchange.send_json({"ok": False, "error": "missing channel parameter"}, 400)
+            return
+
+        channel = self.hub.open(channel_id)
         handler = exchange.handler
+
+        exchange.status = 200
         handler.send_response(200)
         handler.send_header("Content-Type", "text/event-stream")
         handler.send_header("Cache-Control", "no-cache")
         handler.send_header("Connection", "keep-alive")
         handler.end_headers()
 
-        sub = stream.subscribe()
         try:
-            while True:
-                try:
-                    event = sub.get(timeout=15)
-                except queue.Empty:
-                    handler.wfile.write(b": keepalive\n\n")
-                    handler.wfile.flush()
-                    continue
-
-                payload = json.dumps(event)
-                handler.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
-                handler.wfile.flush()
-
-                if event.get("type") == "end":
-                    break
+            self._write_event(handler, {"type": "hello", "channel": channel_id, "boot": self.hub.boot})
+            self._pump_channel(handler, channel)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
-            stream.unsubscribe(sub)
-            if stop is not None:
-                stop.set()
+            self.hub.release(channel)
+
+    def _pump_channel(self, handler, channel: StreamChannel) -> None:
+        """Forwards the channel's events to the client until the channel closes.
+
+        Args:
+            handler : Raw request handler whose output stream receives the frames.
+            channel : Channel whose outgoing queue is drained.
+        """
+        while True:
+            event = channel.next(self.KEEPALIVE_S)
+
+            if event is None:
+                handler.wfile.write(b": keepalive\n\n")
+                handler.wfile.flush()
+                continue
+
+            if event is StreamChannel.CLOSE:
+                return
+
+            self._write_event(handler, event)
+
+    @staticmethod
+    def _write_event(handler, event: dict) -> None:
+        """Writes one event as a server-sent-events data frame and flushes it."""
+        handler.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
+        handler.wfile.flush()
+
+    def subscribe(self, exchange: HttpExchange, channel_id: str) -> None:
+        """Attaches a job's main stream or one unit tail to the page's channel.
+
+        The body carries ``job_id``, an optional integer ``unit`` and ``after``, the
+        last event id the page holds for that job's main stream.
+
+        Args:
+            exchange   : Request being answered.
+            channel_id : Channel id taken from the wildcard path segment.
+
+        Returns:
+            None. Answers 400 for a malformed body and 404 when the channel, the job or the unit is unknown.
+        """
+        request = self._channel_request(exchange)
+        if request is None:
+            return
+
+        job_id, unit = request
+        after        = exchange.body.get("after", -1)
+
+        if not isinstance(after, int) or isinstance(after, bool):
+            exchange.send_json({"ok": False, "error": f"after must be an integer event id, got {after!r}"}, 400)
+            return
+
+        exchange.send_result(self.hub.subscribe(channel_id, self.processes, job_id, unit, after), 404)
+
+    def unsubscribe(self, exchange: HttpExchange, channel_id: str) -> None:
+        """Detaches a job's main stream or one unit tail from the page's channel.
+
+        Args:
+            exchange   : Request being answered.
+            channel_id : Channel id taken from the wildcard path segment.
+
+        Returns:
+            None. Answers 400 for a malformed body and 404 for an unknown channel.
+        """
+        request = self._channel_request(exchange)
+        if request is None:
+            return
+
+        job_id, unit = request
+        exchange.send_result(self.hub.unsubscribe(channel_id, job_id, unit), 404)
+
+    def _channel_request(self, exchange: HttpExchange) -> tuple[str, int | None] | None:
+        """Returns the job id and optional unit index of a channel request, or None after answering 400."""
+        job_id = exchange.body.get("job_id")
+        unit   = exchange.body.get("unit")
+
+        if not isinstance(job_id, str) or not job_id:
+            exchange.send_json({"ok": False, "error": "job_id must be a non-empty string"}, 400)
+            return None
+
+        if unit is not None and (not isinstance(unit, int) or isinstance(unit, bool)):
+            exchange.send_json({"ok": False, "error": f"unit must be an integer index or null, got {unit!r}"}, 400)
+            return None
+
+        return job_id, unit
 
     def stop(self, exchange: HttpExchange, job_id: str) -> None:
         """Stops the job addressed by the wildcard id."""

@@ -6,14 +6,19 @@ class AnimatedGauge extends CanvasBase {
     super(canvas);
     this.min    = opts.min != null ? opts.min : tuning.min;
     this.max    = opts.max != null ? opts.max : tuning.max;
+    this.k      = tuning.k || 0;
+    this.c      = tuning.c || 0;
     this.ease   = tuning.ease;
     this.settle = tuning.settle;
     this.v      = this.min;
     this.t      = this.min;
+    this.vel    = 0;
     this.peak   = this.min;
     this.peakAt = 0;
     this._raf   = null;
+    this._last  = 0;
     this._tick  = this._tick.bind(this);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (this._ready && this.ctx) this._draw(); });
   }
 
   onResize() {
@@ -31,27 +36,49 @@ class AnimatedGauge extends CanvasBase {
     if (v >= this.peak || now - this.peakAt > 60000) { this.peak = v; this.peakAt = now; }
     this.t = v;
 
-    if (REDUCED_MOTION) { this.v = v; this._draw(); return; }
-    if (this._raf == null) this._raf = requestAnimationFrame(this._tick);
+    if (REDUCED_MOTION) { this.v = v; this.vel = 0; this._draw(); return; }
+    this._wake();
   }
 
-  _tick() {
-    this.v += (this.t - this.v) * this.ease;
-    if (Math.abs(this.t - this.v) < (this.max - this.min) * this.settle) {
-      this.v    = this.t;
-      this._raf = null;
-      this._draw();
-      return;
+  _wake() {
+    if (this._raf != null) return;
+    this._last = performance.now();
+    this._raf  = requestAnimationFrame(this._tick);
+  }
+
+  _live() {
+    return false;
+  }
+
+  _tick(now) {
+    const dt   = Math.min(0.05, Math.max(0.001, (now - this._last) / 1000));
+    this._last = now;
+    if (this.k) {
+      const n = Math.max(1, Math.ceil(dt * 240));
+      const h = dt / n;
+      for (let i = 0; i < n; i++) {
+        this.vel += (-this.k * (this.v - this.t) - this.c * this.vel) * h;
+        this.v   += this.vel * h;
+      }
+    } else {
+      this.v += (this.t - this.v) * this.ease;
     }
+    const span   = this.max - this.min;
+    const landed = Math.abs(this.t - this.v) < span * this.settle && Math.abs(this.vel) < span * this.settle * 12;
+    if (landed) { this.v = this.t; this.vel = 0; }
     this._draw();
+    if (landed && !this._live()) { this._raf = null; return; }
     this._raf = requestAnimationFrame(this._tick);
   }
 }
 
 class DialGauge extends AnimatedGauge {
 
+  static TRAIL    = 24;
+  static SWEEP_MS = 720;
+
   constructor(canvas, opts) {
-    super(canvas, opts, { min: 0, max: 100, ease: 0.14, settle: 0.0005 });
+    super(canvas, opts, { min: 0, max: 100, k: 90, c: 13, settle: 0.0005 });
     this.label  = opts.label || "";
     this.unit   = opts.unit || "";
     this.color  = opts.color || "111, 155, 255";
@@ -62,22 +89,75 @@ class DialGauge extends AnimatedGauge {
     this.big    = !!opts.big;
     this.a0     = -Math.PI * 1.2;
     this.a1     = Math.PI * 0.2;
+    this.trail  = [];
+    this.swept  = false;
+    this.held   = null;
+    this._sweep = null;
     this._ready = true;
     this._draw();
+  }
+
+  set(value) {
+    if (!this.swept) {
+      this.swept = true;
+      if (!REDUCED_MOTION) {
+        this.held   = value;
+        this.t      = this.max;
+        this._sweep = setTimeout(() => {
+          const v     = this.held;
+          this.held   = null;
+          this._sweep = null;
+          this._note(v);
+          super.set(v);
+        }, DialGauge.SWEEP_MS);
+        this._wake();
+        return;
+      }
+    }
+    if (this.held !== null) { this.held = value; return; }
+    this._note(value);
+    super.set(value);
+  }
+
+  _note(value) {
+    if (value == null) return;
+    this.trail.push(Math.max(this.min, Math.min(this.max, value)));
+    if (this.trail.length > DialGauge.TRAIL) this.trail.shift();
+  }
+
+  dispose() {
+    clearTimeout(this._sweep);
+    super.dispose();
+  }
+
+  _alarm() {
+    if (!this.zones.length) return false;
+    return this.v >= this.zones[this.zones.length - 1].from;
+  }
+
+  _live() {
+    return !REDUCED_MOTION && this._alarm();
   }
 
   _angle(v) {
     return this.a0 + ((v - this.min) / (this.max - this.min)) * (this.a1 - this.a0);
   }
 
-  _arc(ctx, cx, cy, r, from, to, color, lw, glow) {
+  _arc(ctx, cx, cy, r, from, to, color, lw) {
     ctx.beginPath();
     ctx.arc(cx, cy, r, from, to);
     ctx.strokeStyle = color;
     ctx.lineWidth   = lw;
-    if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = 8; }
     ctx.stroke();
-    ctx.shadowBlur = 0;
+  }
+
+  _ray(ctx, cx, cy, a, r0, r1, color, lw) {
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = lw;
+    ctx.stroke();
   }
 
   _draw() {
@@ -87,81 +167,83 @@ class DialGauge extends AnimatedGauge {
     const h   = this.h;
     ctx.clearRect(0, 0, w, h);
 
-    const r  = Math.min((w - 14) / 2, (h - 12) / 1.60);
-    const cx = w / 2;
-    const cy = 7 + r;
-    const lw = Math.max(2.5, r * 0.075);
+    const big    = this.big;
+    const r      = Math.max(12, Math.min((w - (big ? 54 : 40)) / 2, (h - (big ? 44 : 36)) / 1.588));
+    const cx     = w / 2;
+    const cy     = r + (big ? 27 : 22);
+    const alarm  = this._alarm();
+    const breath = alarm && !REDUCED_MOTION ? 0.5 + 0.5 * Math.sin(performance.now() / 260) : 1;
+    const ink    = "220, 235, 245";
 
-    this._arc(ctx, cx, cy, r, this.a0, this.a1, "rgba(255, 255, 255, 0.08)", lw, null);
-    this.zones.forEach((z) => {
-      this._arc(ctx, cx, cy, r + lw * 0.85, this._angle(z.from), this._angle(z.to), `rgba(${z.color}, 0.75)`, Math.max(1.5, lw * 0.38), null);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.97, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(6, 10, 14, 0.72)";
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${ink}, 0.16)`;
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.89, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${ink}, 0.07)`;
+    ctx.stroke();
+
+    const lw = Math.max(1.5, r * 0.04);
+    this._arc(ctx, cx, cy, r, this.a0, this.a1, `rgba(${ink}, 0.14)`, 1);
+    if (this.v > this.min) this._arc(ctx, cx, cy, r, this.a0, this._angle(this.v), `rgba(${this.color}, 0.9)`, lw);
+
+    this.zones.forEach((z, i) => {
+      const hot = alarm && i === this.zones.length - 1;
+      this._arc(ctx, cx, cy, r + 4, this._angle(z.from), this._angle(z.to), `rgba(${z.color}, ${hot ? 0.45 + 0.55 * breath : 0.7})`, hot ? 2.2 : 1.4);
     });
-    if (this.v > this.min) {
-      this._arc(ctx, cx, cy, r, this.a0, this._angle(this.v), `rgba(${this.color}, 0.9)`, lw, `rgba(${this.color}, 0.5)`);
-    }
 
     const steps = this.majors * this.minors;
     for (let i = 0; i <= steps; i++) {
       const major = i % this.minors === 0;
       const a     = this.a0 + (i / steps) * (this.a1 - this.a0);
-      const r0    = r * (major ? 0.74 : 0.80);
-      const r1    = r * 0.88;
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
-      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
-      ctx.strokeStyle = major ? "rgba(220, 235, 245, 0.55)" : "rgba(220, 235, 245, 0.22)";
-      ctx.lineWidth   = major ? 1.4 : 1;
-      ctx.stroke();
+      this._ray(ctx, cx, cy, a, r + 7, r + (major ? 12 : 9), `rgba(${ink}, ${major ? 0.55 : 0.22})`, major ? 1.2 : 1);
     }
 
-    ctx.font         = `500 ${this.big ? 9 : 8}px 'JetBrains Mono', ui-monospace, monospace`;
+    ctx.font         = `600 ${big ? 8.5 : 7.5}px 'JetBrains Mono', ui-monospace, monospace`;
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle    = "rgba(220, 235, 245, 0.45)";
+    ctx.fillStyle    = `rgba(${ink}, 0.78)`;
     for (let m = 0; m <= this.majors; m++) {
       const val = this.min + (m / this.majors) * (this.max - this.min);
       const a   = this._angle(val);
-      ctx.fillText(String(Math.round(val)), cx + Math.cos(a) * r * 0.60, cy + Math.sin(a) * r * 0.60);
+      ctx.fillText(String(Math.round(val)), cx + Math.cos(a) * (r + 19), cy + Math.sin(a) * (r + 19) + 0.5);
     }
 
     if (this.peak > this.v + (this.max - this.min) * 0.01) {
-      const pa = this._angle(this.peak);
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(pa) * r * 0.90, cy + Math.sin(pa) * r * 0.90);
-      ctx.lineTo(cx + Math.cos(pa) * r * 1.00, cy + Math.sin(pa) * r * 1.00);
-      ctx.strokeStyle = "rgba(251, 191, 36, 0.9)";
-      ctx.lineWidth   = 1.6;
-      ctx.stroke();
+      this._ray(ctx, cx, cy, this._angle(this.peak), r - 7, r - 2, "rgba(251, 191, 36, 0.9)", 1.4);
     }
 
-    const na = this._angle(this.v);
-    ctx.beginPath();
-    ctx.moveTo(cx - Math.cos(na) * r * 0.16, cy - Math.sin(na) * r * 0.16);
-    ctx.lineTo(cx + Math.cos(na) * r * 0.72, cy + Math.sin(na) * r * 0.72);
-    ctx.strokeStyle = "rgba(230, 240, 246, 0.95)";
-    ctx.lineWidth   = this.big ? 1.9 : 1.5;
-    ctx.shadowColor = `rgba(${this.color}, 0.7)`;
-    ctx.shadowBlur  = 7;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    const n = this.trail.length;
+    this.trail.forEach((val, i) => {
+      const age = (n - 1 - i) / Math.max(1, DialGauge.TRAIL - 1);
+      this._ray(ctx, cx, cy, this._angle(val), r * 0.34, r * 0.76, `rgba(${ink}, ${(0.11 * (1 - age)).toFixed(3)})`, 1);
+    });
 
+    const na = this._angle(this.v);
+    this._ray(ctx, cx, cy, na, -r * 0.12, r * 0.78, `rgba(230, 240, 246, 0.96)`, big ? 1.7 : 1.4);
+
+    const hub   = Math.max(2.6, r * 0.07);
+    const alert = alarm ? this.zones[this.zones.length - 1].color : null;
     ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(2.4, r * 0.07), 0, Math.PI * 2);
-    ctx.fillStyle   = "#10161c";
-    ctx.strokeStyle = "rgba(220, 235, 245, 0.7)";
+    ctx.arc(cx, cy, hub, 0, Math.PI * 2);
+    ctx.fillStyle   = "rgba(6, 10, 14, 0.95)";
+    ctx.strokeStyle = alert ? `rgba(${alert}, ${0.5 + 0.5 * breath})` : `rgba(${ink}, 0.8)`;
     ctx.lineWidth   = 1.2;
     ctx.fill();
     ctx.stroke();
 
-    const vy   = cy + r * (this.big ? 0.40 : 0.42);
-    const vtxt = `${this.v.toFixed(this.digits)}${this.unit}`;
-    ctx.font      = `600 ${this.big ? 19 : 12}px 'JetBrains Mono', ui-monospace, monospace`;
-    ctx.fillStyle = "rgba(230, 240, 246, 0.95)";
-    ctx.fillText(vtxt, cx, vy);
+    const vy = cy + r * 0.42;
+    ctx.font      = `600 ${big ? 16 : 12}px 'JetBrains Mono', ui-monospace, monospace`;
+    ctx.fillStyle = "rgba(230, 240, 246, 0.96)";
+    ctx.fillText(`${this.v.toFixed(this.digits)}${this.unit}`, cx, vy);
 
-    ctx.font      = `600 ${this.big ? 8.5 : 7.5}px 'JetBrains Mono', ui-monospace, monospace`;
-    ctx.fillStyle = "rgba(158, 173, 181, 0.85)";
-    ctx.fillText(this.label, cx, this.big ? cy - r * 0.34 : vy + 12);
+    ctx.font      = `600 ${big ? 7.5 : 7}px 'JetBrains Mono', ui-monospace, monospace`;
+    ctx.fillStyle = "rgba(158, 173, 181, 0.9)";
+    ctx.fillText(this.label, cx, vy + (big ? 13 : 11));
   }
 }
 
@@ -193,15 +275,15 @@ class LinearMeter extends AnimatedGauge {
     const x1 = w - 2;
     const ty = h - 12;
 
-    ctx.font         = "600 8px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.font         = "700 8px 'JetBrains Mono', ui-monospace, monospace";
     ctx.textAlign    = "left";
     ctx.textBaseline = "middle";
-    ctx.fillStyle    = "rgba(158, 173, 181, 0.85)";
+    ctx.fillStyle    = "rgba(158, 173, 181, 0.95)";
     ctx.fillText(this.label, x0, 7);
 
-    ctx.font      = "600 12.5px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.font      = "700 12.5px 'JetBrains Mono', ui-monospace, monospace";
     ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(230, 240, 246, 0.95)";
+    ctx.fillStyle = "rgba(230, 240, 246, 0.98)";
     ctx.fillText(`${this.v.toFixed(this.digits)}${this.unit}`, x1, 8);
 
     this.zones.forEach((z) => {
@@ -328,10 +410,10 @@ class TankGauge extends AnimatedGauge {
 
     const pct  = Math.round(this.v * 100);
     const high = fy < y0 + 16;
-    ctx.font         = "600 9.5px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.font         = "700 9.5px 'JetBrains Mono', ui-monospace, monospace";
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle    = "rgba(230, 240, 246, 0.9)";
+    ctx.fillStyle    = "rgba(230, 240, 246, 0.97)";
     ctx.fillText(`${pct}%`, x0 + tw / 2, high ? fy + 12 : fy - 9);
   }
 }

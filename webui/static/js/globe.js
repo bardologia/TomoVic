@@ -22,6 +22,11 @@ class TomogramGlobe {
     this.liftEl = refs.lift;
     this.clampEl = refs.clamp;
     this.pointsEl = refs.points;
+    this.drapeEl = refs.metric;
+    this.drapeLayerSel = refs.metricLayer;
+    this.pauliStretchSel = refs.pauliStretch;
+    this.pauliCmapSel = refs.pauliCmap;
+    this.pauliPointsSel = refs.pauliPoints;
     this.tracksEl = refs.tracks;
     this.flyEl = refs.fly;
     this.reframeEl = refs.reframe;
@@ -68,6 +73,14 @@ class TomogramGlobe {
     this.sweepT0 = null;
     this.flightPeriod = TomogramGlobe.FLIGHT_PERIOD_MS;
     this.offline = false;
+    this.drapeToken = 0;
+    this.pauliLayer = null;
+    this.pauliLayerUrl = null;
+    this.drapeNote = "";
+    this.stride = 5;
+    this.pauliStretch = "channel";
+    this.pauliCmap = "viridis";
+    this.pauliPoints = "rgb";
 
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
       btn.addEventListener("click", () => this._setColor(btn.dataset.color));
@@ -84,6 +97,11 @@ class TomogramGlobe {
     this.reframeEl.addEventListener("click", () => this._flyToScene(true));
     this.fullEl.addEventListener("click", () => this._onFullscreen());
     document.addEventListener("fullscreenchange", () => this._syncFullscreen());
+    this.drapeEl.addEventListener("change", () => this._onDrapeToggle());
+    this.drapeLayerSel.addEventListener("change", () => { this._syncPauliControls(); if (this.drapeEl.checked) this._fetchDrape(); });
+    this.pauliStretchSel.addEventListener("change", () => this._onPauliStretch());
+    this.pauliCmapSel.addEventListener("change", () => this._onPauliCmap());
+    this.pauliPointsSel.addEventListener("change", () => this._onPauliPoints());
     this.cutAxisEl.addEventListener("change", () => this._onCutAxis());
     this.cutPosEl.addEventListener("input", () => this._onCutPos());
     this.cutSweepEl.addEventListener("change", () => this._onCutSweep());
@@ -128,6 +146,17 @@ class TomogramGlobe {
       this.flightGroup = null;
       this.viewer.scene.requestRender();
     }
+
+    this.drapeToken += 1;
+    this._clearPauliLayer();
+    const layers = meta.pauli ? TomogramGlobe.PAULI_LAYERS : [];
+    this.drapeEl.checked = false;
+    this.drapeEl.disabled = !layers.length;
+    this.drapeLayerSel.innerHTML = layers.map((layer) => `<option value="${layer.mode}">${SharedCharts.esc(layer.label)}</option>`).join("");
+    this.drapeLayerSel.disabled = !layers.length;
+    this.drapeNote = "";
+    this._syncPauliControls();
+
     this._syncThresholdLabel();
     this.tour.sync();
   }
@@ -151,16 +180,24 @@ class TomogramGlobe {
   }
 
   _syncBtns() {
+    const hasPauli = !!(this.host.meta && this.host.meta.pauli);
     this.colorEl.querySelectorAll(".cube-space").forEach((btn) => {
+      if (btn.dataset.color === "pauli") {
+        btn.disabled = !hasPauli;
+        if (!hasPauli && this.colorBy === "pauli") this.colorBy = "mu";
+      }
       btn.classList.toggle("is-active", btn.dataset.color === this.colorBy);
     });
   }
 
   _setColor(colorBy) {
     if (colorBy === this.colorBy) return;
+    const refetch = colorBy === "pauli" || this.colorBy === "pauli";
     this.colorBy = colorBy;
     this._syncBtns();
-    this._redraw();
+    this._syncPauliControls();
+    if (refetch) this._fetch();
+    else this._redraw();
   }
 
   _onThreshold() {
@@ -230,6 +267,144 @@ class TomogramGlobe {
     this.collection.show = this.pointsEl.checked;
     this.trackLayer = this.viewer.scene.primitives.add(new Cesium.PrimitiveCollection());
     this.cutLayer = this.viewer.scene.primitives.add(new Cesium.PrimitiveCollection());
+  }
+
+  _onDrapeToggle() {
+    this._syncPauliControls();
+    if (!this.drapeEl.checked) {
+      this.drapeToken += 1;
+      this.drapeNote = "";
+      this._clearPauliLayer();
+      this._syncStatus();
+      return;
+    }
+    this._fetchDrape();
+  }
+
+  async _fetchDrape() {
+    if (!this.viewer || !this.drapeLayerSel.value) return;
+
+    this.drapeToken += 1;
+    const token = this.drapeToken;
+    const mode = this.drapeLayerSel.value;
+
+    try {
+      const res = await fetch(`/api/cubes/globe_pauli?id=${encodeURIComponent(this.host.selectedId)}&mode=${mode}${this._pauliQuery(mode)}`);
+      if (!res.ok || token !== this.drapeToken) return;
+
+      const rect = res.headers.get("X-Rectangle").split(",").map(Number);
+      const win = res.headers.get("X-Window").split(",").map(Number);
+      const blob = await res.blob();
+      if (token !== this.drapeToken) return;
+
+      await this._drapePauliImage(blob, rect, token);
+      if (token !== this.drapeToken) return;
+      this.drapeNote = this._pauliNote(mode, win);
+      this._syncStatus();
+    } catch (e) {
+      this.atEl.textContent = "the Pauli drape could not be loaded";
+    }
+  }
+
+  static PAULI_DRAPE_ALPHA = 0.92;
+
+  async _drapePauliImage(blob, rect, token) {
+    this._clearPauliLayer();
+    const url = URL.createObjectURL(blob);
+    const rectangle = Cesium.Rectangle.fromDegrees(rect[0], rect[1], rect[2], rect[3]);
+    const provider = await Cesium.SingleTileImageryProvider.fromUrl(url, { rectangle });
+    if (token !== this.drapeToken) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    this.pauliLayerUrl = url;
+    this.pauliLayer = this.viewer.imageryLayers.addImageryProvider(provider);
+    this.pauliLayer.alpha = TomogramGlobe.PAULI_DRAPE_ALPHA;
+    this.viewer.scene.requestRender();
+  }
+
+  _clearPauliLayer() {
+    if (this.pauliLayer && this.viewer) {
+      this.viewer.imageryLayers.remove(this.pauliLayer, true);
+      this.viewer.scene.requestRender();
+    }
+    if (this.pauliLayerUrl) URL.revokeObjectURL(this.pauliLayerUrl);
+    this.pauliLayer = null;
+    this.pauliLayerUrl = null;
+  }
+
+  static PAULI_LAYERS = [
+    { mode: "rgb", label: "Pauli composite" },
+    { mode: "surface", label: "Pauli surface" },
+    { mode: "double", label: "Pauli double bounce" },
+    { mode: "volume", label: "Pauli volume" },
+    { mode: "dominant", label: "Pauli dominant" },
+  ];
+
+  _pauliWindow() {
+    const meta = this.host.meta;
+    if (this.host.pauli && this.host.pauli.available) return this.host.pauli.win;
+    return { az: meta.pauli.window[0], rg: meta.pauli.window[1] };
+  }
+
+  _pauliQuery(mode) {
+    const win = this._pauliWindow();
+    const single = mode !== "rgb" && mode !== "dominant";
+    const stretch = mode === "dominant" ? "" : `&stretch=${this.pauliStretch}`;
+    const cmap = single ? `&cmap=${this.pauliCmap}` : "";
+    return `&win_az=${win.az}&win_rg=${win.rg}${stretch}${cmap}`;
+  }
+
+  _drapeMode() {
+    if (!this.drapeEl.checked || !this.drapeLayerSel.value) return null;
+    return this.drapeLayerSel.value;
+  }
+
+  _syncPauliControls() {
+    const hasPauli = !!(this.host.meta && this.host.meta.pauli);
+    const mode = hasPauli ? this._drapeMode() : null;
+    const drapeStretch = mode !== null && mode !== "dominant";
+    const pointsComposite = hasPauli && this.colorBy === "pauli" && this.pauliPoints === "rgb";
+
+    this.drapeLayerSel.hidden = !hasPauli;
+    this.drapeEl.closest("label").hidden = !hasPauli;
+    this.pauliStretchSel.hidden = !(drapeStretch || pointsComposite);
+    this.pauliStretchSel.value = this.pauliStretch;
+    this.pauliCmapSel.hidden = !(mode !== null && mode !== "rgb" && mode !== "dominant");
+    this.pauliCmapSel.value = this.pauliCmap;
+    this.pauliPointsSel.hidden = !(hasPauli && this.colorBy === "pauli");
+    this.pauliPointsSel.value = this.pauliPoints;
+  }
+
+  _onPauliStretch() {
+    this.pauliStretch = this.pauliStretchSel.value;
+    const mode = this._drapeMode();
+    if (mode !== null && mode !== "dominant") this._fetchDrape();
+    if (this.colorBy === "pauli" && this.pauliPoints === "rgb") this._fetch();
+  }
+
+  _onPauliCmap() {
+    this.pauliCmap = this.pauliCmapSel.value;
+    const mode = this._drapeMode();
+    if (mode !== null && mode !== "rgb" && mode !== "dominant") this._fetchDrape();
+  }
+
+  _onPauliPoints() {
+    this.pauliPoints = this.pauliPointsSel.value;
+    this._syncPauliControls();
+    if (this.colorBy === "pauli") this._fetch();
+  }
+
+  _pauliNote(mode, win) {
+    const layer = TomogramGlobe.PAULI_LAYERS.find((entry) => entry.mode === mode);
+    const asked = this._pauliWindow();
+    let scheme;
+    if (mode === "rgb") scheme = `red double · green volume · blue surface, ${this.pauliStretch === "shared" ? "shared dB scale" : "per channel"}`;
+    else if (mode === "dominant") scheme = "blue surface · red double · green volume";
+    else scheme = `${this.pauliCmap}, ${this.pauliStretch === "shared" ? "shared" : "own"} dB range`;
+    const widened = win[0] !== asked.az || win[1] !== asked.rg ? ` (requested ${asked.az} × ${asked.rg}, widened to the drape cell stride)` : "";
+    return ` · drape ${layer.label} (${scheme}, window ${win[0]} × ${win[1]}${widened})`;
   }
 
   _onPointsToggle() {
@@ -452,8 +627,9 @@ class TomogramGlobe {
   }
 
   _url(source) {
+    const pauli = this.colorBy === "pauli" ? `&pauli=${this.pauliPoints}${this._pauliQuery(this.pauliPoints)}` : "";
     return `/api/cubes/globe_points?id=${encodeURIComponent(this.host.selectedId)}&source=${source}` +
-      `&amp_min=${this._ampMin(source)}&max=${this._maxPoints()}`;
+      `&amp_min=${this._ampMin(source)}&max=${this._maxPoints()}${pauli}`;
   }
 
   _load(url, signal = null) {
@@ -494,8 +670,7 @@ class TomogramGlobe {
 
     this.loadTimer = setTimeout(() => {
       this.stageEl.classList.add("is-loading");
-      this.atEl.classList.add("is-loading");
-      this.atEl.textContent = "loading scatterers…";
+      this.atEl.innerHTML = ThinkingOrb.busy("searching", "loading voxels…");
     }, 120);
   }
 
@@ -531,7 +706,8 @@ class TomogramGlobe {
 
     this.points = raw.subarray(4);
     this.total = raw[1];
-    this.muRange = TomogramCloud.sampleRange(this.points, 3, 5);
+    this.stride = raw[2];
+    this.muRange = TomogramCloud.sampleRange(this.points, 3, this.stride);
     this._redraw();
     this._prefetch();
   }
@@ -616,15 +792,22 @@ class TomogramGlobe {
 
     this.collection.removeAll();
     this.flightBasis = globe.tracks ? this._flightBasis(globe, anchor, up, lift) : null;
-    this.pointAlong = this.flightBasis ? new Float32Array(rows.length / 5) : null;
+    const stride = this.stride;
+    this.pointAlong = this.flightBasis ? new Float32Array(rows.length / stride) : null;
 
-    for (let i = 0; i < rows.length; i += 5) {
+    for (let i = 0; i < rows.length; i += stride) {
       const mu = rows[i + 3];
       const amp = rows[i + 4];
-      const t = this.colorBy === "amp"
-        ? (amp - ampLo) / Math.max(ampHi - ampLo, 1e-6)
-        : (mu - muLo) / muSpan;
-      const rgb = TomogramCloud.palette(t);
+
+      let rgb;
+      if (this.colorBy === "pauli" && stride >= 8) {
+        rgb = [Math.round(rows[i + 5] * 255), Math.round(rows[i + 6] * 255), Math.round(rows[i + 7] * 255)];
+      } else {
+        const t = this.colorBy === "amp"
+          ? (amp - ampLo) / Math.max(ampHi - ampLo, 1e-6)
+          : (mu - muLo) / muSpan;
+        rgb = TomogramCloud.palette(t);
+      }
 
       const upComp = rows[i] * up.x + rows[i + 1] * up.y + rows[i + 2] * up.z;
       const rise = upComp * (exagg - 1) + lift;
@@ -637,7 +820,7 @@ class TomogramGlobe {
 
       if (this.pointAlong) {
         const basis = this.flightBasis;
-        this.pointAlong[i / 5] = (position.x - basis.first.x) * basis.forward.x
+        this.pointAlong[i / stride] = (position.x - basis.first.x) * basis.forward.x
           + (position.y - basis.first.y) * basis.forward.y
           + (position.z - basis.first.z) * basis.forward.z;
       }
@@ -657,7 +840,7 @@ class TomogramGlobe {
       this.flown = true;
     }
 
-    this.shown = rows.length / 5;
+    this.shown = rows.length / stride;
     this._rebuildCut();
     this._redrawTracks();
     this._syncStatus();
@@ -688,7 +871,13 @@ class TomogramGlobe {
       if (this.flyEl.checked) trackNote += " · flight loop";
     }
 
-    this.atEl.textContent = `${visible.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${cutNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery`;
+    let pointsNote = "";
+    if (this.colorBy === "pauli") {
+      pointsNote = this.pauliPoints === "dominant"
+        ? " · voxels by dominant mechanism (blue surface · red double · green volume)"
+        : ` · voxels by Pauli composite (red double · green volume · blue surface, ${this.pauliStretch === "shared" ? "shared dB scale" : "per channel"})`;
+    }
+    this.atEl.textContent = `${visible.toLocaleString()} of ${Math.round(this.total).toLocaleString()} voxels${exaggNote}${cutNote}${trackNote} · corner fit ±${globe.residual_rms_m.toFixed(1)} m · ctrl+drag tilts · Esri World Imagery${pointsNote}${this.drapeNote}`;
   }
 
   _redrawTracks() {
