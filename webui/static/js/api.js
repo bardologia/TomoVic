@@ -2,11 +2,12 @@
 
 class Api {
 
-  static async probe(url, timeoutMs = 0) {
+  static async probe(url, timeoutMs = 0, signal = null) {
     const controller = timeoutMs > 0 ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-      const res  = await fetch(url, controller ? { signal: controller.signal } : {});
+      const effectiveSignal = signal || (controller ? controller.signal : null);
+      const res  = await fetch(url, effectiveSignal ? { signal: effectiveSignal } : {});
       const data = await res.json().catch(() => null);
       return { status: res.status, data };
     } catch (e) {
@@ -16,12 +17,13 @@ class Api {
     }
   }
 
-  static async get(url, timeoutMs = 0) {
-    const probe = await Api.probe(url, timeoutMs);
+  static async get(url, timeoutMs = 0, signal = null) {
+    const probe = await Api.probe(url, timeoutMs, signal);
     if (probe.timedOut) return { error: `no answer from the console within ${Math.round(timeoutMs / 1000)} s` };
     if (!probe.status) return { error: "backend unreachable" };
     if (probe.status >= 500) return { error: `server ${probe.status}` };
-    return probe.data || { error: `malformed response from ${url}` };
+    if (probe.status >= 400) return (probe.data && probe.data.error) ? probe.data : { error: `request failed with status ${probe.status}` };
+    return (probe.data !== null && probe.data !== undefined) ? probe.data : { error: `malformed response from ${url}` };
   }
 
   static async post(url, body) {
@@ -31,7 +33,13 @@ class Api {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || {}),
       });
-      return await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return (data && typeof data === "object")
+          ? { ok: false, ...data }
+          : { ok: false, error: `request failed with status ${res.status}` };
+      }
+      return data || { ok: true };
     } catch (e) {
       return { ok: false, error: "backend unreachable" };
     }
@@ -44,7 +52,13 @@ class Api {
         headers: { "Content-Type": blob.type || "application/octet-stream" },
         body: blob,
       });
-      return await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return (data && typeof data === "object")
+          ? { ok: false, ...data }
+          : { ok: false, error: `request failed with status ${res.status}` };
+      }
+      return data || { ok: true };
     } catch (e) {
       return { ok: false, error: "backend unreachable" };
     }
@@ -55,6 +69,7 @@ class Api {
 class Format {
 
   static duration(seconds) {
+    if (seconds == null || !Number.isFinite(seconds)) return "0s";
     const total = Math.max(0, Math.round(seconds));
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
@@ -64,11 +79,19 @@ class Format {
   }
 
   static progressBits(p) {
-    const done = p.done + p.failed;
-    const pct = Math.round((100 * done) / p.total);
-    const bits = [`${done}/${p.total}`, `${pct}%`];
-    if (p.eta_s != null) bits.push(`ETA ${Format.duration(p.eta_s)}`, `≈ ${p.finish_at.slice(11, 16)}`);
-    else if (done < p.total) bits.push("estimating ETA");
+    if (!p) return [];
+    const done = (p.done || 0) + (p.failed || 0);
+    const total = p.total || 0;
+    const pct = total > 0 ? Math.round((100 * done) / total) : 0;
+    const bits = [`${done}/${total}`, `${pct}%`];
+    if (p.eta_s != null && Number.isFinite(p.eta_s)) {
+      bits.push(`ETA ${Format.duration(p.eta_s)}`);
+      if (p.finish_at && typeof p.finish_at === "string" && p.finish_at.length >= 16) {
+        bits.push(`≈ ${p.finish_at.slice(11, 16)}`);
+      }
+    } else if (done < total) {
+      bits.push("estimating ETA");
+    }
     if (p.failed) bits.push(`${p.failed} FAILED`);
     return bits;
   }
@@ -80,6 +103,7 @@ class Toast {
 
   static show(message, kind) {
     const el = document.getElementById("toast");
+    if (!el) return;
     el.textContent = message;
     el.className = "toast is-show" + (kind ? ` is-${kind}` : "");
 

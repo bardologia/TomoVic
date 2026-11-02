@@ -118,6 +118,17 @@ class TomogramVolume {
     window.addEventListener("mouseup", () => { this.dragging = null; });
     this.canvas.addEventListener("wheel", (ev) => this._onWheel(ev), { passive: false });
     this.canvas.addEventListener("dblclick", () => this._resetView());
+
+    this.canvas.addEventListener("webglcontextlost", (ev) => {
+      ev.preventDefault();
+      this.gl = null;
+      this.program = null;
+    }, false);
+    this.canvas.addEventListener("webglcontextrestored", () => {
+      this._ensureGl();
+      if (this.volume) this._uploadVolume();
+      this._draw();
+    }, false);
   }
 
   get available() {
@@ -205,7 +216,7 @@ class TomogramVolume {
   async _fetch() {
     this.token += 1;
     const token = this.token;
-    this.atEl.textContent = "Streaming volume…";
+    this.atEl.innerHTML = ThinkingOrb.busy("listening", "Streaming volume…");
 
     try {
       const res = await fetch(`/api/cubes/volume?id=${encodeURIComponent(this.host.selectedId)}&source=${this.source}&max=${TomogramVolume.MAX_DIM}`);

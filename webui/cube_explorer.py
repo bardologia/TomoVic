@@ -4,9 +4,12 @@ Opens the raw tomogram cubes written by the preprocessing pipeline together
 with their DEM and primary SLC amplitude, optionally alongside the
 parametrized tomogram of a Gaussian parameter run reconstructed lazily on the
 same elevation axis, and renders slices, planes, transects and geocoded point
-clouds as PNG or packed binary payloads. Cubes are indexed by elevation bin,
-azimuth pixel and range pixel; elevation axes are in metres and geocoded
-positions in ECEF metres.
+clouds as PNG or packed binary payloads. When the run carries a polarimetric
+primary it also serves the multilooked Pauli decomposition as maps, pixel
+readouts, scene summaries and a north-up drape for the globe. The slice
+collector renders a basket of cuts across runs into a folder and can mail it as
+zip volumes. Cubes are indexed by elevation bin, azimuth pixel and range pixel;
+elevation axes are in metres and geocoded positions in ECEF metres.
 """
 
 from __future__ import annotations
@@ -16,13 +19,16 @@ import json
 import math
 import os
 import re
+import smtplib
 import sys
 import threading
 import time
 import traceback
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from pathlib  import Path
+from datetime      import datetime
+from email.message import EmailMessage
+from pathlib       import Path
 
 import matplotlib
 
@@ -30,13 +36,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from catalog_roots              import CatalogRoots, RunScanner
-from lru_cache                  import LruCache
-from tools.data.gaussians       import GaussianMixture
-from tools.reporting.plotting   import PlotBase
-from tools.sar.geocoding        import SceneGeocoder
-from tools.sar.track_parameters import TrackParameters
-from web_logger                 import WebLogger
+from catalog_roots                  import CatalogRoots, RunScanner
+from globe_drape                    import FootprintImage
+from lru_cache                      import LruCache
+from tools.data.gaussians           import GaussianMixture
+from tools.reporting.plotting       import PlotBase
+from tools.runtime.machine_profile  import MachineProfile
+from tools.sar.geocoding            import SceneGeocoder
+from tools.sar.geometry_field       import GeometryField
+from tools.sar.polarimetry          import PauliDecomposer, PolarimetricArtifact
+from tools.sar.track_parameters     import TrackParameters
+from web_logger                     import WebLogger
 
 
 class SliceFigureArchiver(PlotBase):
@@ -642,6 +652,15 @@ class CubeExplorer:
     FIGURE_DIRS     = ("images", "figures", "params")
     FIGURE_SUFFIXES = (".png", ".gif", ".jpg", ".jpeg", ".svg")
 
+    PAULI_MODES           = ("rgb", "surface", "double", "volume", "dominant")
+    PAULI_LABELS          = {"surface": "surface (odd bounce)", "double": "double bounce", "volume": "volume"}
+    PAULI_COLORS          = {"surface": "#3a9ad9", "double": "#d55e00", "volume": "#009e73"}
+    PAULI_NODATA          = "#10151a"
+    PAULI_WINDOW_MAX      = 99
+    PAULI_CACHE_WINDOWS   = 2
+    GLOBE_IMAGE_WIDTH     = 2048
+    GLOBE_CELLS_PER_PIXEL = 4
+
     def __init__(self, logger: WebLogger) -> None:
         """Builds the explorer with an idle load status and no cube loaded."""
         self.logger      = logger
@@ -786,12 +805,10 @@ class CubeExplorer:
         with self.lock:
             if self.loaded is None or self.loaded["id"] != cube_id:
                 return None
-            primary    = self.loaded["primary"]
-            vmin, vmax = self.loaded["primary_clim"]
+            primary = self.loaded["primary"]
+            clim    = self.loaded["primary_clim"]
 
-        buf = io.BytesIO()
-        plt.imsave(buf, primary, cmap="gray", vmin=float(vmin), vmax=float(vmax), **self.PNG_ENCODE)
-        return buf.getvalue()
+        return self._encode_primary(primary, clim)
 
     def profiles(self, cube_id: str, az: int, rg: int) -> dict:
         """Returns the elevation profile of every source at one pixel.
@@ -1092,34 +1109,51 @@ class CubeExplorer:
         header = np.array([dem.shape[0], dem.shape[1], median, 0.0], dtype=np.float32)
         return header.tobytes() + np.ascontiguousarray(grid).tobytes()
 
-    def globe_points_bin(self, cube_id: str, source: str, amp_min: float, max_points: int) -> bytes | None:
+    def globe_points_bin(self, cube_id: str, source: str, amp_min: float, max_points: int, pauli_mode: str = "", win_az: int = 1, win_rg: int = 1, shared: bool = False, cmap: str = "viridis") -> bytes | None:
         """Packs a geocoded point cloud as ECEF offsets from the scene anchor.
 
         Scatterer elevations are added to the DEM terrain height at their pixel
-        before geocoding, so points sit above ground on the globe.
+        before geocoding, so points sit above ground on the globe. With a Pauli
+        mode every row also carries the colour of its pixel in that Pauli map,
+        so the scatterers can be painted by the scattering mechanism of the
+        ground they stand on.
 
         Args:
-            cube_id: Id of the loaded cube.
-            source: Source to draw points from, restricted to GLOBE_SOURCES.
-            amp_min: Minimum amplitude for a point to be kept.
-            max_points: Cap on emitted points before the terrain mask is applied.
+            cube_id    : Id of the loaded cube.
+            source     : Source to draw points from, restricted to GLOBE_SOURCES.
+            amp_min    : Minimum amplitude for a point to be kept.
+            max_points : Cap on emitted points before the terrain mask is applied.
+            pauli_mode : One of PAULI_MODES to append the pixel colour of, or "" for no colour columns.
+            win_az     : Multilook window of the Pauli map in azimuth pixels.
+            win_rg     : Multilook window of the Pauli map in range pixels.
+            shared     : Whether every Pauli component is stretched over one pooled dB range rather than its own percentiles.
+            cmap       : Colormap painting a single Pauli component's power, one of CMAPS.
 
         Returns:
-            A four-float32 header (emitted count, pre-mask total, 0, 0) followed by
-            rows of (ECEF x, y, z offsets in metres, elevation in metres,
-            amplitude), or None when the cube has no geocoding or the source is
-            not globe-renderable.
+            A four-float32 header (emitted count, pre-mask total, columns per
+            row, 0) followed by rows of (ECEF x, y, z offsets in metres,
+            elevation in metres, amplitude) plus red, green and blue in [0, 1]
+            when a Pauli mode was given, or None when the cube has no
+            geocoding, the source is not globe-renderable, or a Pauli mode was
+            given without a polarimetric primary or with an unknown mode or
+            colormap.
         """
         with self.lock:
             if self.loaded is None or self.loaded["id"] != cube_id:
                 return None
             geo       = self.loaded["geo"]
             param_tag = self.loaded["param_tag"]
+            pauli     = self.loaded["pauli"]
 
         if geo is None or source not in self.GLOBE_SOURCES:
             return None
+        if pauli_mode and (pauli is None or pauli_mode not in self.PAULI_MODES or cmap not in self.CMAPS):
+            return None
 
+        window = self._pauli_window(win_az, win_rg)
         key    = f"{cube_id}|{param_tag}|{source}|{amp_min!r}|{max_points}"
+        if pauli_mode:
+            key = f"{key}|{pauli_mode}|{window}" + ("" if pauli_mode == "dominant" else f"|{shared}|{cmap}")
         cached = self.globe_blobs.get(key)
         if cached is not None:
             return cached
@@ -1143,13 +1177,89 @@ class CubeExplorer:
         _, _, ecef = geo["geocoder"].geocode(az_idx + geo["az0"], rg_idx + geo["rg0"], heights)
         offsets    = (ecef - geo["anchor_ecef"][None, :]).astype(np.float32)
 
-        globe_rows = np.concatenate([offsets, rows[:, 2:3], rows[:, 3:4]], axis=1)
-        header     = np.array([globe_rows.shape[0], total, 0.0, 0.0], dtype=np.float32)
+        columns = [offsets, rows[:, 2:3], rows[:, 3:4]]
+        if pauli_mode:
+            image = self._pauli_raster(self._pauli_powers(pauli, window), pauli_mode, shared, cmap)
+            columns.append(image[az_idx, rg_idx])
+
+        globe_rows = np.concatenate(columns, axis=1).astype(np.float32)
+        header     = np.array([globe_rows.shape[0], total, globe_rows.shape[1], 0.0], dtype=np.float32)
         blob       = header.tobytes() + np.ascontiguousarray(globe_rows).tobytes()
 
         if len(blob) <= self.GLOBE_BLOB_MAX_BYTES:
             self.globe_blobs.put(key, blob)
         return blob
+
+    def globe_pauli_png(self, cube_id: str, mode: str, win_az: int, win_rg: int, shared: bool, cmap: str, width: int | None = None) -> tuple | None:
+        """Renders one Pauli map as a north-up RGBA image over the scene footprint for the globe drape.
+
+        The map is resampled onto a longitude/latitude grid of square ground
+        cells, transparent outside the footprint, so Cesium can drape it as one
+        imagery tile. The cell count follows the ground, GLOBE_CELLS_PER_PIXEL
+        cells per pixel of the finer axis along the longer side up to the width
+        cap, and the multilook window is widened per axis to at least the
+        pixels one cell covers, so every cell shows the mean of the pixels it
+        stands for rather than a single speckled sample. The footprint lookup
+        is cached per cube and width cap, so only the painting repeats per mode
+        and scheme.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            mode    : One of PAULI_MODES.
+            win_az  : Multilook window in azimuth pixels.
+            win_rg  : Multilook window in range pixels.
+            shared  : Whether every component is stretched over one pooled dB range rather than its own percentiles.
+            cmap    : Colormap painting a single component's power, one of CMAPS.
+            width   : Cap on the cell count along the longer ground side; GLOBE_IMAGE_WIDTH when None.
+
+        Returns:
+            Tuple of PNG bytes, the rectangle [west, south, east, north] in
+            degrees the image spans and the (azimuth, range) window rendered,
+            or None when the cube has no geocoding, no polarimetric primary, or
+            the mode or colormap is unknown.
+        """
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return None
+            geo = self.loaded["geo"]
+            ctx = self.loaded["pauli"]
+
+        if geo is None or ctx is None or mode not in self.PAULI_MODES or cmap not in self.CMAPS:
+            return None
+
+        footprint = self._footprint(geo, self.GLOBE_IMAGE_WIDTH if width is None else int(width))
+        step      = footprint["plan"]["step"]
+        window    = self._pauli_window(max(int(win_az), step[0]), max(int(win_rg), step[1]))
+
+        image = self._pauli_raster(self._pauli_powers(ctx, window), mode, shared, cmap)
+        rgba  = footprint["resampler"].paint(image, footprint["geometry"])
+
+        buf = io.BytesIO()
+        plt.imsave(buf, rgba, **self.PNG_ENCODE)
+        return buf.getvalue(), [float(value) for value in footprint["geometry"]["rect"]], window
+
+    def _footprint(self, geo: dict, width: int) -> dict:
+        """Returns the north-up lookup of the loaded cube's footprint for a width cap, building and caching it on first use.
+
+        Args:
+            geo   : Geocoding context of the loaded cube.
+            width : Cap on the cell count along the longer ground side.
+
+        Returns:
+            Dict with the ``resampler`` bound to the footprint, its ``plan`` (width, per-axis step, cell and pixel spacing) and the ``geometry`` lookup.
+        """
+        cache = geo.setdefault("footprint", {})
+        entry = cache.get(width)
+        if entry is not None:
+            return entry
+
+        resampler = FootprintImage(geo["geocoder"], geo["dem"], geo["az0"], geo["rg0"])
+        plan      = resampler.plan(self.GLOBE_CELLS_PER_PIXEL, width)
+        entry     = {"resampler": resampler, "plan": plan, "geometry": resampler.geometry(plan["width"], plan["step"])}
+
+        cache.clear()
+        cache[width] = entry
+        return entry
 
     def _warm_globe_blobs(self, cube_id: str) -> None:
         """Precomputes the default-view globe blob of every source into the cache.
@@ -1798,12 +1908,12 @@ class CubeExplorer:
             param_tag: Parameter run loaded alongside the raw cube, or None.
         """
         try:
-            entries, meta, primary, dem, geo, passes, timer = self._load_all(reader, param_tag)
-            clim            = tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
+            entries, meta, primary, dem, geo, passes, pauli, timer = self._load_all(reader, param_tag)
+            clim            = self._primary_clim(primary)
             meta["timings"] = {"total": round(timer.total(), 3), "stages": timer.stages}
 
             with self.lock:
-                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo, "passes": passes}
+                self.loaded = {"id": cube_id, "param_tag": param_tag, "entries": entries, "meta": meta, "primary": primary, "primary_clim": clim, "dem": dem, "dem_relative": self._dem_relative_grid(dem), "geo": geo, "passes": passes, "pauli": pauli}
                 self.status = {"state": "ready", "id": cube_id, "progress": 1.0, "stage": "ready", "error": ""}
                 self.cube_cache.put(reader.cache_key(param_tag), self.loaded)
 
@@ -1820,7 +1930,7 @@ class CubeExplorer:
         self._warm_globe_blobs(cube_id)
         self.logger.muted(f"globe point cache warmed in {warm.total():.1f} s: {cube_id}")
 
-    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None, LoadTimer]:
+    def _load_all(self, reader: StampReader, param_tag: str | None) -> tuple[dict, dict, np.ndarray, np.ndarray | None, dict | None, dict | None, dict | None, LoadTimer]:
         """Reads the tomogram, maps and geometry artifacts of one preprocessing run.
 
         Every stage books its wall time on a LoadTimer and names itself in the
@@ -1836,9 +1946,11 @@ class CubeExplorer:
         Returns:
             Tuple of the per-source entries, the front-end metadata payload, the
             primary amplitude map in dB of shape (azimuth, range), the DEM in
-            metres, the geocoding context, the raw pass-stack context and the
-            stage timer; DEM and geocoding are None when the scene cannot be
-            geolocated, the pass context when the run stores no secondary stack.
+            metres, the geocoding context, the raw pass-stack context, the
+            polarimetric context and the stage timer; DEM and geocoding are None
+            when the scene cannot be geolocated, the pass context when the run
+            stores no secondary stack, the polarimetric context when the run
+            lists no polarimetric primary.
 
         Raises:
             ValueError: If the tomogram is not three-dimensional or its footprint
@@ -1878,6 +1990,7 @@ class CubeExplorer:
         dem     = stage("dem",       lambda: self._load_dem(reader, n_az, n_rg))
         geo     = stage("geocoding", lambda: self._load_geo(reader, dem, n_az, n_rg))
         passes  = stage("passes",    lambda: self._load_passes(reader, n_az, n_rg))
+        pauli   = stage("pauli",     lambda: self._load_polarimetry(reader, n_az, n_rg))
 
         meta = {
             "sources"   : [s for s in self.SOURCES if s in entries],
@@ -1889,13 +2002,14 @@ class CubeExplorer:
             "intensity" : {s: [entries[s]["vmin"], entries[s]["vmax"]] for s in entries},
             "param"     : self._param_meta_payload(entries.get("param")),
             "dem"       : dem is not None,
-            "spacing"   : self._load_spacing(reader),
+            "spacing"   : self._load_spacing(reader, n_rg),
             "globe"     : self._globe_meta(geo),
             "passes"    : self._passes_meta(passes),
+            "pauli"     : self._pauli_meta(pauli),
         }
         meta["globe_defaults"] = self._globe_defaults(meta)
 
-        return entries, meta, primary, dem, geo, passes, timer
+        return entries, meta, primary, dem, geo, passes, pauli, timer
 
     def _globe_defaults(self, meta: dict) -> dict | None:
         """Returns the globe request every source is first served with.
@@ -1995,22 +2109,327 @@ class CubeExplorer:
             "fields"      : fields,
         }
 
-    def _load_spacing(self, reader: StampReader) -> dict | None:
-        """Returns the reference track's azimuth and range pixel spacing in metres.
+    def pauli_png(self, cube_id: str, mode: str, win_az: int, win_rg: int, shared: bool, cmap: str = "viridis") -> bytes | None:
+        """Renders the Pauli decomposition of the primary pass as a PNG.
 
         Args:
-            reader: Preprocessing run reader.
+            cube_id : Id of the loaded cube.
+            mode    : "rgb" for the composite (red double bounce, green volume, blue surface), a component key for its multilooked power in dB, or "dominant" for the strongest mechanism per pixel.
+            win_az  : Multilook window in azimuth pixels.
+            win_rg  : Multilook window in range pixels.
+            shared  : Whether every component is stretched over one pooled dB range rather than its own percentiles.
+            cmap    : Colormap painting a single component's power, one of CMAPS.
 
         Returns:
-            Dict with ``az`` and ``rg`` spacings, or None when the run stores no
-            track parameters.
+            PNG bytes of the (azimuth, range) map cropped to the cube footprint, or
+            None when the cube is not loaded, carries no polarimetric primary or
+            the mode or colormap is unknown.
+        """
+        ctx = self._pauli_context(cube_id)
+        if ctx is None or mode not in self.PAULI_MODES or cmap not in self.CMAPS:
+            return None
+
+        entry = self._pauli_powers(ctx, self._pauli_window(win_az, win_rg))
+        image = self._pauli_raster(entry, mode, shared, cmap)
+
+        buf = io.BytesIO()
+        plt.imsave(buf, image, **self.PNG_ENCODE)
+        return buf.getvalue()
+
+    def pauli_value_at(self, cube_id: str, az: int, rg: int, win_az: int, win_rg: int) -> dict:
+        """Reads the Pauli powers, mechanism shares and channel ratios at one pixel.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            az      : Azimuth pixel index, clipped into range.
+            rg      : Range pixel index, clipped into range.
+            win_az  : Multilook window in azimuth pixels.
+            win_rg  : Multilook window in range pixels.
+
+        Returns:
+            Dict with ``ok``, the clipped indices, the ``window`` used, whether
+            the window holds data (``valid``), the component powers in ``db``,
+            their ``fractions`` of the span, the ``dominant`` component key
+            (None where the window holds no data), the ``span_db`` and the
+            co-polar ``hh_vv_db`` and cross-polar ``hv_hh_db`` ratios in dB.
+        """
+        ctx = self._pauli_context(cube_id)
+        if ctx is None:
+            return {"ok": False, "error": "this cube has no polarimetric primary"}
+
+        window = self._pauli_window(win_az, win_rg)
+        entry  = self._pauli_powers(ctx, window)
+        powers = entry["powers"]
+
+        az = int(np.clip(az, 0, powers.shape[1] - 1))
+        rg = int(np.clip(rg, 0, powers.shape[2] - 1))
+
+        fractions = PauliDecomposer.fractions(powers[:, az:az + 1, rg:rg + 1])[:, 0, 0]
+        decibel   = entry["db"][:, az, rg]
+        dominant  = int(entry["dominant"][az, rg])
+        ratios    = self._pauli_ratios(powers[:, az, rg], entry["copolar"][:, az, rg])
+
+        return {
+            "ok"        : True,
+            "az"        : az,
+            "rg"        : rg,
+            "window"    : list(window),
+            "valid"     : dominant >= 0,
+            "db"        : {key: float(decibel[index]) for index, key in enumerate(PauliDecomposer.COMPONENTS)},
+            "fractions" : {key: float(fractions[index]) for index, key in enumerate(PauliDecomposer.COMPONENTS)},
+            "dominant"  : None if dominant < 0 else PauliDecomposer.COMPONENTS[dominant],
+            **ratios,
+        }
+
+    def pauli_summary(self, cube_id: str, win_az: int, win_rg: int, shared: bool) -> dict:
+        """Summarises the decomposition over the whole cube footprint.
+
+        Args:
+            cube_id : Id of the loaded cube.
+            win_az  : Multilook window in azimuth pixels.
+            win_rg  : Multilook window in range pixels.
+            shared  : Whether every component is stretched over one pooled dB range rather than its own percentiles.
+
+        Returns:
+            Dict with ``ok``, the ``window`` used, the stretch ``bounds`` per
+            component in dB, the ``scene_share`` of the summed span each
+            component carries (the normalised diagonal of the scene-averaged
+            coherency matrix, which does not depend on the multilook window),
+            the ``dominant_share`` of data-holding pixels each component wins,
+            their count ``n_pixels``, the count ``n_nodata`` of pixels whose
+            window holds no data, and the scene-mean ``span_db``, co-polar
+            ``hh_vv_db`` and cross-polar ``hv_hh_db`` in dB.
+        """
+        ctx = self._pauli_context(cube_id)
+        if ctx is None:
+            return {"ok": False, "error": "this cube has no polarimetric primary"}
+
+        window   = self._pauli_window(win_az, win_rg)
+        entry    = self._pauli_powers(ctx, window)
+        valid    = entry["valid"]
+        bounds   = PauliDecomposer.stretch_bounds(entry["db"], shared, valid)
+        n_pixels = int(np.count_nonzero(valid))
+
+        total   = entry["powers"][:, valid].sum(axis=1, dtype=np.float64)
+        copolar = entry["copolar"][:, valid].sum(axis=1, dtype=np.float64)
+        share   = total / total.sum()
+
+        return {
+            "ok"             : True,
+            "window"         : list(window),
+            "bounds"         : {key: [bounds[key][0], bounds[key][1]] for key in PauliDecomposer.COMPONENTS},
+            "scene_share"    : {key: float(share[index]) for index, key in enumerate(PauliDecomposer.COMPONENTS)},
+            "dominant_share" : {key: float(np.count_nonzero(entry["dominant"] == index) / n_pixels) for index, key in enumerate(PauliDecomposer.COMPONENTS)},
+            "n_pixels"       : n_pixels,
+            "n_nodata"       : int(valid.size - n_pixels),
+            **self._pauli_ratios(total / n_pixels, copolar / n_pixels),
+        }
+
+    @staticmethod
+    def _pauli_ratios(powers: np.ndarray, copolar: np.ndarray) -> dict:
+        """Returns the span and the channel ratios of one set of powers in dB.
+
+        Args:
+            powers  : Pauli component powers of shape (3,), surface, double bounce and volume.
+            copolar : Co-polar powers of shape (2,), |HH|^2 and |VV|^2.
+
+        Returns:
+            Dict with ``span_db`` (|HH|^2 + 2 |HV|^2 + |VV|^2), ``hh_vv_db`` (HH over VV) and ``hv_hh_db`` (HV over HH); the volume power is 2 |HV|^2.
+        """
+        decibel = lambda value: float(PauliDecomposer.decibel(np.asarray([value], dtype=np.float64))[0])
+
+        return {
+            "span_db"  : decibel(float(np.sum(powers))),
+            "hh_vv_db" : decibel(float(copolar[0])) - decibel(float(copolar[1])),
+            "hv_hh_db" : decibel(float(powers[2]) / 2.0) - decibel(float(copolar[0])),
+        }
+
+    def _pauli_context(self, cube_id: str) -> dict | None:
+        """Returns the polarimetric context of the loaded cube, or None when the id or the artifact is absent."""
+        with self.lock:
+            if self.loaded is None or self.loaded["id"] != cube_id:
+                return None
+            return self.loaded["pauli"]
+
+    def _pauli_window(self, win_az: int, win_rg: int) -> tuple:
+        """Clamps a requested multilook window into [1, PAULI_WINDOW_MAX] per axis."""
+        return (int(np.clip(int(win_az), 1, self.PAULI_WINDOW_MAX)), int(np.clip(int(win_rg), 1, self.PAULI_WINDOW_MAX)))
+
+    def _pauli_powers(self, ctx: dict, window: tuple) -> dict:
+        """Returns the decomposition at one window, computing and caching it on first use.
+
+        The boxcar reads up to half a window beyond the cube footprint wherever
+        the artifact covers it, so the reflect boundary of the filter only acts
+        at the edge of the preprocessing crop. Concurrent requests for the same
+        window compute it once: the context lock serialises the miss.
+
+        Args:
+            ctx    : Polarimetric context of the loaded cube.
+            window : Multilook window as (azimuth, range) pixels.
+
+        Returns:
+            Dict with the multilooked ``powers`` of shape (3, azimuth, range) in
+            float32, the same in ``db``, the ``dominant`` component index map
+            (-1 where the window holds no data), the ``valid`` mask and the
+            ``copolar`` powers of shape (2, azimuth, range).
+        """
+        with ctx["lock"]:
+            cached = ctx["cache"].get(window)
+            if cached is not None:
+                return cached
+
+            az_lo, az_hi, rg_lo, rg_hi = ctx["bounds"]
+            raw                        = np.load(ctx["path"], mmap_mode="r")
+
+            pad_az_lo = min(window[0] // 2, az_lo)
+            pad_az_hi = min(window[0] - window[0] // 2 - 1, raw.shape[1] - az_hi)
+            pad_rg_lo = min(window[1] // 2, rg_lo)
+            pad_rg_hi = min(window[1] - window[1] // 2 - 1, raw.shape[2] - rg_hi)
+
+            stack      = np.asarray(raw[:, az_lo - pad_az_lo:az_hi + pad_az_hi, rg_lo - pad_rg_lo:rg_hi + pad_rg_hi])
+            decomposer = PauliDecomposer(window)
+            core       = (slice(None), slice(pad_az_lo, pad_az_lo + az_hi - az_lo), slice(pad_rg_lo, pad_rg_lo + rg_hi - rg_lo))
+            powers     = decomposer.powers(stack)[core]
+            copolar    = decomposer.copolar_powers(stack)[core]
+
+            entry = {
+                "powers"   : powers,
+                "db"       : PauliDecomposer.decibel(powers),
+                "dominant" : PauliDecomposer.dominant(powers),
+                "valid"    : PauliDecomposer.valid(powers),
+                "copolar"  : copolar,
+            }
+            ctx["cache"].put(window, entry)
+
+            return entry
+
+    @classmethod
+    def _pauli_palette(cls) -> np.ndarray:
+        """Returns the mechanism colours as a float RGB array of shape (3, 3) in component order."""
+        return cls._hex_rgb([cls.PAULI_COLORS[key] for key in PauliDecomposer.COMPONENTS])
+
+    def _pauli_raster(self, entry: dict, mode: str, shared: bool, cmap: str) -> np.ndarray:
+        """Paints one Pauli map as a float RGB image.
+
+        Args:
+            entry  : Cached decomposition at the requested window.
+            mode   : One of PAULI_MODES.
+            shared : Whether every component is stretched over one pooled dB range rather than its own percentiles.
+            cmap   : Colormap painting a single component's power, one of CMAPS.
+
+        Returns:
+            Float32 array of shape (azimuth, range, 3) with values in [0, 1]: the
+            composite for "rgb", the mechanism colours for "dominant", the
+            colormapped power otherwise; pixels without data paint black in the
+            composite and the dominant map and in the map background colour in
+            a single-component map.
+        """
+        valid  = entry["valid"]
+        bounds = PauliDecomposer.stretch_bounds(entry["db"], shared, valid)
+
+        if mode == "rgb":
+            return PauliDecomposer.composite(entry["db"], bounds)
+        if mode == "dominant":
+            painted = self._pauli_palette()[np.maximum(entry["dominant"], 0)]
+            return np.where(valid[..., None], painted, 0.0).astype(np.float32)
+
+        index     = PauliDecomposer.COMPONENTS.index(mode)
+        low, high = bounds[mode]
+        norm      = np.clip((entry["db"][index] - low) / (high - low), 0.0, 1.0)
+        painted   = plt.get_cmap(cmap)(norm)[..., :3]
+        return np.where(valid[..., None], painted, self._hex_rgb([self.PAULI_NODATA])[0]).astype(np.float32)
+
+    def _load_polarimetry(self, reader: StampReader, n_az: int, n_rg: int) -> dict | None:
+        """Locates the polarimetric primary of a preprocessing run.
+
+        Args:
+            reader : Preprocessing run reader.
+            n_az   : Azimuth extent of the tomogram, in pixels.
+            n_rg   : Range extent of the tomogram, in pixels.
+
+        Returns:
+            Context with the artifact ``path``, the crop ``bounds`` into it, the
+            default multilook ``window`` from its sidecar, an empty decomposition
+            ``cache`` holding the last PAULI_CACHE_WINDOWS windows and the
+            ``lock`` serialising its misses, or None when the run lists no
+            polarimetric primary.
+
+        Raises:
+            FileNotFoundError : If the layout lists the artifact but the array or its sidecar is missing.
+            ValueError        : If the array is not a three-channel stack over the tomogram footprint or the sidecar's channel order differs from the artifact contract.
+        """
+        name = reader.layout()["artifacts"].get(PolarimetricArtifact.ARTIFACT_KEY)
+        if not name:
+            return None
+
+        path         = reader.run_dir / "data" / name
+        sidecar_path = reader.run_dir / "meta" / PolarimetricArtifact.SIDECAR
+        if not path.is_file():
+            raise FileNotFoundError(f"dataset.json in {reader.where} lists {PolarimetricArtifact.ARTIFACT_KEY} but {path} is missing")
+        if not sidecar_path.is_file():
+            raise FileNotFoundError(f"polarimetric primary {path} has no sidecar {sidecar_path}; rerun the Extract Polarimetry entry (main/processing/extract_polarimetry.py) on this run")
+
+        shape = np.load(path, mmap_mode="r").shape
+        if len(shape) != 3 or shape[0] != 3:
+            raise ValueError(f"polarimetric primary {path} has shape {shape}, expected (3, azimuth, range)")
+        if shape[1:] != (n_az, n_rg):
+            raise ValueError(f"polarimetric primary {path} footprint {shape[1:]} does not match the {n_az}x{n_rg} tomogram footprint")
+
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        if list(sidecar["channels"]) != list(PolarimetricArtifact.CHANNELS):
+            raise ValueError(f"{sidecar_path} orders channels as {sidecar['channels']}, expected {list(PolarimetricArtifact.CHANNELS)}")
+
+        window = self._pauli_window(sidecar["window"][0], sidecar["window"][1])
+
+        return {"path": path, "bounds": (0, n_az, 0, n_rg), "window": window, "cache": LruCache(self.PAULI_CACHE_WINDOWS), "lock": threading.Lock()}
+
+    @classmethod
+    def _pauli_meta(cls, ctx: dict | None) -> dict | None:
+        """Serialises the polarimetric context for the front end, or None without a polarimetric primary."""
+        if ctx is None:
+            return None
+
+        components = [{"key": key, "label": cls.PAULI_LABELS[key], "color": cls.PAULI_COLORS[key]} for key in PauliDecomposer.COMPONENTS]
+        return {"window": list(ctx["window"]), "window_max": cls.PAULI_WINDOW_MAX, "components": components, "modes": list(cls.PAULI_MODES)}
+
+    def _load_spacing(self, reader: StampReader, n_rg: int) -> dict | None:
+        """Returns the reference track's pixel spacings in metres and, with a geometry field, the ground-range spacing over the tomogram.
+
+        Args:
+            reader : Preprocessing run reader.
+            n_rg   : Range extent of the tomogram, in pixels.
+
+        Returns:
+            Dict with the ``az`` and slant ``rg`` spacings, plus ``incidence_deg``
+            (mean look angle over the tomogram's range columns) and
+            ``ground_rg`` (slant spacing over the sine of that angle) when the
+            run saved its geometry field, or None when the run stores no track
+            parameters.
+
+        Raises:
+            ValueError : If the geometry field does not cover the tomogram's range columns.
         """
         params = reader.track_parameters()
         if params is None:
             return None
 
         reference = params.parameters[0]
-        return {"az": float(reference["ps_az"]), "rg": float(reference["ps_rg"])}
+        spacing   = {"az": float(reference["ps_az"]), "rg": float(reference["ps_rg"])}
+
+        field_path = reader.run_dir / "meta" / GeometryField.FILENAME
+        if not field_path.is_file():
+            return spacing
+
+        field = GeometryField.load(field_path)
+        start = reader.global_crop()[2] - field.range_start
+        look  = field.look_angle[max(start, 0):start + n_rg]
+        if start < 0 or look.size != n_rg:
+            raise ValueError(f"{field_path} covers range indices [{field.range_start}, {field.range_start + field.n_range}) but the tomogram needs [{start + field.range_start}, {start + field.range_start + n_rg})")
+
+        incidence = float(np.mean(look))
+        spacing["incidence_deg"] = float(np.degrees(incidence))
+        spacing["ground_rg"]     = spacing["rg"] / math.sin(incidence)
+        return spacing
 
     def _load_dem(self, reader: StampReader, n_az: int, n_rg: int) -> np.ndarray | None:
         """Loads the preprocessing DEM matching the tomogram footprint.
@@ -2247,6 +2666,14 @@ class CubeExplorer:
             },
         }
 
+    @staticmethod
+    def _hex_rgb(colors) -> np.ndarray:
+        """Returns hex colour strings as a float RGB array of shape (len(colors), 3)."""
+        rgb = []
+        for color in colors:
+            rgb.append([int(color[j:j + 2], 16) / 255.0 for j in (1, 3, 5)])
+        return np.asarray(rgb, dtype=np.float64)
+
     def _load_passes(self, reader: StampReader, n_az: int, n_rg: int) -> dict | None:
         """Locates the raw pass stack of a preprocessing run.
 
@@ -2375,6 +2802,26 @@ class CubeExplorer:
         amplitude = np.abs(np.asarray(raw)).astype(np.float32)
         return 20.0 * np.log10(np.maximum(amplitude, 1e-12))
 
+    @staticmethod
+    def _primary_clim(primary: np.ndarray) -> tuple[float, float]:
+        """Returns the 1st and 99th percentile of a primary amplitude map, in dB."""
+        return tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
+
+    @classmethod
+    def _encode_primary(cls, primary: np.ndarray, clim: tuple[float, float]) -> bytes:
+        """Encodes a primary amplitude map as a greyscale PNG.
+
+        Args:
+            primary : Float array of shape (azimuth, range) holding the amplitude in dB.
+            clim    : Grey-scale limits (vmin, vmax) in dB.
+
+        Returns:
+            PNG bytes of the map, one image pixel per cube pixel.
+        """
+        buf = io.BytesIO()
+        plt.imsave(buf, primary, cmap="gray", vmin=float(clim[0]), vmax=float(clim[1]), **cls.PNG_ENCODE)
+        return buf.getvalue()
+
 
 class SliceCollector:
     """Renders the same slices across many runs for side-by-side comparison.
@@ -2384,17 +2831,19 @@ class SliceCollector:
     the cube loaded in the Cube tab.
 
     Attributes:
-        cubes: Explorer supplying the readers, archiver and cut helpers.
-        logger: Web logger for render and collection reporting.
-        render_lock: Serialises figure writing during a collection.
-        contexts: LRU cache of opened run contexts, keyed by run directory.
+        cubes       : Explorer supplying the readers, archiver and cut helpers.
+        logger      : Web logger for render and collection reporting.
+        render_lock : Serialises figure writing during a collection.
+        contexts    : LRU cache of opened run contexts, keyed by run directory.
     """
 
-    SOURCES    = ("full", "param")
-    AXES       = ("range", "azimuth")
-    MAX_RUNS   = 24
-    MAX_POINTS = 24
-    CACHE_CAP  = 16
+    SOURCES   = ("full", "param")
+    AXES      = ("range", "azimuth")
+    SPACES    = ("physical", "normalized")
+    ITEM_KEYS = ("id", "source", "axis", "az", "rg", "space", "cmap")
+    MAX_RUNS  = 24
+    MAX_ITEMS = 400
+    CACHE_CAP = 16
 
     def __init__(self, cubes: CubeExplorer, logger: WebLogger) -> None:
         """Stores the explorer and logger and prepares the context cache."""
@@ -2407,10 +2856,10 @@ class SliceCollector:
         """Describes one collectable cube.
 
         Args:
-            cube_id: Preprocessing run directory path.
+            cube_id : Preprocessing run directory path.
 
         Returns:
-            Dict with ``ok``, the run id, run, group and tag names, the cube's
+            Dict with ``ok``, the run id, run, group and tomogram tag names, the cube's
             azimuth and range extents, the available ``sources`` and their
             intensity limits, or ``ok`` False with the reason.
         """
@@ -2435,25 +2884,59 @@ class SliceCollector:
             "intensity" : {s: [entries[s]["vmin"], entries[s]["vmax"]] for s in entries},
         }
 
+    def primary_png(self, cube_id: str) -> bytes | None:
+        """Renders the primary SLC amplitude map of a collectable cube as a PNG.
+
+        The map covers the tomogram footprint, so image pixel (row, column) is
+        cube pixel (azimuth, range). It is rendered once per context and cached.
+
+        Args:
+            cube_id : Preprocessing run directory path.
+
+        Returns:
+            Greyscale PNG bytes of the (azimuth, range) amplitude map in dB, or
+            None when the cube cannot be opened or its primary SLC is missing;
+            the reason is logged.
+        """
+        try:
+            context = self._context(cube_id)
+        except Exception as error:
+            self.logger.warning(f"primary map for {cube_id} failed while opening the cube: {error}")
+            return None
+
+        if context is None:
+            self.logger.warning(f"primary map refused: unknown cube id {cube_id}")
+            return None
+
+        if context["primary_png"] is None:
+            try:
+                primary = self.cubes._primary_db(context["reader"], context["n_az"], context["n_rg"])
+            except (FileNotFoundError, ValueError) as error:
+                self.logger.warning(f"primary map for {cube_id} unavailable: {error}")
+                return None
+            context["primary_png"] = CubeExplorer._encode_primary(primary, CubeExplorer._primary_clim(primary))
+
+        return context["primary_png"]
+
     def slice_png(self, cube_id: str, source: str, axis: str, az: int, rg: int, space: str = "physical", cmap: str = "jet", vmin: float | None = None, vmax: float | None = None) -> bytes | None:
         """Renders one slice of a collectable cube as a PNG.
 
         Args:
-            cube_id: Preprocessing run directory path.
-            source: Cube key to render.
-            axis: "range" or "azimuth".
-            az: Azimuth pixel index, clipped into range.
-            rg: Range pixel index, clipped into range.
-            space: "physical" or "normalized".
-            cmap: Colormap name.
-            vmin: Optional lower colour limit, honoured only in physical space.
-            vmax: Optional upper colour limit, honoured only in physical space.
+            cube_id : Preprocessing run directory path.
+            source  : Cube key to render.
+            axis    : "range" or "azimuth".
+            az      : Azimuth pixel index, clipped into range.
+            rg      : Range pixel index, clipped into range.
+            space   : "physical" or "normalized".
+            cmap    : Colormap name.
+            vmin    : Optional lower colour limit, honoured only in physical space.
+            vmax    : Optional upper colour limit, honoured only in physical space.
 
         Returns:
             PNG bytes, or None when the arguments are invalid or the cube carries
             no such source.
         """
-        if source not in self.SOURCES or axis not in self.AXES or space not in ("physical", "normalized"):
+        if source not in self.SOURCES or axis not in self.AXES or space not in self.SPACES:
             return None
 
         try:
@@ -2479,139 +2962,215 @@ class SliceCollector:
         plt.imsave(buf, np.flipud(data), cmap=CubeExplorer._entry_cmap(entry, cmap), vmin=lo, vmax=hi, **CubeExplorer.PNG_ENCODE)
         return buf.getvalue()
 
-    def collect(self, ids: list, points: list, sources: list, axes: list, space: str = "physical", cmap: str = "jet", shared: bool = True, name: str = "") -> dict:
-        """Renders and archives a grid of slices across runs, points, sources and axes.
+    def collect(self, items: list, shared: bool = True, name: str = "", reuse: bool = False) -> dict:
+        """Renders and archives a basket of slices, each with its own cut and styling.
 
         Figures land under ``<runs root>/slice_collections/<name>`` in one folder
-        per point and cut, next to a ``collection.json`` manifest.
+        per point and cut, next to a ``collection.json`` manifest that also
+        records the validated request.
 
         Args:
-            ids: Preprocessing run directory paths, deduplicated, at most MAX_RUNS.
-            points: Dicts with ``az`` and ``rg`` pixel indices, at most MAX_POINTS.
-            sources: Cube keys to render, a non-empty subset of SOURCES.
-            axes: Cut axes to render, a non-empty subset of AXES.
-            space: "physical" or "normalized".
-            cmap: Colormap name.
-            shared: When True and space is physical, all runs of a source share
-                the widest colour range across them.
-            name: Collection folder name; sanitised, and defaulted to a timestamp.
+            items  : Basket entries, dicts carrying the ITEM_KEYS; duplicates are dropped, at most MAX_ITEMS entries over at most MAX_RUNS cubes.
+            shared : When True, the physical-space figures of one source share the widest colour range across every basket run carrying that source.
+            name   : Collection folder name; sanitised, and defaulted to a timestamp.
+            reuse  : When True, an existing folder of that name whose manifest records the same basket and scale is returned as it is instead of refused.
 
         Returns:
             Dict with ``ok``, the output ``dir``, the resolved ``name``, the
-            written ``files``, the run-source pairs that were ``missing`` and the
-            number of runs, or ``ok`` False with the reason.
+            written ``files``, the run-source pairs of basket entries whose run
+            lacks that source as ``missing``, the number of runs and whether an
+            existing folder was ``reused``, or ``ok`` False with the reason.
         """
-        ids     = list(dict.fromkeys(str(i) for i in ids if i))
-        sources = list(dict.fromkeys(sources))
-        axes    = list(dict.fromkeys(axes))
-
-        if not ids:
-            return {"ok": False, "error": "select at least one run"}
-        if len(ids) > self.MAX_RUNS:
-            return {"ok": False, "error": f"at most {self.MAX_RUNS} runs per collection, got {len(ids)}"}
-        if space not in ("physical", "normalized"):
-            return {"ok": False, "error": f"unknown space: {space}"}
-        if not sources or any(s not in self.SOURCES for s in sources):
-            return {"ok": False, "error": f"sources must be a non-empty subset of {self.SOURCES}"}
-        if not axes or any(a not in self.AXES for a in axes):
-            return {"ok": False, "error": f"axes must be a non-empty subset of {self.AXES}"}
-
         try:
-            points   = self._points(points)
-            contexts = []
-            for cube_id in ids:
-                context = self._context(cube_id)
-                if context is None:
-                    return {"ok": False, "error": f"unknown cube id: {cube_id}"}
-                contexts.append(context)
+            plan = self._plan(items, name)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-        labels  = self._labels(contexts)
-        title   = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "").strip("._")
-        title   = title or datetime.now().strftime("collection_%Y%m%d_%H%M%S")
-        out_dir = contexts[0]["root"] / "slice_collections" / title
+        items, ids, contexts, labels, title, out_dir = plan
+        request = {"items": items, "shared": bool(shared)}
 
         if out_dir.exists():
-            return {"ok": False, "error": f"a collection named '{title}' already exists at {out_dir}; pick another name or delete it first"}
+            earlier = self._earlier(out_dir, request) if reuse else None
+            if earlier is None:
+                differs = " for a different basket" if reuse else ""
+                return {"ok": False, "error": f"a collection named '{title}' already exists at {out_dir}{differs}; pick another name or delete it first"}
+            return earlier
 
-        clims   = {source: self._shared_clim(contexts, source, space) if shared else None for source in sources}
-        missing = [{"label": label, "source": source} for source in sources for context, label in zip(contexts, labels) if source not in context["entries"]]
+        clims = self._basket_clims(items, contexts) if shared else {}
 
-        files = []
+        files   = []
+        entries = []
+        missing = []
         with self.render_lock:
-            for az, rg in points:
-                point_dir = out_dir / f"az{az:04d}_rg{rg:04d}"
-                for source in sources:
-                    clim = clims[source]
-                    for axis in axes:
-                        cut_dir = point_dir / f"{axis}_{source}_{space}"
-                        for context, label in zip(contexts, labels):
-                            entry = context["entries"].get(source)
-                            if entry is None:
-                                continue
+            for item in items:
+                context = contexts[item["id"]]
+                label   = labels[item["id"]]
+                entry   = context["entries"].get(item["source"])
+                if entry is None:
+                    gap = {"label": label, "source": item["source"]}
+                    if gap not in missing:
+                        missing.append(gap)
+                    continue
 
-                            az_i = int(np.clip(az, 0, context["n_az"] - 1))
-                            rg_i = int(np.clip(rg, 0, context["n_rg"] - 1))
-                            data, heights, vmin, vmax = self._cut(entry, axis, az_i, rg_i, space)
-                            if clim is not None:
-                                vmin, vmax = clim
+                az_i = int(np.clip(item["az"], 0, context["n_az"] - 1))
+                rg_i = int(np.clip(item["rg"], 0, context["n_rg"] - 1))
+                data, heights, vmin, vmax = self._cut(entry, item["axis"], az_i, rg_i, item["space"])
 
-                            saved = self.cubes.archiver.render(data, heights, vmin, vmax, source, axis, az_i, rg_i, space, cut_dir / f"{label}.png", cmap=CubeExplorer._entry_cmap(entry, cmap), label=label)
-                            files.append(str(saved.relative_to(out_dir)))
+                clim = clims.get(item["source"]) if item["space"] == "physical" else None
+                if clim is not None:
+                    vmin, vmax = clim
+
+                cut_dir = out_dir / f"az{item['az']:04d}_rg{item['rg']:04d}" / f"{item['axis']}_{item['source']}_{item['space']}_{item['cmap']}"
+                saved   = self.cubes.archiver.render(data, heights, vmin, vmax, item["source"], item["axis"], az_i, rg_i, item["space"], cut_dir / f"{label}.png", cmap=CubeExplorer._entry_cmap(entry, item["cmap"]), label=label)
+                rel     = str(saved.relative_to(out_dir))
+
+                files.append(rel)
+                entries.append({**item, "label": label, "file": rel})
 
         if not files:
-            return {"ok": False, "error": "no figures rendered; none of the selected runs carry the requested sources"}
+            return {"ok": False, "error": "no figures rendered; none of the basket runs carry the requested sources"}
 
         manifest = {
             "name"    : title,
             "created" : datetime.now().isoformat(timespec="seconds"),
-            "space"   : space,
-            "cmap"    : cmap,
             "shared"  : bool(shared),
-            "axes"    : axes,
-            "sources" : sources,
-            "points"  : [{"az": az, "rg": rg} for az, rg in points],
-            "clims"   : {source: (list(clim) if clim else None) for source, clim in clims.items()},
-            "runs"    : [{"id": str(c["run_dir"]), "run": c["run"], "group": c["group"], "stamp": c["stamp"], "label": label} for c, label in zip(contexts, labels)],
+            "clims"   : {source: list(clim) for source, clim in clims.items()},
+            "runs"    : [{"id": str(contexts[i]["run_dir"]), "run": contexts[i]["run"], "group": contexts[i]["group"], "stamp": contexts[i]["stamp"], "label": labels[i]} for i in ids],
+            "points"  : [{"az": az, "rg": rg} for az, rg in dict.fromkeys((item["az"], item["rg"]) for item in items)],
+            "items"   : entries,
             "missing" : missing,
             "files"   : files,
+            "request" : request,
         }
         (out_dir / "collection.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-        self.logger.ok(f"collected {len(files)} slice figures from {len(contexts)} runs into {out_dir}")
-        return {"ok": True, "dir": str(out_dir), "name": title, "files": files, "missing": missing, "runs": len(contexts)}
+        self.logger.ok(f"collected {len(files)} slice figures from {len(ids)} runs into {out_dir}")
+        return {"ok": True, "dir": str(out_dir), "name": title, "files": files, "missing": missing, "runs": len(ids), "reused": False}
 
-    def _points(self, raw) -> list:
-        """Validates and deduplicates the requested collection points.
+    def _plan(self, raw: list, name: str) -> tuple:
+        """Validates a basket and resolves its runs, labels and output folder.
 
         Args:
-            raw: List of dicts carrying ``az`` and ``rg`` pixel indices.
+            raw  : Basket entries as posted.
+            name : Requested collection name.
 
         Returns:
-            List of unique (azimuth, range) pairs in request order.
+            Tuple of the validated entries, the cube ids in first-use order,
+            their contexts keyed by id, their file labels keyed by id, the
+            sanitised collection name and the collection folder.
 
         Raises:
-            ValueError: If the list is empty or not a list, exceeds MAX_POINTS, or
-                holds a negative index.
+            ValueError : If an entry is invalid, the basket spans more than MAX_RUNS cubes, or a cube id is unknown.
+        """
+        items = self._items(raw)
+        ids   = list(dict.fromkeys(item["id"] for item in items))
+        if len(ids) > self.MAX_RUNS:
+            raise ValueError(f"at most {self.MAX_RUNS} runs per collection, got {len(ids)}")
+
+        contexts = {}
+        for cube_id in ids:
+            context = self._context(cube_id)
+            if context is None:
+                raise ValueError(f"unknown cube id: {cube_id}")
+            contexts[cube_id] = context
+
+        labels  = dict(zip(ids, self._labels([contexts[cube_id] for cube_id in ids])))
+        title   = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "").strip("._")
+        title   = title or datetime.now().strftime("collection_%Y%m%d_%H%M%S")
+        out_dir = contexts[ids[0]]["root"] / "slice_collections" / title
+
+        return items, ids, contexts, labels, title, out_dir
+
+    def _items(self, raw) -> list:
+        """Validates and deduplicates the basket entries.
+
+        Args:
+            raw : List of dicts carrying the ITEM_KEYS.
+
+        Returns:
+            Unique entries in request order, each a dict of the ITEM_KEYS with
+            integer ``az`` and ``rg`` and string values otherwise.
+
+        Raises:
+            ValueError : If the basket is empty or not a list, exceeds MAX_ITEMS, or an entry lacks a key, names an unknown source, axis, space or colormap, or holds a negative index.
         """
         if not isinstance(raw, list) or not raw:
-            raise ValueError("points must be a non-empty list of {az, rg}")
-        if len(raw) > self.MAX_POINTS:
-            raise ValueError(f"at most {self.MAX_POINTS} points per collection, got {len(raw)}")
+            raise ValueError("the basket is empty; add slices before exporting")
+        if len(raw) > self.MAX_ITEMS:
+            raise ValueError(f"at most {self.MAX_ITEMS} slices per collection, got {len(raw)}")
 
-        points = []
-        seen   = set()
+        items = []
+        seen  = set()
         for entry in raw:
-            az, rg = int(entry["az"]), int(entry["rg"])
-            if az < 0 or rg < 0:
-                raise ValueError(f"point az={az}, rg={rg} is negative")
-            if (az, rg) in seen:
-                continue
-            seen.add((az, rg))
-            points.append((az, rg))
+            absent = [key for key in self.ITEM_KEYS if key not in entry]
+            if absent:
+                raise ValueError(f"basket entry {entry} lacks {absent}")
 
-        return points
+            item = {key: str(entry[key]) for key in self.ITEM_KEYS}
+            item["az"], item["rg"] = int(entry["az"]), int(entry["rg"])
+
+            if item["source"] not in self.SOURCES:
+                raise ValueError(f"unknown source '{item['source']}'; expected one of {self.SOURCES}")
+            if item["axis"] not in self.AXES:
+                raise ValueError(f"unknown axis '{item['axis']}'; expected one of {self.AXES}")
+            if item["space"] not in self.SPACES:
+                raise ValueError(f"unknown space '{item['space']}'; expected one of {self.SPACES}")
+            if item["cmap"] not in CubeExplorer.CMAPS:
+                raise ValueError(f"unknown colormap '{item['cmap']}'; expected one of {CubeExplorer.CMAPS}")
+            if item["az"] < 0 or item["rg"] < 0:
+                raise ValueError(f"point az={item['az']}, rg={item['rg']} is negative")
+
+            key = tuple(item[k] for k in self.ITEM_KEYS)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+
+        return items
+
+    @staticmethod
+    def _earlier(out_dir: Path, request: dict) -> dict | None:
+        """Returns an existing collection written for exactly this request, or None.
+
+        Args:
+            out_dir : Existing collection folder.
+            request : Validated basket entries and scale flag of the new request.
+
+        Returns:
+            The collect result describing that folder with ``reused`` True, or
+            None when it holds no manifest or its manifest records another
+            request.
+        """
+        manifest_path = out_dir / "collection.json"
+        if not manifest_path.is_file():
+            return None
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("request") != request:
+            return None
+
+        return {"ok": True, "dir": str(out_dir), "name": manifest["name"], "files": manifest["files"], "missing": manifest["missing"], "runs": len(manifest["runs"]), "reused": True}
+
+    def _basket_clims(self, items: list, contexts: dict) -> dict:
+        """Returns the shared colour range of every source drawn in physical space.
+
+        Args:
+            items    : Validated basket entries.
+            contexts : Opened run contexts keyed by cube id.
+
+        Returns:
+            Dict from source to its (vmin, vmax) envelope over the basket runs
+            whose physical-space entries draw that source; sources without a
+            usable envelope are left out.
+        """
+        clims = {}
+        for source in dict.fromkeys(item["source"] for item in items if item["space"] == "physical"):
+            ids  = dict.fromkeys(item["id"] for item in items if item["space"] == "physical" and item["source"] == source)
+            clim = self._shared_clim([contexts[cube_id] for cube_id in ids], source, "physical")
+            if clim is not None:
+                clims[source] = clim
+
+        return clims
 
     @staticmethod
     def _labels(contexts: list) -> list:
@@ -2621,7 +3180,7 @@ class SliceCollector:
         and suffixed with the tomogram tag when that is still not unique.
 
         Args:
-            contexts: Opened run contexts, in collection order.
+            contexts : Opened run contexts, in collection order.
 
         Returns:
             One label per context, in the same order.
@@ -2650,9 +3209,9 @@ class SliceCollector:
         """Returns the colour range covering one source across every context.
 
         Args:
-            contexts: Opened run contexts.
-            source: Cube key whose limits are merged.
-            space: Only "physical" yields shared limits.
+            contexts : Opened run contexts.
+            source   : Cube key whose limits are merged.
+            space    : Only "physical" yields shared limits.
 
         Returns:
             The (vmin, vmax) envelope, or None in normalised space, when no
@@ -2677,11 +3236,11 @@ class SliceCollector:
         complex, so the slice is materialised and reduced to magnitude first.
 
         Args:
-            entry: Context entry holding the cube and its elevation axis.
-            axis: "range" for a fixed range column, "azimuth" for a fixed azimuth row.
-            az: Azimuth pixel index, clipped into range.
-            rg: Range pixel index, clipped into range.
-            space: "normalized" to peak-normalise columns, else "physical".
+            entry : Context entry holding the cube and its elevation axis.
+            axis  : "range" for a fixed range column, "azimuth" for a fixed azimuth row.
+            az    : Azimuth pixel index, clipped into range.
+            rg    : Range pixel index, clipped into range.
+            space : "normalized" to peak-normalise columns, else "physical".
 
         Returns:
             Tuple of the float32 slice of shape (elevation bins, samples) ordered
@@ -2706,7 +3265,7 @@ class SliceCollector:
         """Returns the cached or freshly built context of a preprocessing run.
 
         Args:
-            cube_id: Preprocessing run directory path.
+            cube_id : Preprocessing run directory path.
 
         Returns:
             The run context, or None when the id is unknown.
@@ -2729,16 +3288,16 @@ class SliceCollector:
         """Opens the tomogram of a run without materialising it.
 
         Args:
-            reader: Reader of the run to open.
+            reader : Reader of the run to open.
 
         Returns:
-            Context with the run directory, its runs root, the run, group and
-            tag names, the azimuth and range extents and the lazily held
-            ``entries`` per source.
+            Context with the run directory, its reader and runs root, the run,
+            group and tag names, the azimuth and range extents, the lazily held
+            ``entries`` per source and an empty ``primary_png`` slot filled on
+            the first map request.
 
         Raises:
-            ValueError: If the run lies outside every catalogued runs root or the
-                tomogram is not three-dimensional.
+            ValueError : If the run lies outside every catalogued runs root or the tomogram is not three-dimensional.
         """
         run_dir = reader.run_dir
         root    = self._root_for(run_dir)
@@ -2761,14 +3320,16 @@ class SliceCollector:
             self.logger.warning(f"{run_dir.name} holds {len(tags)} parameter runs ({', '.join(tags)}); the collector serves none of them — the Cube tab loads a chosen tag explicitly")
 
         return {
-            "run_dir" : run_dir,
-            "root"    : root,
-            "run"     : run_dir.name,
-            "group"   : str(run_dir.relative_to(root).parent),
-            "stamp"   : reader.layout()["tomogram_tag"],
-            "n_az"    : n_az,
-            "n_rg"    : n_rg,
-            "entries" : entries,
+            "run_dir"     : run_dir,
+            "reader"      : reader,
+            "root"        : root,
+            "run"         : run_dir.name,
+            "group"       : str(run_dir.relative_to(root).parent),
+            "stamp"       : reader.layout()["tomogram_tag"],
+            "n_az"        : n_az,
+            "n_rg"        : n_rg,
+            "entries"     : entries,
+            "primary_png" : None,
         }
 
     @staticmethod
@@ -2776,8 +3337,8 @@ class SliceCollector:
         """Wraps a cube without materialising it and estimates its colour limits.
 
         Args:
-            raw: Memory-mapped cube of shape (elevation, azimuth, range).
-            x_axis: Elevation axis in metres.
+            raw    : Memory-mapped cube of shape (elevation, azimuth, range).
+            x_axis : Elevation axis in metres.
 
         Returns:
             Entry with the untouched ``cube``, its ``x_axis`` and the 1st and 99th
@@ -2795,3 +3356,246 @@ class SliceCollector:
     def _root_for(self, run_dir: Path) -> Path | None:
         """Returns the catalogued runs root containing the run, or None."""
         return self.cubes.roots.enclosing(run_dir)
+
+
+class SliceCollectionMailer:
+    """Mails a slice basket as a rendered collection packed into zip attachments.
+
+    The basket is rendered through the collector first, so every mailed
+    collection also stays on disk under ``slice_collections``. The folder is then
+    packed into size-capped zip volumes under its ``mail`` subfolder and
+    submitted over SMTP with SSL, one message per volume, from the sender and
+    SMTP endpoint of the machine profile's ``mail`` section, logging in with the
+    password held in the PASSWORD_ENV environment variable.
+
+    Attributes:
+        collector         : Slice collector rendering the basket.
+        logger            : Web logger for packing and submission messages.
+        endpoint          : Mail section of the machine profile, carrying ``sender``, ``recipient``, ``smtp_host`` and ``smtp_port``.
+        ADDRESS           : Pattern one recipient address must match.
+        PASSWORD_ENV      : Environment variable holding the SMTP password, never written to disk by the console.
+        SUBJECT_PREFIX    : Prefix of every message subject.
+        MAX_ATTACHMENT_MB : Upper bound of one zip volume in megabytes, measured on the uncompressed files.
+        SMTP_TIMEOUT_S    : Seconds a blocking SMTP connect, login or upload may stall before the submission fails.
+    """
+
+    ADDRESS           = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+    PASSWORD_ENV      = "REPORT_MAIL_PASSWORD"
+    SUBJECT_PREFIX    = "TomoVic"
+    MAX_ATTACHMENT_MB = 18.0
+    SMTP_TIMEOUT_S    = 120.0
+
+    def __init__(self, collector: SliceCollector, logger: WebLogger) -> None:
+        """Stores the collector and logger and reads the mail section of the machine profile."""
+        self.collector = collector
+        self.logger    = logger
+        self.endpoint  = MachineProfile.current().mail
+
+    def settings(self) -> dict:
+        """Describes the mail defaults the basket form starts from.
+
+        Returns:
+            Dict with ``ok``, the default ``recipient``, the ``sender``, whether
+            a sender is configured and the SMTP password variable is set
+            (``ready``), the variable's name and the attachment cap in
+            megabytes.
+        """
+        return {
+            "ok"                : True,
+            "recipient"         : self.endpoint["recipient"],
+            "sender"            : self.endpoint["sender"],
+            "ready"             : bool(self.endpoint["sender"]) and bool(os.environ.get(self.PASSWORD_ENV)),
+            "password_env"      : self.PASSWORD_ENV,
+            "max_attachment_mb" : self.MAX_ATTACHMENT_MB,
+        }
+
+    def _recipients(self, raw: str) -> list:
+        """Splits and validates a comma- or semicolon-separated address list.
+
+        Args:
+            raw : Address list typed in the basket form.
+
+        Returns:
+            The addresses in typed order.
+
+        Raises:
+            ValueError : If the list is empty or an address is malformed.
+        """
+        addresses = [part.strip() for part in re.split(r"[,;]", raw or "") if part.strip()]
+        if not addresses:
+            raise ValueError("enter at least one recipient address")
+
+        malformed = [address for address in addresses if not self.ADDRESS.match(address)]
+        if malformed:
+            raise ValueError(f"malformed recipient address: {', '.join(malformed)}")
+
+        return addresses
+
+    def _pack(self, out_dir: Path, result: dict) -> list:
+        """Packs the rendered collection and its manifest into zip volumes.
+
+        Volumes are filled in manifest order and a new one starts whenever the
+        next file would push the uncompressed total past MAX_ATTACHMENT_MB;
+        volumes of an earlier packing of the same folder are deleted first.
+
+        Args:
+            out_dir : Collection folder written by the collector.
+            result  : Collector result naming the collection and its figures.
+
+        Returns:
+            Paths of the written volumes under ``<out_dir>/mail``, whose members
+            sit under ``<name>/`` so unpacking every volume rebuilds the folder.
+
+        Raises:
+            ValueError : If one figure alone exceeds the attachment cap.
+        """
+        name      = result["name"]
+        mail_dir  = out_dir / "mail"
+        max_bytes = int(self.MAX_ATTACHMENT_MB * 1024 * 1024)
+        entries   = [(out_dir / "collection.json", f"{name}/collection.json")]
+        entries  += [(out_dir / rel, f"{name}/{rel}") for rel in result["files"]]
+
+        volumes = []
+        filled  = 0
+        for source, arcname in entries:
+            size = source.stat().st_size
+            if size > max_bytes:
+                raise ValueError(f"cannot mail {source}: it is {size / 1048576:.1f} MB on its own, above the {self.MAX_ATTACHMENT_MB:g} MB attachment cap")
+            if not volumes or filled + size > max_bytes:
+                volumes.append([])
+                filled = 0
+            volumes[-1].append((source, arcname))
+            filled += size
+
+        mail_dir.mkdir(parents=True, exist_ok=True)
+        for stale in sorted(mail_dir.glob(f"{name}*.zip")):
+            stale.unlink()
+
+        paths = []
+        for index, volume in enumerate(volumes, start=1):
+            path = mail_dir / (f"{name}.zip" if len(volumes) == 1 else f"{name}_{index:02d}of{len(volumes):02d}.zip")
+            with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for source, arcname in volume:
+                    archive.write(source, arcname)
+            self.logger.muted(f"packed {path.name}: {len(volume)} file(s), {path.stat().st_size / 1048576:.1f} MB")
+            paths.append(path)
+
+        return paths
+
+    def _body(self, out_dir: Path, note: str, volumes: list) -> str:
+        """Writes the plain-text message body from the collection manifest.
+
+        Args:
+            out_dir : Collection folder holding ``collection.json``.
+            note    : Free text typed in the basket form, placed first; may be empty.
+            volumes : Written zip volumes.
+
+        Returns:
+            The message body.
+        """
+        manifest = json.loads((out_dir / "collection.json").read_text(encoding="utf-8"))
+
+        lines = [note.strip(), ""] if note.strip() else []
+        lines.append(f"Slice collection '{manifest['name']}': {len(manifest['files'])} figures from {len(manifest['runs'])} runs, colour scale {'shared per source' if manifest['shared'] else 'per run'}.")
+        lines.append("")
+        lines.append("Runs:")
+        lines += [f"  {run['label']}  ({run['group']}/{run['run']}, tomogram {run['stamp']})" for run in manifest["runs"]]
+        lines.append("")
+        lines.append("Points: " + ", ".join(f"az {point['az']} rg {point['rg']}" for point in manifest["points"]))
+
+        if manifest["missing"]:
+            lines.append("Skipped, run lacks the source: " + ", ".join(f"{gap['label']} {gap['source']}" for gap in manifest["missing"]))
+        if len(volumes) > 1:
+            lines.append(f"The collection is split over {len(volumes)} messages; unpack every volume into one folder to rebuild it.")
+
+        lines.append("")
+        lines.append(f"Saved on the TomoVic host under {out_dir}")
+        return "\n".join(lines)
+
+    def _message(self, recipients: list, subject: str, body: str, volume: Path) -> EmailMessage:
+        """Builds one message carrying one zip volume.
+
+        Args:
+            recipients : Validated recipient addresses.
+            subject    : Message subject line.
+            body       : Plain-text message body.
+            volume     : Zip volume attached under its file name.
+
+        Returns:
+            The assembled message.
+        """
+        message            = EmailMessage()
+        message["From"]    = self.endpoint["sender"]
+        message["To"]      = ", ".join(recipients)
+        message["Subject"] = subject
+        message.set_content(body)
+        message.add_attachment(volume.read_bytes(), maintype="application", subtype="zip", filename=volume.name)
+        return message
+
+    def _submit(self, messages: list) -> None:
+        """Submits the messages over one SMTP SSL session.
+
+        Args:
+            messages : Assembled messages, sent in order.
+
+        Raises:
+            OSError : If the connect, login or an upload fails or stalls past SMTP_TIMEOUT_S, including smtplib's SMTPException subclasses.
+        """
+        start = time.monotonic()
+        with smtplib.SMTP_SSL(self.endpoint["smtp_host"], int(self.endpoint["smtp_port"]), timeout=self.SMTP_TIMEOUT_S) as smtp:
+            smtp.login(self.endpoint["sender"], os.environ[self.PASSWORD_ENV])
+            for message in messages:
+                smtp.send_message(message)
+
+        self.logger.ok(f"sent {len(messages)} message(s) to {messages[0]['To']} via {self.endpoint['smtp_host']} in {time.monotonic() - start:.1f} s")
+
+    def mail(self, items: list, shared: bool = True, name: str = "", recipient: str = "", note: str = "") -> dict:
+        """Renders the basket, packs it and mails it to the given recipients.
+
+        Args:
+            items     : Basket entries, as accepted by ``SliceCollector.collect``.
+            shared    : Whether physical-space figures of one source share a colour range.
+            name      : Collection folder name; sanitised, and defaulted to a timestamp.
+            recipient : Comma- or semicolon-separated recipient addresses.
+            note      : Free text placed at the top of the message body.
+
+        Returns:
+            The collector result extended with the ``recipient`` line and the
+            mailed ``volumes`` names, or ``ok`` False with the reason; when
+            sending fails after rendering, the result still names the saved
+            ``dir``. A basket already saved under the same name is mailed
+            from that folder without rendering it again.
+        """
+        try:
+            recipients = self._recipients(recipient)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if not self.endpoint["sender"]:
+            return {"ok": False, "error": f"no mail sender configured: set the mail section of the machine profile ({MachineProfile.location()}) and restart TomoVic"}
+        if not os.environ.get(self.PASSWORD_ENV):
+            return {"ok": False, "error": f"SMTP password not found: add export {self.PASSWORD_ENV}=<app password> to the machine profile env and restart TomoVic"}
+
+        result = self.collector.collect(items, shared, name, reuse=True)
+        if not result["ok"]:
+            return result
+
+        out_dir = Path(result["dir"])
+        try:
+            volumes = self._pack(out_dir, result)
+        except ValueError as exc:
+            return {"ok": False, "error": f"saved to {out_dir}, but packing failed: {exc}", "dir": str(out_dir)}
+
+        body     = self._body(out_dir, note, volumes)
+        messages = []
+        for index, volume in enumerate(volumes, start=1):
+            suffix = f" [{index}/{len(volumes)}]" if len(volumes) > 1 else ""
+            messages.append(self._message(recipients, f"{self.SUBJECT_PREFIX}: slice collection {result['name']}{suffix}", body, volume))
+
+        try:
+            self._submit(messages)
+        except OSError as exc:
+            self.logger.error(f"mailing slice collection {result['name']} failed after rendering: {exc}")
+            return {"ok": False, "error": f"saved to {out_dir}, but mailing failed: {exc}", "dir": str(out_dir)}
+
+        return {**result, "recipient": ", ".join(recipients), "volumes": [volume.name for volume in volumes]}

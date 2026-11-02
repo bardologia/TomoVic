@@ -417,15 +417,15 @@ class RepoMapView {
     this.trace    = { on: false, col: -1, timer: null };
 
     this.ROLE_COLORS = {
-      entry        : "#6d28d9",
-      orchestrator : "#1d4fd8",
-      config       : "#b45309",
-      transform    : "#0e7490",
-      model        : "#be185d",
-      data         : "#15803d",
-      io           : "#0f766e",
-      metric       : "#c2410c",
-      external     : "#64748b",
+      entry        : "#a78bfa",
+      orchestrator : "#6f9bff",
+      config       : "#f59e0b",
+      transform    : "#22d3ee",
+      model        : "#f472b6",
+      data         : "#4ade80",
+      io           : "#2dd4bf",
+      metric       : "#fb923c",
+      external     : "#94a3b8",
     };
     this.ROLE_LABELS = {
       entry        : "Entry",

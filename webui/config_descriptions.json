@@ -2,7 +2,8 @@
   "sections": {
     "sar": "The first stage of the pipeline, which turns raw multi-baseline F-SAR stacks into focused tomograms. It drives PyRAT fusartomo beamforming and interferogram generation for one preprocessing run, resolving acquisition geometry and interferometric baselines into the vertical-wavenumber (kz) axis used downstream. The configs here control focusing and filter settings, CPU and thread budgets, run filesystem layout, the tomogram height axis, and the batch entry points that sweep filter window sizes and render stack-overview diagnostics.",
     "comparison": "The stage that rebuilds side-by-side comparisons across completed preprocessing runs without re-running the generation step. It aggregates existing preprocessing outputs into a single report grouped by the varied factor. The configs here control the comparison of preprocessing trials differing by multilook window.",
-    "param_extraction": "The stage that fits parametric height profiles to focused tomograms, producing the per-pixel Gaussian-mixture parametrized tomogram. It runs constrained optimization over each preprocessed tomogram and recomputes fit metrics and diagnostic plots for existing trials. The configs here control optimizer iteration caps and fit hyperparameters, the single-run extraction driver, the batch entry point that sweeps datasets and hyperparameter grids, and the inference config that regenerates metrics and summaries."
+    "param_extraction": "The stage that fits parametric height profiles to focused tomograms, producing the per-pixel Gaussian-mixture parametrized tomogram. It runs constrained optimization over each preprocessed tomogram and recomputes fit metrics and diagnostic plots for existing trials. The configs here control optimizer iteration caps and fit hyperparameters, the single-run extraction driver, the batch entry point that sweeps datasets and hyperparameter grids, and the inference config that regenerates metrics and summaries.",
+    "resources": "Host and device sampling settings carried by the long-running processing entries such as parameter extraction: whether the resource monitor runs, how often it samples CPU, RAM, shared memory and GPU memory, and the utilisation levels that raise a warning in the run log."
   },
   "configs": {
     "sar/processing_config::TomogramConfig": {
@@ -76,7 +77,7 @@
         "max_crop_azimuth_width": "Maximum azimuth pixels per PyRAT subsection, forwarded into each session's TomogramConfig; wider crops split into multiple parallel-worker jobs",
         "apply_resampling": "Whether pyrat resamples the stack geometry before focusing, forwarded into each session's TomogramConfig",
         "apply_presumming": "Whether pyrat presums (averages) acquisitions before focusing, forwarded into each session's TomogramConfig",
-        "max_amplitude_clip": "Upper amplitude clip applied to the focused tomogram, forwarded into each session's TomogramConfig",
+        "max_amplitude_clip": "Absolute ceiling, in linear amplitude units, on the secondary SLC amplitude carried by the interferograms, forwarded into each session's TomogramConfig; the tomogram itself is not clipped",
         "effort": "Parallelism intensity level: low, medium, or high, forwarded to each session's ParallelConfig",
         "tomogram_workers": "Fixed number of parallel PyRAT tomogram worker processes; None lets ParallelConfig.resolve_plan derive it from the core budget",
         "pyrat_threads": "Fixed thread count per PyRAT job; None derives it from the core budget",
@@ -85,7 +86,9 @@
         "stack_identifier": "Identifier distinguishing the acquisition stack, forwarded into each session's ProcessingConfig",
         "tomogram_output_tag": "Filename tag embedded in each session's generated tomogram output artifacts",
         "parameter_output_tag": "Filename tag embedded in each session's generated parameter output artifacts",
-        "tomogram_env_name": "Conda environment name in which each session's tomogram and interferogram PyRAT launchers execute"
+        "tomogram_env_name": "Conda environment name in which each session's tomogram and interferogram PyRAT launchers execute",
+        "main_directory": "Root holding the dataset runs, forwarded into each session's ProcessingConfig",
+        "pyrat_directory": "PyRAT root directory, forwarded into each session's ProcessingConfig and the scene-extent probe"
       }
     },
     "sar/processing_config::PreprocessInferenceConfig": {
@@ -114,6 +117,7 @@
         "n_default_gaussians": "Number of Gaussian components (K) stored per pixel, derived from param_extraction_meta.json k_max of the parameter run",
         "x_min": "Lower bound of the height/elevation axis in meters, taken from the dataset's tomogram_config.height_range",
         "x_max": "Upper bound of the height/elevation axis in meters, taken from the dataset's tomogram_config.height_range",
+        "activity_threshold": "Physical amplitude above which a Gaussian slot counts as active (a strict comparison shared by every stage through GaussianActivity.is_active), read from param_extraction_meta.json activity_threshold of the parameter run; it is chosen once at extraction and every analysis and viewer stage reads it from here instead of asking again",
         "params_per_gaussian": "Number of stored parameters per Gaussian component (amplitude, mean, sigma = 3)"
       }
     },
@@ -165,6 +169,7 @@
         "output_prefix": "leading token of each generated output subdirectory name, shared across the sweep",
         "output_suffix": "optional fixed naming tag overriding the auto-derived suffix; rejected when the sweep expands to more than one permutation",
         "height_range": "reconstruction height-axis extent in meters as (min, max) applied to every plan; None reads it per-dataset from metadata",
+        "overwrite": "toggle allowing an existing parameter run under a permutation's directory name to be deleted and refitted; off, a sweep landing on an existing run is refused before any fitting, since the run name encodes only k_max, lambda, the sigma divisor and the free parameters",
         "fit_k_values": "list of maximum Gaussian-component counts (k_max) to sweep, one extraction plan per value",
         "fit_lambda_values": "list of component-count regularization strengths (lambda_k) to sweep, one extraction plan per value",
         "fit_modes": "fit modes to sweep, each an underscore-joined composition of free parameters from sigma, amp, mu (e.g. sigma, amp_mu, sigma_amp_mu); every non-empty composition is valid",
@@ -178,7 +183,8 @@
         "gpu_device_ids": "GPU indices pinned via EnvironmentPinner.gpus before extraction runs",
         "range_batch_size": "number of range bins loaded and fit together per batch, shared across the sweep",
         "gpu_pixel_batch_size": "fixed number of pixels per GPU batch the JAX Adam-fit kernel is compiled and iterated over, shared across the sweep",
-        "parameter_workers": "CPU worker count for the shared PeakInitialiser pool, defaulting to min(64, cpu_count)"
+        "parameter_workers": "CPU worker count for the shared PeakInitialiser pool, defaulting to min(64, cpu_count)",
+        "resources": "ResourceConfig sub-config of the host and GPU resource monitor that samples RAM, swap, /dev/shm, CPU and NVML counters while each extraction group fits, warns at the RAM/VRAM/shm thresholds and logs the peaks; the TensorBoard flag has no effect here since extraction writes no TensorBoard run"
       }
     },
     "param_extraction::ParamExtractionInferenceConfig": {
@@ -192,20 +198,27 @@
         "noise_coherence": "coherence floor in (0, 1] modelling the speckle/SNR decorrelation a real pair carries on top of the fitted-profile coherence (predicted height error uses gamma = noise_coherence * profile coherence); the 0.99 default matches high-coherence airborne stacks with strong multilooking and moves the predicted optimum toward shorter baselines as it rises"
       }
     },
-    "param_extraction::InjectExternalParamsEntryConfig": {
-      "summary": "Batch entry point that imports externally fitted Gaussian parameter cubes into preprocessed datasets as ordinary parameter runs",
+    "sar/polarimetry_config::PolarimetryEntryConfig": {
+      "summary": "Entry-point config extending preprocessed datasets with the polarimetric primary: the primary pass read again in every polarisation over the dataset crop and stored as the Pauli-ready artifact the Cube tab decomposes",
       "fields": {
-        "dataset_base_path": "root directory holding the preprocessed dataset runs that receive the external parameters",
-        "dataset_filter": "explicit dataset directory names to inject into; empty injects into every dataset under the base path",
-        "source_files": "absolute paths of the external RAT parameter cubes, each holding three channels per Gaussian over one azimuth/range window",
-        "source_windows": "explicit '<az_start>a<az_end>a<rg_start>a<rg_end>' extent per source file; empty reads each window from its filename",
-        "source_order": "order of the three channels inside each Gaussian triple of the source files, as a permutation of amp, mu and sigma joined with '_'",
-        "output_prefix": "leading token of the generated parameter-run subdirectory name, joined with the suffix",
-        "output_suffix": "trailing token of the generated parameter-run subdirectory name, distinguishing this import from the fitted runs beside it",
-        "origin_note": "free-text provenance recorded in the run metadata, naming who produced the external fit and how",
-        "k_slots": "number of Gaussian slots written per pixel; 0 keeps the slot count the sources carry, a larger value pads the remainder with empty slots",
-        "activity_threshold": "amplitude above which a Gaussian counts as active, driving the slot ordering and the height-convention check",
-        "overwrite": "toggle allowing an existing parameter run of the same name to be deleted and rewritten"
+        "dataset_base_path": "root directory scanned for dataset subdirectories, each requiring a data/ folder, to extend",
+        "dataset_filter": "list of dataset directory names selecting which datasets under the base path are extended; empty extends all",
+        "pyrat_directory": "PyRAT root directory put on the import path of the extraction worker",
+        "pyrat_threads": "thread count PyRAT uses inside the extraction worker",
+        "tomogram_env_name": "Conda environment name in which the PyRAT extraction worker executes",
+        "overwrite": "toggle extracting the polarimetric primary again for a dataset that already lists it; off, such a dataset is skipped"
+      }
+    },
+    "resources::ResourceConfig": {
+      "summary": "Background system-resource monitor polling RAM/VRAM/swap/shared-memory and raising threshold warnings",
+      "fields": {
+        "enabled": "Master toggle running the background ResourceMonitor thread while the entry runs",
+        "poll_interval_sec": "Seconds between successive resource-usage samples",
+        "log_to_tensorboard": "Record every sampled resource metric as flat TensorBoard scalars under system/resources; parameter extraction writes no TensorBoard run, so the flag has no effect there",
+        "warn_ram_pct": "System RAM usage percentage that triggers a warning log",
+        "warn_vram_pct": "GPU memory usage percentage, summed across all visible GPUs against their total capacity, that triggers a warning log",
+        "warn_shm_pct": "Shared-memory (/dev/shm) usage percentage that triggers a warning log",
+        "warn_cooldown_sec": "Minimum seconds between repeated warnings of the same kind, per metric"
       }
     }
   }

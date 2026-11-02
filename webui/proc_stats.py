@@ -72,9 +72,9 @@ class PssCache:
     """Caches proportional set size readings, which are expensive to sample per process.
 
     Attributes:
-        lock: Guards the entry table against concurrent samplers.
-        entries: Mapping from pid to a (monotonic timestamp, PSS in bytes) pair.
-        pruned_t: Monotonic timestamp of the last prune sweep.
+        lock     : Guards the entry table against concurrent samplers.
+        entries  : Mapping from pid to a (monotonic timestamp, PSS in bytes) pair.
+        pruned_t : Monotonic timestamp of the last prune sweep.
     """
 
     TTL_S   = 5.0
@@ -108,7 +108,7 @@ class PssCache:
         """Returns the process's PSS in bytes, re-reading /proc only once the TTL expires.
 
         Args:
-            pid: Process id to sample.
+            pid : Process id to sample.
 
         Returns:
             Proportional set size in bytes, or None when the process is gone or
@@ -149,7 +149,7 @@ class ProcStats:
         """Returns the parsed /proc/<pid>/stat fields the console uses.
 
         Args:
-            pid: Process id to read.
+            pid : Process id to read.
 
         Returns:
             Mapping with the command name, state letter, parent pid, summed
@@ -238,5 +238,116 @@ class ProcSweep:
                 continue
 
             rows.append({"pid": pid, "uid": uid, "stat": stat, "attributed": ProcStats.attributed(pid)})
+
+        return rows
+
+
+class UserSlices:
+    """Reads the per-user cgroup v2 slices that systemd keeps under user.slice.
+
+    Every login user owns one `user-<uid>.slice`. Its three pressure files exist
+    whatever controllers are delegated, `cpu.stat` reports the slice's summed CPU
+    time with exited children included, and `memory.stat` gives the memory charged
+    to the user as long as the memory controller is delegated to user.slice.
+    """
+
+    ROOT      = "/sys/fs/cgroup/user.slice"
+    PSI_ROOT  = "/proc/pressure"
+    RESOURCES = (("cpu", "cpu"), ("mem", "memory"), ("io", "io"))
+
+    @staticmethod
+    def host_available() -> bool:
+        """Returns whether the kernel exposes machine-wide pressure-stall files."""
+        return os.path.isfile(os.path.join(UserSlices.PSI_ROOT, "cpu"))
+
+    @staticmethod
+    def available() -> bool:
+        """Returns whether the user.slice cgroup tree exists on this host."""
+        return os.path.isdir(UserSlices.ROOT)
+
+    @staticmethod
+    def pressure(path: str) -> dict:
+        """Parses one pressure file into its 10-second averages.
+
+        Args:
+            path : Path of a `cpu.pressure`, `memory.pressure` or `io.pressure` file.
+
+        Returns:
+            Mapping with "some" and "full", the avg10 percentages of time at least one
+            task, respectively every task, of the group was stalled.
+
+        Raises:
+            OSError   : The file cannot be read.
+            ValueError: The file does not carry the expected fields.
+        """
+        out = {"some": 0.0, "full": 0.0}
+        for line in open(path).read().splitlines():
+            head, *tokens = line.split()
+            fields        = dict(token.split("=") for token in tokens if "=" in token)
+            if head in out:
+                out[head] = float(fields["avg10"])
+        return out
+
+    @staticmethod
+    def host_pressure() -> dict:
+        """Returns the machine-wide pressure keyed "cpu", "mem" and "io".
+
+        Raises:
+            OSError: `/proc/pressure` is unavailable on this kernel.
+        """
+        return {key: UserSlices.pressure(os.path.join(UserSlices.PSI_ROOT, name)) for key, name in UserSlices.RESOURCES}
+
+    @staticmethod
+    def self_slice_uid() -> int | None:
+        """Returns the uid of the user slice the calling process lives in, or None when outside user.slice."""
+        try:
+            line = open("/proc/self/cgroup").read()
+        except OSError:
+            return None
+
+        marker = "/user.slice/user-"
+        start  = line.find(marker)
+        if start < 0:
+            return None
+        digits = line[start + len(marker):].split(".slice", 1)[0]
+        return int(digits) if digits.isdigit() else None
+
+    @staticmethod
+    def _counter(path: str, keys: tuple) -> dict:
+        """Returns the named integer fields of a flat-keyed cgroup file, missing keys as 0."""
+        out = {key: 0 for key in keys}
+        for line in open(path).read().splitlines():
+            key, _, value = line.partition(" ")
+            if key in out:
+                out[key] = int(value)
+        return out
+
+    @staticmethod
+    def rows() -> list[dict]:
+        """Returns one row per user slice, skipping slices that vanish mid-read.
+
+        Returns:
+            List of mappings with the "uid", the cumulative "cpu_usec" of the slice,
+            its "mem" in bytes charged as anonymous plus shared memory, and "stall",
+            the pressure keyed "cpu", "mem" and "io" as returned by `pressure`.
+        """
+        rows = []
+
+        for entry in os.listdir(UserSlices.ROOT):
+            if not (entry.startswith("user-") and entry.endswith(".slice")):
+                continue
+            digits = entry[len("user-"):-len(".slice")]
+            if not digits.isdigit():
+                continue
+
+            base = os.path.join(UserSlices.ROOT, entry)
+            try:
+                cpu   = UserSlices._counter(os.path.join(base, "cpu.stat"), ("usage_usec",))
+                mem   = UserSlices._counter(os.path.join(base, "memory.stat"), ("anon", "shmem"))
+                stall = {key: UserSlices.pressure(os.path.join(base, f"{name}.pressure")) for key, name in UserSlices.RESOURCES}
+            except OSError:
+                continue
+
+            rows.append({"uid": int(digits), "cpu_usec": cpu["usage_usec"], "mem": mem["anon"] + mem["shmem"], "stall": stall})
 
         return rows

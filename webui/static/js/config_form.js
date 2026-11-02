@@ -35,6 +35,7 @@ class ConfigForm {
     search.className = "cfg-search";
     search.type = "search";
     search.placeholder = `Filter ${cfg.leaves.length} fields...`;
+    search.setAttribute("aria-label", "Filter configuration parameters");
     search.spellcheck = false;
     search.addEventListener("input", () => {
       this.query = search.value.trim().toLowerCase();
@@ -84,6 +85,17 @@ class ConfigForm {
     this._refresh();
 
     return { applied: changed.length, skipped, locked };
+  }
+
+  static outcomeParts(outcome) {
+    const parts = [];
+    if (outcome.locked.length) parts.push(`${outcome.locked.length} locked field${outcome.locked.length === 1 ? "" : "s"} kept`);
+    if (outcome.skipped.length) parts.push(`${outcome.skipped.length} unknown key${outcome.skipped.length === 1 ? "" : "s"} skipped: ${outcome.skipped.slice(0, 4).join(", ")}${outcome.skipped.length > 4 ? ", ..." : ""}`);
+    return parts;
+  }
+
+  static outcomeKind(outcome) {
+    return outcome.skipped.length || outcome.locked.length ? "warn" : "ok";
   }
 
   _buildPins(pinned) {
@@ -398,7 +410,7 @@ class ConfigForm {
     } else if (leaf.type === "bool") {
       control = this._switchControl(leaf);
       row.classList.add("cfg-edit__row--bool");
-    } else if (leaf.type === "int" || leaf.type === "float") {
+    } else if (leaf.type === "int" || leaf.type === "float" || kind === "number") {
       control = new window.NumberField(this, leaf, short, kind === "number" ? spec : null).build();
       row.classList.add("cfg-edit__row--num");
     } else {
@@ -640,13 +652,23 @@ class ConfigForm {
 
   _conditionFails(condition) {
     const leaf = this.byPath.get(condition.field);
-    if (!leaf) return false;
+    if (!leaf) return true;
 
-    const value = String(this._effective(leaf));
-    if (condition.in) return !condition.in.includes(value);
+    const raw   = this._effective(leaf);
+    const value = String(raw);
 
-    const isSet = value !== "" && value !== "None";
-    return isSet !== condition.set;
+    if (condition.in) {
+      return !condition.in.map(String).includes(value);
+    }
+
+    if (condition.set !== undefined) {
+      const isFalsy = raw === null || raw === undefined || raw === false ||
+                      value === "" || value === "None" || value === "False" || value === "0";
+      const isSet = !isFalsy;
+      return isSet !== Boolean(condition.set);
+    }
+
+    return false;
   }
 
   _whenHolds(when) {

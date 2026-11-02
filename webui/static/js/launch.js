@@ -60,7 +60,7 @@ class RailRunModeBlock {
 
 class LaunchView extends ConfigForm {
 
-  static MODEL_COLORS = { input: "#1d4fd8", model: "#16191b", latent: "#a16207", output: "#0f766e", calc: "#7c3aed" };
+  static MODEL_COLORS = { input: "#6f9bff", model: "#eef2f5", latent: "#fbbf24", output: "#2dd4bf", calc: "#a78bfa" };
 
   static MODEL_TAGS = { input: "input", model: "network", latent: "latent", output: "output", calc: "result" };
 
@@ -78,6 +78,19 @@ class LaunchView extends ConfigForm {
       ],
     },
   };
+
+  static FIGURES = [
+    [/^pre_process$/, "aperture"],
+    [/^extract_params$/, "threshold"],
+    [/^analyze_param_extraction$/, "transect"],
+    [/^analyze_preprocessing$/, "slc"],
+    [/^compare(_|$)/, "balance"],
+  ];
+
+  static figureFor(key) {
+    const match = LaunchView.FIGURES.find(([pattern]) => pattern.test(key));
+    return match ? match[1] : "surface";
+  }
 
   constructor(runConsole, project) {
     super();
@@ -99,8 +112,23 @@ class LaunchView extends ConfigForm {
     this.copyLoadSeq = 0;
     this.copyTimer = null;
     this.runMode = null;
+    this.pendingImport = null;
     this._wireTabs();
     this._wireKeys();
+  }
+
+  get key() {
+    return this._key;
+  }
+
+  set key(value) {
+    this._key = value;
+    this._syncFigure();
+  }
+
+  _syncFigure() {
+    if (!this._key) return;
+    document.querySelector(".launch__figure").setAttribute("name", LaunchView.figureFor(this._key));
   }
 
   _resetState() {
@@ -130,6 +158,7 @@ class LaunchView extends ConfigForm {
 
     if (key === this.key && this.config) {
       if (section) this._setActiveSection(section);
+      this._importPending();
       return;
     }
 
@@ -165,6 +194,32 @@ class LaunchView extends ConfigForm {
 
     this._renderConfig(cfg);
     this._refresh();
+    this._importPending();
+  }
+
+  _importPending() {
+    const entry = this.pendingImport;
+    this.pendingImport = null;
+
+    if (!entry || !this.config || entry.script !== this.key) return;
+
+    const outcome = this.applyRunConfig(entry.overrides);
+    const verb    = entry.launch ? "Retrying" : "Imported";
+    const parts   = [`${verb} "${entry.name}": ${outcome.applied} override${outcome.applied === 1 ? "" : "s"} set`, ...ConfigForm.outcomeParts(outcome)];
+    if (entry.launch) parts.push(...this._restoreLaunch(entry.launch));
+    Toast.show(parts.join(" · "), ConfigForm.outcomeKind(outcome));
+  }
+
+  _restoreLaunch(launch) {
+    const notes  = [];
+    const interp = document.getElementById("launch-interpreter");
+
+    this.detach = Boolean(launch.detach);
+    if (interp && [...interp.options].some((opt) => opt.value === launch.interpreter)) interp.value = launch.interpreter;
+    else notes.push(`interpreter ${launch.interpreter} is no longer listed, using the preferred one`);
+
+    this._refresh();
+    return notes;
   }
 
   leave() {
@@ -174,7 +229,7 @@ class LaunchView extends ConfigForm {
   _renderSkeleton() {
     document.getElementById("launch-kicker").textContent = "";
     document.getElementById("launch-variants").innerHTML = "";
-    document.getElementById("launch-title").textContent = "Loading...";
+    document.getElementById("launch-title").innerHTML = ThinkingOrb.busy("searching", "Loading…");
     document.getElementById("launch-purpose").textContent = "";
     document.getElementById("launch-facts").innerHTML = "";
     document.getElementById("launch-rail").innerHTML = "";
@@ -183,6 +238,7 @@ class LaunchView extends ConfigForm {
     host.innerHTML = "";
     const wall = document.createElement("div");
     wall.className = "launch-skeleton";
+    wall.innerHTML = ThinkingOrb.panel("breathing", "reading the script configuration…");
     for (let i = 0; i < 4; i++) {
       const block = document.createElement("div");
       block.className = "launch-skeleton__panel";
@@ -298,13 +354,13 @@ class LaunchView extends ConfigForm {
 
     let nodes = "";
     laid.flat().forEach(({ node, cx, cy }) => {
-      const color = LaunchView.MODEL_COLORS[node.kind] || "#16191b";
+      const color = LaunchView.MODEL_COLORS[node.kind] || "#eef2f5";
       nodes += this._glyph(node.glyph, cx, cy, color) + this._caption(node, cx, cy, color, SLOT);
     });
 
     return `<svg class="mflow-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="data flow">` +
       `<defs><marker id="mflow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
-      `<path d="M0 0L10 5L0 10z" fill="#9aa196"/></marker></defs>` +
+      `<path d="M0 0L10 5L0 10z" fill="#8b9ba8"/></marker></defs>` +
       links + nodes + `</svg>`;
   }
 
@@ -469,7 +525,7 @@ class LaunchView extends ConfigForm {
     const base = this.copyBase !== null ? this.copyBase : ResultsSources.runs();
     const seq  = ++this.copyLoadSeq;
 
-    note.textContent = "listing...";
+    note.innerHTML = ThinkingOrb.busy("searching", "listing…");
     const res = await Api.get(`/api/run-config/runs?base=${encodeURIComponent(base)}`);
     if (seq !== this.copyLoadSeq) return;
 
@@ -511,10 +567,8 @@ class LaunchView extends ConfigForm {
       }
 
       const outcome = this.applyRunConfig(res.config);
-      const parts   = [`Copied ${res.run}: ${outcome.applied} override${outcome.applied === 1 ? "" : "s"} set`];
-      if (outcome.locked.length) parts.push(`${outcome.locked.length} locked field${outcome.locked.length === 1 ? "" : "s"} kept`);
-      if (outcome.skipped.length) parts.push(`${outcome.skipped.length} unknown key${outcome.skipped.length === 1 ? "" : "s"} skipped: ${outcome.skipped.slice(0, 4).join(", ")}${outcome.skipped.length > 4 ? ", ..." : ""}`);
-      Toast.show(parts.join(" · "), outcome.skipped.length || outcome.locked.length ? "warn" : "ok");
+      const parts   = [`Copied ${res.run}: ${outcome.applied} override${outcome.applied === 1 ? "" : "s"} set`, ...ConfigForm.outcomeParts(outcome)];
+      Toast.show(parts.join(" · "), ConfigForm.outcomeKind(outcome));
     } finally {
       apply.disabled = false;
     }

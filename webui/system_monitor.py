@@ -2,8 +2,8 @@
 
 Reads CPU and memory counters from /proc, GPU devices and compute apps from
 nvidia-smi, and disk usage from du, then assembles the snapshot the console polls.
-Background threads keep a rolling CPU/RAM/GPU history and a per-user activity
-table alive between snapshots.
+Background threads keep a rolling CPU/RAM/GPU history, a per-user activity table
+and a persistent 30-day GPU occupancy log alive between snapshots.
 """
 
 from __future__ import annotations
@@ -16,8 +16,11 @@ import threading
 import time
 from collections import deque
 
-from proc_stats import CpuCounters, MemInfo, ProcStats, ProcSweep
-from web_logger import WebLogger
+from gpu_activity  import GpuActivityLog
+from host_history  import HostHistoryLog
+from proc_stats    import CpuCounters, MemInfo, ProcStats, ProcSweep
+from telemetry_log import CpuBusyMeter, TelemetrySampler
+from web_logger    import WebLogger
 
 
 class GpuProbe:
@@ -28,11 +31,11 @@ class GpuProbe:
     unknown rather than empty.
 
     Attributes:
-        logger: Console logger, warned once per failure and once per recovery.
-        lock: Guards the cache and the failure flag.
-        cache: Raw rows per query flag, with the monotonic time they were read at.
-        installed: Whether nvidia-smi is on PATH.
-        failed: Whether the last probe failed, used to log state changes only.
+        logger    : Console logger, warned once per failure and once per recovery.
+        lock      : Guards the cache and the failure flag.
+        cache     : Raw rows per query flag, with the monotonic time they were read at.
+        installed : Whether nvidia-smi is on PATH.
+        failed    : Whether the last probe failed, used to log state changes only.
     """
 
     DEVICE_QUERY = "index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,uuid"
@@ -76,8 +79,8 @@ class GpuProbe:
         """Runs one nvidia-smi query and returns its rows.
 
         Args:
-            flag: Query flag passed to nvidia-smi.
-            width: Minimum number of cells a row must hold to be kept.
+            flag  : Query flag passed to nvidia-smi.
+            width : Minimum number of cells a row must hold to be kept.
 
         Returns:
             One list of stripped cells per accepted line, an empty list when nvidia-smi
@@ -128,21 +131,23 @@ class SystemMonitor:
     """Assembles the host snapshot: CPU, memory, disk, GPUs, processes and users.
 
     Attributes:
-        paths: Project paths providing the repository root measured on disk.
-        logger: Console logger.
-        lock: Serialises the CPU and process sampling inside a snapshot.
-        probe: nvidia-smi probe backing the GPU views.
-        prev_cpu: Previous per-core CPU counters, for percentage deltas.
-        prev_proc: Previous per-process CPU jiffies, for percentage deltas.
-        prev_proc_t: Monotonic time the process counters were last read at.
-        uid: Numeric user id owning the console.
-        user: Login name of that user.
-        clk: Clock ticks per second used to convert jiffies to CPU time.
-        page: Memory page size in bytes.
-        user_root: Highest ancestor of the repository still owned by this user.
-        du_usage: Latest du result in bytes for the user root and the repository.
-        history: Rolling CPU, RAM and GPU history sampler.
-        users: Per-user activity sampler.
+        paths       : Project paths providing the repository root measured on disk.
+        logger      : Console logger.
+        lock        : Serialises the CPU and process sampling inside a snapshot.
+        probe       : nvidia-smi probe backing the GPU views.
+        prev_cpu    : Previous per-core CPU counters, for percentage deltas.
+        prev_proc   : Previous per-process CPU jiffies, for percentage deltas.
+        prev_proc_t : Monotonic time the process counters were last read at.
+        uid         : Numeric user id owning the console.
+        user        : Login name of that user.
+        clk         : Clock ticks per second used to convert jiffies to CPU time.
+        page        : Memory page size in bytes.
+        user_root   : Highest ancestor of the repository still owned by this user.
+        du_usage    : Latest du result in bytes for the user root and the repository.
+        history     : Rolling CPU, RAM and GPU history sampler.
+        users       : Per-user activity sampler.
+        activity    : Persistent 30-day per-GPU occupancy log.
+        host_hist   : Persistent host telemetry log (CPU, RAM, network, GPU health).
     """
 
     PROC_LIMIT   = 30
@@ -165,10 +170,14 @@ class SystemMonitor:
         self.du_usage    = {"user": None, "repo": None}
         self.history     = SystemHistory(self)
         self.users       = ActiveUsers(self)
+        self.activity    = GpuActivityLog(self, paths, logger)
+        self.host_hist   = HostHistoryLog(self, paths, logger)
 
         threading.Thread(target=self._du_loop, daemon=True).start()
         threading.Thread(target=self.history.sample_loop, daemon=True).start()
         threading.Thread(target=self.users.sample_loop, daemon=True).start()
+        threading.Thread(target=self.activity.sample_loop, daemon=True).start()
+        threading.Thread(target=self.host_hist.sample_loop, daemon=True).start()
 
     def _cpu_percents(self) -> tuple[list[float], float]:
         """Returns the per-core busy percentages and the total, against the previous read."""
@@ -194,7 +203,7 @@ class SystemMonitor:
         """Returns the PROC_LIMIT busiest processes owned by this user.
 
         Args:
-            gpu_mem: GPU memory in MiB held per pid, from the compute-app query.
+            gpu_mem : GPU memory in MiB held per pid, from the compute-app query.
 
         Returns:
             Rows with pid, state, CPU percentage since the previous sweep, RSS, thread
@@ -405,7 +414,7 @@ class SystemMonitor:
         """Returns one card per GPU with its telemetry and who is holding it.
 
         Args:
-            occupancy: Devices with their compute processes, from gpu_occupancy.
+            occupancy : Devices with their compute processes, from gpu_occupancy.
 
         Returns:
             Cards carrying index, name, utilisation, memory, temperature and power, plus
@@ -496,47 +505,40 @@ class SystemMonitor:
         }
 
 
-class SystemHistory:
+class SystemHistory(TelemetrySampler):
     """Rolling CPU, RAM and per-GPU history sampled in the background.
 
     Keeps at most MAX_SAMPLES points per series at SAMPLE_PERIOD_S spacing, refreshing
     the GPU devices only every GPU_PERIOD_S seconds.
 
     Attributes:
-        monitor: Host monitor providing the counters.
-        lock: Guards the series against concurrent readers.
-        prev: Previous aggregate CPU counters, for percentage deltas.
-        cpu: Recent total CPU busy percentages.
-        ram: Recent used-memory percentages.
-        gpus: Per-device utilisation and memory-percentage series, keyed by index.
-        devices: Last GPU device read, reused between GPU refreshes.
-        devices_at: Monotonic time of that read.
+        monitor    : Host monitor providing the counters.
+        logger     : Console logger.
+        lock       : Guards the series against concurrent readers.
+        cpu_meter  : CPU busy-percentage meter over successive /proc/stat readings.
+        cpu        : Recent total CPU busy percentages.
+        ram        : Recent used-memory percentages.
+        gpus       : Per-device utilisation and memory-percentage series, keyed by index.
+        devices    : Last GPU device read, reused between GPU refreshes.
+        devices_at : Monotonic time of that read.
     """
 
     SAMPLE_PERIOD_S = 0.5
     GPU_PERIOD_S    = 2.0
     MAX_SAMPLES     = 144
+    LABEL           = "system history"
 
     def __init__(self, monitor: SystemMonitor) -> None:
         """Stores the monitor and creates the empty bounded series."""
         self.monitor    = monitor
+        self.logger     = monitor.logger
         self.lock       = threading.Lock()
-        self.prev       = None
+        self.cpu_meter  = CpuBusyMeter()
         self.cpu        = deque(maxlen=self.MAX_SAMPLES)
         self.ram        = deque(maxlen=self.MAX_SAMPLES)
         self.gpus       = {}
         self.devices    = None
         self.devices_at = None
-
-    def _cpu_percent(self) -> float:
-        """Returns the total CPU busy percentage since the previous sample."""
-        current   = CpuCounters.read().get("cpu")
-        prev      = self.prev
-        self.prev = current
-
-        if current is None or prev is None or current[1] <= prev[1]:
-            return 0.0
-        return round(100.0 * (current[0] - prev[0]) / (current[1] - prev[1]), 1)
 
     def _ram_percent(self) -> float:
         """Returns the used share of total memory as a percentage."""
@@ -561,7 +563,7 @@ class SystemHistory:
 
     def sample(self) -> None:
         """Appends one CPU, RAM and per-GPU point, padding unseen GPUs with zeros."""
-        cpu     = self._cpu_percent()
+        cpu     = self.cpu_meter.percent()
         ram     = self._ram_percent()
         devices = self._devices()
 
@@ -601,36 +603,29 @@ class SystemHistory:
                 "gpus"        : {key: {"util": list(track["util"]), "mem": list(track["mem"])} for key, track in self.gpus.items()},
             }
 
-    def sample_loop(self) -> None:
-        """Samples every SAMPLE_PERIOD_S seconds forever, logging any sampling failure."""
-        while True:
-            try:
-                self.sample()
-            except Exception as error:
-                self.monitor.logger.error(f"system history sampling failed: {error}")
 
-            time.sleep(self.SAMPLE_PERIOD_S)
-
-
-class ActiveUsers:
+class ActiveUsers(TelemetrySampler):
     """Per-user activity table sampled in the background from /proc, who and nvidia-smi.
 
     Attributes:
-        monitor: Host monitor providing the process sweep, memory and GPU occupancy.
-        lock: Guards the published rows.
-        prev: Previous per-process CPU jiffies, for percentage deltas.
-        prev_t: Monotonic time those counters were read at.
-        rows: Latest published per-user rows.
+        monitor : Host monitor providing the process sweep, memory and GPU occupancy.
+        logger  : Console logger.
+        lock    : Guards the published rows.
+        prev    : Previous per-process CPU jiffies, for percentage deltas.
+        prev_t  : Monotonic time those counters were read at.
+        rows    : Latest published per-user rows.
     """
 
     SAMPLE_PERIOD_S = 2.0
     MIN_UID         = 1000
     CPU_FLOOR_PCT   = 1.0
     MEM_FLOOR       = 1 << 30
+    LABEL           = "active users"
 
     def __init__(self, monitor: SystemMonitor) -> None:
         """Stores the monitor and creates the empty counters and row list."""
         self.monitor = monitor
+        self.logger  = monitor.logger
         self.lock    = threading.Lock()
         self.prev    = {}
         self.prev_t  = 0.0
@@ -705,10 +700,10 @@ class ActiveUsers:
         CPU_FLOOR_PCT of CPU, GPU memory, or MEM_FLOOR bytes of attributed memory.
 
         Args:
-            users: Per-uid aggregates from the process sweep.
-            dt: Seconds elapsed since the previous sweep.
-            sessions: Login-session count per user name.
-            gpu: GPU memory and device indices per user name.
+            users    : Per-uid aggregates from the process sweep.
+            dt       : Seconds elapsed since the previous sweep.
+            sessions : Login-session count per user name.
+            gpu      : GPU memory and device indices per user name.
 
         Returns:
             Rows with user name and uid, whether it is this user, session and process
@@ -757,12 +752,3 @@ class ActiveUsers:
         with self.lock:
             return [dict(row) for row in self.rows]
 
-    def sample_loop(self) -> None:
-        """Samples every SAMPLE_PERIOD_S seconds forever, logging any sampling failure."""
-        while True:
-            try:
-                self.sample()
-            except Exception as error:
-                self.monitor.logger.error(f"active users sampling failed: {error}")
-
-            time.sleep(self.SAMPLE_PERIOD_S)

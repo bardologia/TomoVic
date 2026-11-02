@@ -95,3 +95,25 @@ def test_a_banner_with_no_body_still_draws_its_box(plain, capsys):
 
     assert len(lines) == 3
     assert lines[0].endswith("=" * (len("Ready") + 4))
+
+
+def test_emitted_lines_land_in_the_ring():
+    """Every emitted line is recorded with its time, level and message."""
+    logger = WebLogger()
+    logger.info("hello")
+    logger.error("boom")
+
+    lines = logger.recent()
+    assert [line["level"] for line in lines[-2:]]   == ["INFO", "ERROR"]
+    assert [line["message"] for line in lines[-2:]] == ["hello", "boom"]
+
+
+def test_the_ring_is_bounded_and_recent_respects_the_limit():
+    """The ring keeps at most RING_LIMIT lines and recent trims to the requested count."""
+    logger = WebLogger()
+    for index in range(WebLogger.RING_LIMIT + 25):
+        logger.muted(f"line {index}")
+
+    assert len(logger.recent(limit=10 ** 6)) == WebLogger.RING_LIMIT
+    assert len(logger.recent(limit=5))       == 5
+    assert logger.recent(limit=1)[0]["message"] == f"line {WebLogger.RING_LIMIT + 24}"

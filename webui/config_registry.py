@@ -19,9 +19,9 @@ class ConfigRegistry:
     """Collects the configuration dataclasses, their fields and their descriptions.
 
     Attributes:
-        paths: Project paths providing the configuration directory and its signature.
-        descriptions: Curated section, class and field descriptions loaded from disk.
-        collected: Cache of (signature, groups), None until the first collection.
+        paths        : Project paths providing the configuration directory and its signature.
+        descriptions : Curated section, class and field descriptions loaded from disk.
+        collected    : Cache of (signature, groups), None until the first collection.
     """
 
     DESCRIPTIONS_FILE = "config_descriptions.json"
@@ -29,6 +29,7 @@ class ConfigRegistry:
     SECTION_TITLES = {
         "sar"        : "SAR Processing",
         "comparison" : "Run Comparison",
+        "resources"  : "Resource Monitoring",
     }
 
     SECTION_ORDER = ["sar", "comparison"]
@@ -37,7 +38,7 @@ class ConfigRegistry:
         """Loads the description file and prepares an empty parse cache.
 
         Args:
-            paths: Project paths locating the configuration package.
+            paths : Project paths locating the configuration package.
         """
         self.paths        = paths
         self.descriptions = self._load_descriptions()
@@ -52,7 +53,7 @@ class ConfigRegistry:
         """Extracts the annotated dataclasses declared at the top level of a module.
 
         Args:
-            path: Python source file inside the configuration package.
+            path : Python source file inside the configuration package.
 
         Returns:
             One entry per dataclass carrying at least one annotated field, with the
@@ -89,7 +90,7 @@ class ConfigRegistry:
         UI uses to keep the author's visual grouping of related settings.
 
         Args:
-            node: Class definition to inspect.
+            node : Class definition to inspect.
 
         Returns:
             One entry per annotated field with its name, unparsed annotation,
@@ -124,7 +125,7 @@ class ConfigRegistry:
         """Renders a field default as source text for display.
 
         Args:
-            value: Default expression node, or None for a field without a default.
+            value : Default expression node, or None for a field without a default.
 
         Returns:
             "required" when there is no default, the unparsed source of a plain
@@ -184,11 +185,10 @@ class ConfigRegistry:
         """Writes the curated class summary and per-field descriptions into a class entry.
 
         Args:
-            cls: Parsed class entry, already carrying its module path.
+            cls : Parsed class entry, already carrying its module path.
 
         Raises:
-            KeyError: If the class or any of its fields is unclaimed in the
-                descriptions file, which is how new settings are caught.
+            KeyError : If the class or any of its fields is unclaimed in the descriptions file, which is how new settings are caught.
         """
         entry       = self.descriptions["configs"][f"{cls['module']}::{cls['name']}"]
         cls["desc"] = entry["summary"]

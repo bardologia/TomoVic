@@ -28,12 +28,16 @@ if str(WEBUI_ROOT) not in sys.path:
     sys.path.insert(0, str(WEBUI_ROOT))
 
 from cube_explorer   import CubeExplorer
+from gpu_activity    import GpuActivityLog
+from host_history    import HostHistoryLog
 from notifier        import JobNotifier
+from politeness      import JobPoliteness
 from process_manager import ProcessManager
 from system_monitor  import ActiveUsers, SystemHistory, SystemMonitor
 from web_logger      import WebLogger
 
 N_ELEV, N_AZ, N_RG, N_SLOTS = 5, 8, 6, 2
+ACTIVITY_THRESHOLD           = 1e-4
 
 SLEEP_LONG = "import time\ntime.sleep(30)\n"
 ARGS_DUMP  = "import pathlib, sys\npathlib.Path('argv.txt').write_text(' '.join(sys.argv[1:]))\n"
@@ -43,23 +47,23 @@ class FakeHandler:
     """Stand-in for a BaseHTTPRequestHandler capturing the response it is sent.
 
     Attributes:
-        command: HTTP method of the simulated request.
-        path: Request path including any query string.
-        headers: Request headers, always carrying Content-Length.
-        rfile: Readable stream over the request body.
-        wfile: Writable stream collecting the response body.
-        status: Status code passed to send_response.
-        sent: Response headers passed to send_header, keyed by name.
+        command : HTTP method of the simulated request.
+        path    : Request path including any query string.
+        headers : Request headers, always carrying Content-Length.
+        rfile   : Readable stream over the request body.
+        wfile   : Writable stream collecting the response body.
+        status  : Status code passed to send_response.
+        sent    : Response headers passed to send_header, keyed by name.
     """
 
     def __init__(self, command: str, path: str, body: bytes = b"", headers: dict | None = None) -> None:
         """Builds a simulated request.
 
         Args:
-            command: HTTP method, e.g. ``"GET"`` or ``"POST"``.
-            path: Request path.
-            body: Raw request body.
-            headers: Extra request headers merged over Content-Length.
+            command : HTTP method, e.g. ``"GET"`` or ``"POST"``.
+            path    : Request path.
+            body    : Raw request body.
+            headers : Extra request headers merged over Content-Length.
         """
         self.command = command
         self.path    = path
@@ -90,12 +94,12 @@ class StubPaths:
     """Minimal stand-in for the webui path registry rooted at a temporary directory.
 
     Attributes:
-        repo_root: Root of the fake repository.
-        main_dir: Directory holding entry-point scripts.
-        logs_dir: Root of the log tree.
-        gpu_guard_dir: Directory for GPU guard state files.
-        gpu_pools_dir: Directory for GPU pool state files.
-        saved_runs_dir: Directory for saved run definitions.
+        repo_root      : Root of the fake repository.
+        main_dir       : Directory holding entry-point scripts.
+        logs_dir       : Root of the log tree.
+        gpu_guard_dir  : Directory for GPU guard state files.
+        gpu_pools_dir  : Directory for GPU pool state files.
+        saved_runs_dir : Directory for saved run definitions.
     """
 
     def __init__(self, root: Path) -> None:
@@ -117,6 +121,22 @@ class StubPaths:
         return {"path": path, "rel": f"main/analysis/{key}.py"}
 
 
+class StubNotifier:
+    """Notifier stand-in recording every pushed system alert.
+
+    Attributes:
+        alerts : Recorded (title, body, priority) tuples, oldest first.
+    """
+
+    def __init__(self) -> None:
+        """Starts with no recorded alerts."""
+        self.alerts = []
+
+    def system_alert(self, title: str, body: str, priority: str = "high") -> None:
+        """Records one pushed alert."""
+        self.alerts.append((title, body, priority))
+
+
 class StubDescriber:
     """Job describer stand-in returning a fixed sentence per catalog key."""
 
@@ -135,10 +155,10 @@ def wait_for_status(manager: ProcessManager, job_id: str, status: str, timeout: 
     """Polls until a job reaches a given status.
 
     Args:
-        manager: Process manager owning the job.
-        job_id: Identifier of the job to poll.
-        status: Status value being waited for.
-        timeout: Maximum wait in seconds.
+        manager : Process manager owning the job.
+        job_id  : Identifier of the job to poll.
+        status  : Status value being waited for.
+        timeout : Maximum wait in seconds.
 
     Returns:
         True if the status was observed before the timeout.
@@ -155,9 +175,9 @@ def wait_until_finished(manager: ProcessManager, job_id: str, timeout: float = 1
     """Polls until a job leaves the running state.
 
     Args:
-        manager: Process manager owning the job.
-        job_id: Identifier of the job to poll.
-        timeout: Maximum wait in seconds.
+        manager : Process manager owning the job.
+        job_id  : Identifier of the job to poll.
+        timeout : Maximum wait in seconds.
 
     Returns:
         True if the job stopped running before the timeout.
@@ -215,15 +235,17 @@ def make_geo_fields() -> dict:
     }
 
 
-def make_preproc(base: Path, rng: np.random.Generator | None = None, with_spacing: bool = False, with_geo: bool = False, n_az: int = N_AZ) -> Path:
+def make_preproc(base: Path, rng: np.random.Generator | None = None, with_spacing: bool = False, with_geo: bool = False, n_az: int = N_AZ, with_passes: bool = False, with_polarimetry: bool = False) -> Path:
     """Writes a synthetic preprocessing run directory.
 
     Args:
-        base: Parent directory receiving the ``preproc`` tree.
-        rng: Generator for the complex primary image; seeded default when None.
-        with_spacing: Whether track_parameters.json with pixel spacings is written.
-        with_geo: Whether a DEM (with one NaN pixel) and geocoding fields are added.
-        n_az: Number of azimuth samples in the primary image.
+        base             : Parent directory receiving the ``preproc`` tree.
+        rng              : Generator for the complex primary image; seeded default when None.
+        with_spacing     : Whether track_parameters.json with pixel spacings is written.
+        with_geo         : Whether a DEM (with one NaN pixel) and geocoding fields are added.
+        n_az             : Number of azimuth samples in the primary image.
+        with_passes      : Whether two complex secondary SLCs, their interferograms and pass labels are added.
+        with_polarimetry : Whether a three-channel polarimetric primary, whose cross-polar channel is the primary itself, is added with its sidecar.
 
     Returns:
         Path of the created preprocessing run directory.
@@ -235,7 +257,28 @@ def make_preproc(base: Path, rng: np.random.Generator | None = None, with_spacin
     primary = rng.normal(size=(n_az, N_RG)) + 1j * rng.normal(size=(n_az, N_RG))
     np.save(preproc / "data" / "primary.npy", primary)
 
-    artifacts = {"primary": "primary.npy"}
+    artifacts   = {"primary": "primary.npy"}
+    pass_labels = None
+
+    if with_passes:
+        stack = rng.normal(size=(2, n_az, N_RG)) + 1j * rng.normal(size=(2, n_az, N_RG))
+        np.save(preproc / "data" / "secondaries.npy", stack)
+        np.save(preproc / "data" / "interferograms.npy", stack * np.conj(primary)[None])
+
+        artifacts["secondaries"]    = "secondaries.npy"
+        artifacts["interferograms"] = "interferograms.npy"
+        pass_labels                 = ["T01", "T02", "T03"]
+
+    if with_polarimetry:
+        hh = rng.normal(size=(n_az, N_RG)) + 1j * rng.normal(size=(n_az, N_RG))
+        vv = rng.normal(size=(n_az, N_RG)) + 1j * rng.normal(size=(n_az, N_RG))
+        np.save(preproc / "data" / "primary_polarimetric.npy", np.stack([hh, primary, vv]).astype(np.complex64))
+
+        sidecar = {"channels": ["hh", "xx", "vv"], "loader_channels": ["HH", "HV", "VH", "VV"], "cross_source": "hv+vh", "symmetrised": True, "window": [2, 2]}
+        (preproc / "meta").mkdir(exist_ok=True)
+        (preproc / "meta" / "primary_polarimetric.json").write_text(json.dumps(sidecar))
+
+        artifacts["primary_polarimetric"] = "primary_polarimetric.npy"
 
     if with_geo:
         dem       = np.full((n_az, N_RG), 680.0, dtype=np.float32)
@@ -243,7 +286,7 @@ def make_preproc(base: Path, rng: np.random.Generator | None = None, with_spacin
         np.save(preproc / "data" / "dem_full.npy", dem)
         artifacts["dem_full"] = "dem_full.npy"
 
-    layout = {"global_crop": [0, n_az, 0, N_RG], "artifacts": artifacts}
+    layout = {"global_crop": [0, n_az, 0, N_RG], "artifacts": artifacts, "pass_labels": pass_labels}
     (preproc / "data" / "dataset.json").write_text(json.dumps(layout))
 
     if with_spacing or with_geo:
@@ -262,7 +305,7 @@ def make_preproc(base: Path, rng: np.random.Generator | None = None, with_spacin
             "per_track"   : per_track,
             "track_files" : [],
         }
-        (preproc / "meta").mkdir()
+        (preproc / "meta").mkdir(exist_ok=True)
         (preproc / "meta" / "track_parameters.json").write_text(json.dumps(payload))
 
     return preproc
@@ -272,15 +315,14 @@ def make_stamp(run: Path, preproc: Path, rng: np.random.Generator, sources: tupl
     """Writes an inference stamp with random curve cubes and its metrics file.
 
     Args:
-        run: Run directory receiving ``inference/<name>`` and ``meta``.
-        preproc: Preprocessing run the dataset config points back to.
-        rng: Generator for the random curve cubes.
-        sources: Cube prefixes to write, each as ``<source>_curves.npy``.
-        x_min: Lowest height of the elevation axis in metres.
-        shape: Cube shape as (elevation, azimuth, range).
-        name: Stamp directory name.
-        region: Split region as [az_start, az_end, rg_start, rg_end]; defaults to
-            the whole scene.
+        run     : Run directory receiving ``inference/<name>`` and ``meta``.
+        preproc : Preprocessing run the dataset config points back to.
+        rng     : Generator for the random curve cubes.
+        sources : Cube prefixes to write, each as ``<source>_curves.npy``.
+        x_min   : Lowest height of the elevation axis in metres.
+        shape   : Cube shape as (elevation, azimuth, range).
+        name    : Stamp directory name.
+        region  : Split region as [az_start, az_end, rg_start, rg_end]; defaults to the whole scene.
 
     Returns:
         Path of the created stamp directory.
@@ -292,7 +334,7 @@ def make_stamp(run: Path, preproc: Path, rng: np.random.Generator, sources: tupl
     region = [0, N_AZ, 0, N_RG] if region is None else region
 
     (run / "meta" / "dataset_creation_config.json").write_text(json.dumps({"preprocessing_run_directory": str(preproc)}))
-    (stamp / "metrics.json").write_text(json.dumps({"x_axis_min": x_min, "x_axis_max": 30.0, "split_region": region, "tracks": {"labels": ["T01", "T02"], "reference": "T01"}}))
+    (stamp / "metrics.json").write_text(json.dumps({"x_axis_min": x_min, "x_axis_max": 30.0, "split_region": region, "tracks": {"labels": ["T01", "T02"], "reference": "T01"}, "activity_threshold": ACTIVITY_THRESHOLD}))
 
     for source in sources:
         np.save(stamp / "cubes" / f"{source}_curves.npy", rng.random(shape).astype(np.float32))
@@ -300,25 +342,25 @@ def make_stamp(run: Path, preproc: Path, rng: np.random.Generator, sources: tupl
     return stamp
 
 
-def make_cube_run(base: Path, sources: tuple = ("pred", "gt"), with_spacing: bool = False, with_reduced: bool = False, with_params: tuple = (), with_metrics: bool = False, with_geo: bool = False) -> Path:
+def make_cube_run(base: Path, sources: tuple = ("pred", "gt"), with_spacing: bool = False, with_reduced: bool = False, with_params: tuple = (), with_metrics: bool = False, with_geo: bool = False, with_passes: bool = False, with_polarimetry: bool = False) -> Path:
     """Writes a complete single-run cube tree for the explorer to discover.
 
     Args:
-        base: Parent directory receiving the preprocessing and run trees.
-        sources: Curve cube prefixes to write.
-        with_spacing: Whether pixel spacing metadata is written.
-        with_reduced: Whether a sparse reduced-curve cube is added.
-        with_params: Sources for which a parameter block of shape
-            (3 * N_SLOTS, N_AZ, N_RG) is written, its second amplitude zeroed.
-        with_metrics: Whether pixel R2 (with one NaN), a physics validity mask
-            and a deliberately misshaped cube are added.
-        with_geo: Whether DEM and geocoding metadata are written.
+        base             : Parent directory receiving the preprocessing and run trees.
+        sources          : Curve cube prefixes to write.
+        with_spacing     : Whether pixel spacing metadata is written.
+        with_reduced     : Whether a sparse reduced-curve cube is added.
+        with_params      : Sources for which a parameter block of shape (3 * N_SLOTS, N_AZ, N_RG) is written, its second amplitude zeroed.
+        with_metrics     : Whether pixel R2 (with one NaN), a physics validity mask and a deliberately misshaped cube are added.
+        with_geo         : Whether DEM and geocoding metadata are written.
+        with_passes      : Whether the preprocessing run carries a secondary SLC stack with interferograms.
+        with_polarimetry : Whether the preprocessing run carries a polarimetric primary with its sidecar.
 
     Returns:
         Path of the created stamp directory.
     """
     rng     = np.random.default_rng(0)
-    preproc = make_preproc(base, rng, with_spacing, with_geo)
+    preproc = make_preproc(base, rng, with_spacing, with_geo, with_passes=with_passes, with_polarimetry=with_polarimetry)
     stamp   = make_stamp(base / "group" / "run_a", preproc, rng, sources)
 
     if with_reduced:
@@ -353,13 +395,13 @@ def make_cv_run(base: Path, splits: tuple = ("test",), seed: str | None = None, 
     checked pixel by pixel.
 
     Args:
-        base: Parent directory receiving the preprocessing and cross-validation trees.
-        splits: Splits for which a completed stamp is written per fold.
-        seed: Optional seed subdirectory inserted under each fold run.
-        sources: Curve cube prefixes to write.
-        with_params: Sources for which a constant parameter block is written.
-        with_metrics: Whether a constant pixel R2 map is written.
-        gap: Guard lines between consecutive folds.
+        base         : Parent directory receiving the preprocessing and cross-validation trees.
+        splits       : Splits for which a completed stamp is written per fold.
+        seed         : Optional seed subdirectory inserted under each fold run.
+        sources      : Curve cube prefixes to write.
+        with_params  : Sources for which a constant parameter block is written.
+        with_metrics : Whether a constant pixel R2 map is written.
+        gap          : Guard lines between consecutive folds.
 
     Returns:
         Path of the cross-validation root directory.
@@ -396,8 +438,8 @@ def open_explorer(base: Path, expected: int | None = None) -> tuple[CubeExplorer
     """Lists the cubes under a directory and returns the explorer and their ids.
 
     Args:
-        base: Directory scanned for cubes.
-        expected: Asserted number of discovered cubes when given.
+        base     : Directory scanned for cubes.
+        expected : Asserted number of discovered cubes when given.
 
     Returns:
         Tuple of the explorer and the discovered cube ids.
@@ -416,9 +458,9 @@ def load_cube(explorer: CubeExplorer, cube_id: str, timeout: float = 30.0) -> di
     """Starts a cube load and blocks until it reports ready.
 
     Args:
-        explorer: Explorer performing the load.
-        cube_id: Identifier of the cube to load.
-        timeout: Maximum wait in seconds.
+        explorer : Explorer performing the load.
+        cube_id  : Identifier of the cube to load.
+        timeout  : Maximum wait in seconds.
 
     Returns:
         Final load status payload.
@@ -438,8 +480,8 @@ def loaded_cube(base: Path, **kwargs) -> tuple[CubeExplorer, str]:
     """Builds a single cube run and returns the explorer with that cube loaded.
 
     Args:
-        base: Parent directory for the generated run.
-        **kwargs: Forwarded to ``make_cube_run``.
+        base     : Parent directory for the generated run.
+        **kwargs : Forwarded to ``make_cube_run``.
 
     Returns:
         Tuple of the explorer and the loaded cube id.
@@ -457,6 +499,8 @@ def monitor(tmp_path, monkeypatch):
     monkeypatch.setattr(SystemMonitor, "_du_loop", lambda self: None)
     monkeypatch.setattr(SystemHistory, "sample_loop", lambda self: None)
     monkeypatch.setattr(ActiveUsers, "sample_loop", lambda self: None)
+    monkeypatch.setattr(GpuActivityLog, "sample_loop", lambda self: None)
+    monkeypatch.setattr(HostHistoryLog, "sample_loop", lambda self: None)
     return SystemMonitor(StubPaths(tmp_path), WebLogger())
 
 
@@ -474,7 +518,7 @@ def make_manager(tmp_path):
 
         paths   = StubPaths(tmp_path)
         logger  = WebLogger()
-        manager = ProcessManager(paths, logger, JobNotifier(paths, logger), StubDescriber())
+        manager = ProcessManager(paths, logger, JobNotifier(paths, logger), StubDescriber(), JobPoliteness(paths, logger))
         built.append(manager)
 
         return manager

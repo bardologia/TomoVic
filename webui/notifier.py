@@ -1,6 +1,7 @@
 """Push notifications for console jobs and a watcher that fires experiment milestones.
 
-JobNotifier sends start, finish and unit-failure messages to an ntfy topic;
+JobNotifier sends start, finish and unit-failure messages, and the host alerts of
+the contention monitor, to an ntfy topic;
 ExperimentProgressWatcher polls the running fan-out jobs and asks the notifier
 to push the first ETA, the quarter milestones, and every newly failed unit.
 """
@@ -216,6 +217,23 @@ class JobNotifier:
         """Returns whether notifications are switched on and a topic is configured."""
         with self.lock:
             return self.settings["enabled"] and bool(self.settings["topic"])
+
+    def system_alert(self, title: str, body: str, priority: str = "high") -> None:
+        """Pushes a host monitoring alert naming the machine it fired on.
+
+        Used by the contention monitor so its neighbour-impact, auto-throttle and
+        auto-nuke alarms reach the configured topic even when no browser tab is
+        open.
+
+        Args:
+            title    : Notification title describing the alert.
+            body     : Alert text, sent with the host name appended.
+            priority : ntfy priority, "high" for alerts and "urgent" for kills.
+        """
+        if not self._enabled():
+            return
+
+        self._dispatch(title, f"{body}\non {socket.gethostname()}", priority)
 
     def job_started(self, record: dict) -> None:
         """Pushes a start notification naming the host, job id and pid.

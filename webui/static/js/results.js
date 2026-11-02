@@ -1,9 +1,12 @@
 "use strict";
 
 class ResultsView {
+  static FIGURES = { folder: "tray", all: "film", compare: "tiles" };
+
   constructor(listEl, detailEl) {
     this.listEl    = listEl;
     this.detailEl  = detailEl;
+    this.figureEl  = detailEl.closest(".page").querySelector(".page__figure");
     this.pathForm  = document.getElementById("results-path-form");
     this.pathInput = document.getElementById("results-path-input");
 
@@ -51,6 +54,15 @@ class ResultsView {
     window.addEventListener("resize", () => this._positionIndex());
   }
 
+  get view() {
+    return this._view;
+  }
+
+  set view(value) {
+    this._view = value;
+    this.figureEl.setAttribute("name", ResultsView.FIGURES[value]);
+  }
+
   enter() {
     if (this.loaded) {
       this.loadCatalog();
@@ -91,14 +103,14 @@ class ResultsView {
   }
 
   async open(path) {
-    this.detailEl.innerHTML = `<div class="res-empty">Loading&hellip;</div>`;
+    this.detailEl.innerHTML = ThinkingOrb.panel("searching", "Loading the results tree…");
 
     const data = await Api.get(`/api/results/tree?path=${encodeURIComponent(path)}`);
 
     if (!data.ok) {
       this.root = null;
       this._renderSidebar();
-      this.detailEl.innerHTML = `<div class="res-empty">${SharedCharts.esc(data.error || "Could not open this path.")}</div>`;
+      this.detailEl.innerHTML = HairlineFigure.empty("plug", "res-empty", SharedCharts.esc(data.error || "Could not open this path."));
       return;
     }
 
@@ -135,7 +147,7 @@ class ResultsView {
     const data = await Api.get(`/api/results/folder?root=${encodeURIComponent(this.root.root)}&rel=${encodeURIComponent(rel)}`);
 
     if (!data.ok) {
-      this.detailEl.innerHTML = `<div class="res-empty">${SharedCharts.esc(data.error || "Could not load this folder.")}</div>`;
+      this.detailEl.innerHTML = HairlineFigure.empty("plug", "res-empty", SharedCharts.esc(data.error || "Could not load this folder."));
       return;
     }
 
@@ -151,7 +163,7 @@ class ResultsView {
 
       if (!data.ok) {
         this.galleryData = null;
-        this.detailEl.innerHTML = `<div class="res-empty">${SharedCharts.esc(data.error || "Could not load the gallery.")}</div>`;
+        this.detailEl.innerHTML = HairlineFigure.empty("plug", "res-empty", SharedCharts.esc(data.error || "Could not load the gallery."));
         return;
       }
 

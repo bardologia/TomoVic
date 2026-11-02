@@ -3,13 +3,14 @@
 Exposes preprocessing-run listing and loading, parameter-run listing and the
 per-pixel Gaussian readout of the parametrized tomogram, plane/slice/transect
 renderings, colour bars, point clouds for the 3D and globe views, the DEM grid,
-per-pass SLC amplitude and interferogram phase maps, the run's saved figures
-and multi-run slice collection.
+per-pass SLC amplitude and interferogram phase maps, Pauli decomposition maps,
+pixel readouts, scene summaries and the north-up globe drape, the run's saved
+figures, and multi-run slice collection with its basket mailer.
 """
 
 from __future__ import annotations
 
-from cube_explorer    import CubeExplorer, SliceCollector
+from cube_explorer    import CubeExplorer, SliceCollectionMailer, SliceCollector
 from routers.dispatch import HttpExchange, RouteTable, SubRouter
 
 
@@ -17,14 +18,29 @@ class CubeRouter(SubRouter):
     """Routes the /api/cubes endpoints onto the cube explorer service.
 
     Attributes:
-        cubes: Cube explorer service answering the requests.
+        STRETCHES : Accepted values of the Pauli ``stretch`` query parameter.
+        cubes     : Cube explorer service answering the requests.
     """
+
+    STRETCHES = ("channel", "shared")
 
     def __init__(self, cubes: CubeExplorer) -> None:
         """Stores the cube explorer service and declares its routes."""
         self.cubes = cubes
 
         super().__init__(("/api/cubes",))
+
+    def _shared_stretch(self, exchange: HttpExchange) -> bool:
+        """Returns whether the Pauli stretch pools every component; an absent parameter means per channel, like both views.
+
+        Raises:
+            ValueError : If the parameter is neither "channel" nor "shared".
+        """
+        stretch = exchange.text("stretch", "channel")
+        if stretch not in self.STRETCHES:
+            raise ValueError(f"stretch must be one of {self.STRETCHES}, got {stretch!r}")
+
+        return stretch == "shared"
 
     def declare(self, table: RouteTable) -> None:
         """Registers the /api/cubes routes."""
@@ -39,9 +55,13 @@ class CubeRouter(SubRouter):
         table.add("GET", "/api/cubes/points",       self.points)
         table.add("GET", "/api/cubes/volume",       self.volume)
         table.add("GET", "/api/cubes/globe_points", self.globe_points)
+        table.add("GET", "/api/cubes/globe_pauli",  self.globe_pauli)
         table.add("GET", "/api/cubes/dem_grid",     self.dem_grid)
         table.add("GET", "/api/cubes/transect",     self.transect)
         table.add("GET", "/api/cubes/slice",        self.slice_view)
+        table.add("GET", "/api/cubes/pauli_map",    self.pauli_map)
+        table.add("GET", "/api/cubes/pauli_at",     self.pauli_at)
+        table.add("GET", "/api/cubes/pauli_summary", self.pauli_summary)
         table.add("GET", "/api/cubes/figures",      self.figures)
         table.add("GET", "/api/cubes/pass_map",     self.pass_map)
         table.add("GET", "/api/cubes/figure",       self.figure)
@@ -111,14 +131,36 @@ class CubeRouter(SubRouter):
         exchange.send_bytes(blob)
 
     def globe_points(self, exchange: HttpExchange) -> None:
-        """Answers with the geocoded binary point cloud consumed by the globe view."""
+        """Answers with the geocoded binary point cloud consumed by the globe view, optionally coloured by a Pauli map."""
         blob = self.cubes.globe_points_bin(
             cube_id    = exchange.text("id"),
             source     = exchange.text("source", "full"),
             amp_min    = exchange.number("amp_min", "0.001"),
             max_points = exchange.integer("max", "60000"),
+            pauli_mode = exchange.text("pauli", ""),
+            win_az     = exchange.integer("win_az", "1"),
+            win_rg     = exchange.integer("win_rg", "1"),
+            shared     = self._shared_stretch(exchange),
+            cmap       = exchange.text("cmap", "viridis"),
         )
         exchange.send_bytes(blob)
+
+    def globe_pauli(self, exchange: HttpExchange) -> None:
+        """Answers with the north-up PNG of one Pauli map for the globe drape, its lon/lat rectangle in the X-Rectangle header and the rendered window in X-Window."""
+        rendered = self.cubes.globe_pauli_png(
+            cube_id = exchange.text("id"),
+            mode    = exchange.text("mode", "rgb"),
+            win_az  = exchange.integer("win_az", "1"),
+            win_rg  = exchange.integer("win_rg", "1"),
+            shared  = self._shared_stretch(exchange),
+            cmap    = exchange.text("cmap", "viridis"),
+        )
+        if rendered is None:
+            exchange.not_found()
+            return
+
+        png, rect, window = rendered
+        exchange.send_png(png, headers={"X-Rectangle": ",".join(f"{value:.8f}" for value in rect), "X-Window": f"{window[0]},{window[1]}"})
 
     def volume(self, exchange: HttpExchange) -> None:
         """Answers with the quantised binary volume of one cube source."""
@@ -183,6 +225,39 @@ class CubeRouter(SubRouter):
         )
         exchange.send_png(png)
 
+    def pauli_map(self, exchange: HttpExchange) -> None:
+        """Answers with the PNG Pauli composite, one component power map or the dominant-mechanism map."""
+        png = self.cubes.pauli_png(
+            cube_id = exchange.text("id"),
+            mode    = exchange.text("mode", "rgb"),
+            win_az  = exchange.integer("win_az", "1"),
+            win_rg  = exchange.integer("win_rg", "1"),
+            shared  = self._shared_stretch(exchange),
+            cmap    = exchange.text("cmap", "viridis"),
+        )
+        exchange.send_png(png)
+
+    def pauli_at(self, exchange: HttpExchange) -> None:
+        """Answers with the Pauli powers and mechanism shares at one pixel."""
+        result = self.cubes.pauli_value_at(
+            cube_id = exchange.text("id"),
+            az      = exchange.integer("az"),
+            rg      = exchange.integer("rg"),
+            win_az  = exchange.integer("win_az", "1"),
+            win_rg  = exchange.integer("win_rg", "1"),
+        )
+        exchange.send_result(result, 404)
+
+    def pauli_summary(self, exchange: HttpExchange) -> None:
+        """Answers with the scene-wide mechanism balance and colour stretch of the Pauli decomposition."""
+        result = self.cubes.pauli_summary(
+            cube_id = exchange.text("id"),
+            win_az  = exchange.integer("win_az", "1"),
+            win_rg  = exchange.integer("win_rg", "1"),
+            shared  = self._shared_stretch(exchange),
+        )
+        exchange.send_result(result, 404)
+
     def figures(self, exchange: HttpExchange) -> None:
         """Answers with the figure files saved under the loaded run."""
         exchange.send_result(self.cubes.list_figures(exchange.text("id")))
@@ -236,27 +311,36 @@ class CubeRouter(SubRouter):
 
 
 class SliceRouter(SubRouter):
-    """Routes the /api/slices endpoints onto the multi-run slice collector.
+    """Routes the /api/slices endpoints onto the multi-run slice collector and its mailer.
 
     Attributes:
-        slices: Slice collector service answering the requests.
+        slices : Slice collector service answering the requests.
+        mailer : Service mailing a rendered basket.
     """
 
-    def __init__(self, slices: SliceCollector) -> None:
-        """Stores the slice collector service and declares its routes."""
+    def __init__(self, slices: SliceCollector, mailer: SliceCollectionMailer) -> None:
+        """Stores the slice collector and mailer services and declares their routes."""
         self.slices = slices
+        self.mailer = mailer
 
         super().__init__(("/api/slices",))
 
     def declare(self, table: RouteTable) -> None:
         """Registers the /api/slices routes."""
-        table.add("GET",  "/api/slices/info",    self.info)
-        table.add("GET",  "/api/slices/slice",   self.slice_view)
-        table.add("POST", "/api/slices/collect", self.collect)
+        table.add("GET",  "/api/slices/info",          self.info)
+        table.add("GET",  "/api/slices/primary",       self.primary)
+        table.add("GET",  "/api/slices/slice",         self.slice_view)
+        table.add("GET",  "/api/slices/mail_settings", self.mail_settings)
+        table.add("POST", "/api/slices/collect",       self.collect)
+        table.add("POST", "/api/slices/mail",          self.mail)
 
     def info(self, exchange: HttpExchange) -> None:
         """Answers with the axis extents and sources available for one cube."""
         exchange.send_result(self.slices.info(exchange.text("id")), 404)
+
+    def primary(self, exchange: HttpExchange) -> None:
+        """Answers with the PNG primary-amplitude map of one cube, cropped to its region."""
+        exchange.send_png(self.slices.primary_png(exchange.text("id")))
 
     def slice_view(self, exchange: HttpExchange) -> None:
         """Answers with the PNG slice of one cube under an optional shared colour scale."""
@@ -273,17 +357,28 @@ class SliceRouter(SubRouter):
         )
         exchange.send_png(png)
 
+    def mail_settings(self, exchange: HttpExchange) -> None:
+        """Answers with the default recipient and whether the SMTP password is available."""
+        exchange.send_json(self.mailer.settings())
+
     def collect(self, exchange: HttpExchange) -> None:
-        """Collects the requested slices of several cubes into one saved figure set."""
+        """Renders the posted basket of slices into one saved figure set."""
         body   = exchange.body
         result = self.slices.collect(
-            ids     = body.get("ids") or [],
-            points  = body.get("points") or [],
-            sources = body.get("sources") or [],
-            axes    = body.get("axes") or [],
-            space   = body.get("space", "physical"),
-            cmap    = body.get("cmap", "jet"),
-            shared  = bool(body.get("shared", True)),
-            name    = body.get("name", ""),
+            items  = body.get("items") or [],
+            shared = bool(body.get("shared", True)),
+            name   = body.get("name", ""),
+        )
+        exchange.send_result(result)
+
+    def mail(self, exchange: HttpExchange) -> None:
+        """Renders the posted basket of slices, then mails it as zip attachments."""
+        body   = exchange.body
+        result = self.mailer.mail(
+            items     = body.get("items") or [],
+            shared    = bool(body.get("shared", True)),
+            name      = body.get("name", ""),
+            recipient = body.get("recipient", ""),
+            note      = body.get("note", ""),
         )
         exchange.send_result(result)

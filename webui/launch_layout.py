@@ -27,6 +27,7 @@ class LaunchLayout:
     """
 
     NUM_WORKERS = {"kind": "number", "int": True, "min": 0, "max": 64, "presets": [0, 2, 4, 8, 16, 32]}
+    NUM_SECONDS = {"kind": "number", "min": 0.5, "max": 60, "step": 0.5, "presets": [3, 5, 8, 10, 15, 30]}
 
     PICK_DATASETS = {"kind": "dataset", "mode": "datasets", "multi": True, "baseFrom": "dataset_base_path", "validOnly": True}
 
@@ -52,7 +53,7 @@ class LaunchLayout:
                 {"key": "config", "title": "Configuration", "panels": [
                     {"kind": "fields", "groups": [
                         {"title": "Crop window", "fields": ["azimuth_start", "azimuth_end", "range_start", "range_end"]},
-                        {"title": "Source", "fields": ["fusar_project_path", "base_directory", "track_selection", "polarisation"]},
+                        {"title": "Source", "fields": ["fusar_project_path", "base_directory", "main_directory", "pyrat_directory", "track_selection", "polarisation"]},
                         {"title": "Beamforming", "fields": ["beamforming_method", "filter_method", "height_range", "win_list", "apply_resampling", "apply_presumming", "max_amplitude_clip"]},
                         {"title": "Effort", "fields": ["effort", "max_crop_azimuth_width", "tomogram_workers", "pyrat_threads"]},
                         {"title": "Outputs", "fields": ["dataset_name", "dataset_type", "stack_identifier", "tomogram_output_tag", "parameter_output_tag", "tomogram_env_name"]},
@@ -69,7 +70,7 @@ class LaunchLayout:
                             {"path": "dataset_filter", "widget": PICK_DATASETS},
                             "pyrat_directory",
                         ]},
-                        {"title": "Output", "fields": ["output_prefix", "output_suffix", "height_range"]},
+                        {"title": "Output", "fields": ["output_prefix", "output_suffix", "height_range", "overwrite"]},
                         {"title": "Fit sweep", "fields": [
                             {"path": "fit_k_values", "widget": MULTI_K},
                             {"path": "fit_lambda_values", "widget": MULTI_LAMBDA},
@@ -90,6 +91,29 @@ class LaunchLayout:
                             "gpu_pixel_batch_size",
                             {"path": "parameter_workers", "widget": NUM_WORKERS},
                         ]},
+                        {"title": "Resource monitor", "fields": [
+                            "resources.enabled",
+                            {"path": "resources.poll_interval_sec", "widget": NUM_SECONDS},
+                            "resources.warn_ram_pct",
+                            "resources.warn_vram_pct",
+                            "resources.warn_shm_pct",
+                            "resources.warn_cooldown_sec",
+                        ]},
+                    ]},
+                    {"kind": "hidden", "fields": ["resources.log_to_tensorboard"]},
+                ]},
+            ],
+        },
+        "extract_polarimetry": {
+            "sections": [
+                {"key": "config", "title": "Configuration", "panels": [
+                    {"kind": "fields", "groups": [
+                        {"title": "Datasets", "fields": [
+                            "dataset_base_path",
+                            {"path": "dataset_filter", "widget": PICK_DATASETS},
+                        ]},
+                        {"title": "PyRat", "fields": ["pyrat_directory", "pyrat_threads", "tomogram_env_name"]},
+                        {"title": "Output", "fields": ["overwrite"]},
                     ]},
                 ]},
             ],

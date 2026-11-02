@@ -6,21 +6,14 @@ class TomoScene extends CanvasBase {
     super(canvas);
     this.t      = 0;
     this.frame  = 0;
-    this.blue   = "29, 79, 216";
-    this.teal   = "15, 118, 110";
-    this.ink    = "20, 30, 40";
+    this.blue   = "111, 155, 255";
+    this.ink    = "214, 226, 236";
 
     this.nTracks    = 4;
     this.fronts     = [];
     this.planes     = [];
     this.terrain    = [];
     this.scatterers = [];
-
-    this.gaussians = [
-      { amp: 0.85, mu: 0.30, sigma: 0.060, vAmp: 0.07, vMu: 0.050, pA: 0.0, pM: 1.1 },
-      { amp: 0.55, mu: 0.55, sigma: 0.085, vAmp: 0.10, vMu: 0.080, pA: 2.1, pM: 3.7 },
-      { amp: 0.40, mu: 0.78, sigma: 0.050, vAmp: 0.08, vMu: 0.060, pA: 4.4, pM: 0.6 },
-    ];
 
     this._seed();
 
@@ -89,16 +82,6 @@ class TomoScene extends CanvasBase {
     this.fronts.push({ cx: x, cy: this._trackY(plane.track), r: 4 });
   }
 
-  _mixture(z) {
-    let v = 0;
-    for (const g of this.gaussians) {
-      const amp = g.amp + g.vAmp * Math.sin(this.t * 0.31 + g.pA);
-      const mu  = g.mu + g.vMu * Math.sin(this.t * 0.23 + g.pM);
-      v += amp * Math.exp(-((z - mu) ** 2) / (2 * g.sigma ** 2));
-    }
-    return v;
-  }
-
   _draw() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.w, this.h);
@@ -106,7 +89,6 @@ class TomoScene extends CanvasBase {
     this._drawTracks(ctx);
     this._drawFronts(ctx);
     this._drawGround(ctx);
-    this._drawProfile(ctx);
   }
 
   _drawTracks(ctx) {
@@ -185,52 +167,6 @@ class TomoScene extends CanvasBase {
         ctx.fill();
       }
     }
-  }
-
-  _drawProfile(ctx) {
-    const dh    = this._designH();
-    const x0    = this.w * 0.935;
-    const yTop  = dh * 0.20;
-    const yBot  = dh * 0.82;
-    const scale = this.w * 0.045;
-
-    ctx.beginPath();
-    ctx.moveTo(x0, yTop);
-    ctx.lineTo(x0, yBot);
-    ctx.strokeStyle = `rgba(${this.ink}, 0.16)`;
-    ctx.lineWidth   = 1;
-    ctx.stroke();
-
-    for (let i = 0; i <= 4; i++) {
-      const y = yTop + ((yBot - yTop) * i) / 4;
-      ctx.beginPath();
-      ctx.moveTo(x0 - 3, y);
-      ctx.lineTo(x0 + 3, y);
-      ctx.stroke();
-    }
-
-    ctx.beginPath();
-    for (let i = 0; i <= 80; i++) {
-      const z = i / 80;
-      const y = yBot - (yBot - yTop) * z;
-      const x = x0 - this._mixture(z) * scale;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = `rgba(${this.teal}, 0.45)`;
-    ctx.lineWidth   = 1.4;
-    ctx.stroke();
-    ctx.lineTo(x0, yTop);
-    ctx.lineTo(x0, yBot);
-    ctx.closePath();
-    ctx.fillStyle = `rgba(${this.teal}, 0.06)`;
-    ctx.fill();
-
-    ctx.font         = "600 9px ui-monospace, SFMono-Regular, Menlo, monospace";
-    ctx.textAlign    = "right";
-    ctx.textBaseline = "bottom";
-    ctx.fillStyle    = `rgba(${this.ink}, 0.30)`;
-    ctx.fillText("p(z) elevation spectrum", x0 + 3, yTop - 8);
   }
 
   _loop() {

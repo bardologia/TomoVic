@@ -2,8 +2,9 @@
 
 class GlobeClipRecorder {
   static FPS            = 60;
+  static FRAME_WIDTH    = 1920;
+  static FRAME_HEIGHT   = 1080;
   static SCALE          = 2;
-  static MAX_WIDTH      = 3840;
   static BITS_PER_PX    = 0.12;
   static MIN_BITRATE    = 12e6;
   static MAX_BITRATE    = 80e6;
@@ -19,6 +20,7 @@ class GlobeClipRecorder {
     this.scale   = 1;
     this.frame   = "";
     this.failure = null;
+    this.pinned  = "";
     this.stage   = document.createElement("canvas");
   }
 
@@ -26,11 +28,20 @@ class GlobeClipRecorder {
     return Boolean(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
   }
 
-  _scaleUp(viewer) {
-    const room = GlobeClipRecorder.MAX_WIDTH / Math.max(viewer.canvas.clientWidth, 1);
+  _pin(container) {
+    this.pinned = container.style.cssText;
+    container.style.flex   = "none";
+    container.style.width  = `${GlobeClipRecorder.FRAME_WIDTH}px`;
+    container.style.height = `${GlobeClipRecorder.FRAME_HEIGHT}px`;
+  }
 
+  _scaleUp(viewer) {
     this.scale = viewer.resolutionScale;
-    viewer.resolutionScale = Math.max(1, Math.min(GlobeClipRecorder.SCALE, room));
+    viewer.resolutionScale = GlobeClipRecorder.SCALE;
+  }
+
+  _unpin(container) {
+    container.style.cssText = this.pinned;
   }
 
   _stageSize(canvas) {
@@ -63,6 +74,9 @@ class GlobeClipRecorder {
   }
 
   _grab(viewer, index) {
+    const size = `${viewer.canvas.width & ~1}x${viewer.canvas.height & ~1}`;
+    if (size !== this.frame) throw new Error(`the globe canvas changed size while rendering (${this.frame} to ${size})`);
+
     const ctx = this.stage.getContext("2d");
     ctx.drawImage(viewer.canvas, 0, 0, this.stage.width, this.stage.height, 0, 0, this.stage.width, this.stage.height);
 
@@ -86,18 +100,22 @@ class GlobeClipRecorder {
     if (!GlobeClipRecorder.available()) throw new Error("this browser cannot encode video offline (WebCodecs is missing)");
 
     this.failure = null;
+    this._pin(viewer.container);
     this._scaleUp(viewer);
-    viewer.render();
-    this._stageSize(viewer.canvas);
-
-    const { config, container } = await this._pickCodec(this.stage.width, this.stage.height);
-    const muxer   = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: container, width: this.stage.width, height: this.stage.height, frameRate: GlobeClipRecorder.FPS }, fastStart: "in-memory" });
-    const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (err) => { this.failure = err; } });
-    encoder.configure(config);
 
     let frames = 0;
-    tour.beginOffline();
+    let config, muxer, encoder;
     try {
+      viewer.render();
+      this._stageSize(viewer.canvas);
+
+      const picked = await this._pickCodec(this.stage.width, this.stage.height);
+      config  = picked.config;
+      muxer   = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: picked.container, width: this.stage.width, height: this.stage.height, frameRate: GlobeClipRecorder.FPS }, fastStart: "in-memory" });
+      encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (err) => { this.failure = err; } });
+      encoder.configure(config);
+
+      tour.beginOffline();
       frames = tour.frameCount(GlobeClipRecorder.FPS);
       for (let i = 0; i < frames; i += 1) {
         tour.seek((i * 1000) / GlobeClipRecorder.FPS);
@@ -113,8 +131,9 @@ class GlobeClipRecorder {
       await encoder.flush();
     } finally {
       tour.endOffline();
-      if (encoder.state !== "closed") encoder.close();
+      if (encoder && encoder.state !== "closed") encoder.close();
       viewer.resolutionScale = this.scale;
+      this._unpin(viewer.container);
     }
 
     muxer.finalize();
@@ -173,8 +192,8 @@ class GlobeTour {
       seconds: 55,
       steps  : [
         { lead: 2.5, seconds:  9, face: "azimuth", spin: [ 0,   8], pitch: [-88, -88], zoom: [1.20, 1.05], cut: "height",  sweep: [0, 1] },
-        { lead: 3.5, seconds: 10, face: "range",   spin: [ 0,  10], pitch: [-14, -22], zoom: [1.10, 0.90], cut: "range",   sweep: [0, 1] },
-        { lead: 3.5, seconds: 11, face: "range",   spin: [35,  35], pitch: [-20, -20], zoom: [0.80, 0.80], cut: "azimuth", sweep: [0, 1], follow: true },
+        { lead: 3.5, seconds: 10, face: "range",   spin: [180, 170], pitch: [-14, -22], zoom: [1.10, 0.90], cut: "range",   sweep: [0, 1] },
+        { lead: 3.5, seconds: 11, face: "range",   spin: [ 35,  35], pitch: [-20, -20], zoom: [0.80, 0.80], cut: "azimuth", sweep: [0, 1], follow: true },
         { lead: 3.5, seconds: 12, face: "azimuth", spin: [ 0, 270], pitch: [-46, -24], zoom: [1.70, 1.00], cut: "off", tracks: true, fly: true, ease: false },
       ],
     },
@@ -516,9 +535,9 @@ class GlobeTour {
 
     this._setBusy(true);
     this.recordEl.classList.add("is-recording");
-    this.recordEl.textContent = "Rendering 0%";
+    this.recordEl.innerHTML = ThinkingOrb.busy("composing", "Rendering 0%");
 
-    const onProgress = (done, total) => { this.recordEl.textContent = `Rendering ${Math.round((100 * done) / total)}%`; };
+    const onProgress = (done, total) => { this.recordEl.innerHTML = ThinkingOrb.busy("composing", `Rendering ${Math.round((100 * done) / total)}%`); };
 
     let result;
     try {

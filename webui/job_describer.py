@@ -43,6 +43,12 @@ class JobDescriber:
             ("modes",    "fit_modes",         "list"),
             ("suffix",   "output_suffix",     "opt"),
         ],
+        "extract_polarimetry": [
+            ("datasets",  "dataset_filter",    "list", "all datasets"),
+            ("env",       "tomogram_env_name", "text"),
+            ("threads",   "pyrat_threads",     "text"),
+            ("overwrite", "overwrite",         "flag"),
+        ],
         "analyze_preprocessing": [
             ("trials", "run_tags", "list", "all trials"),
             ("root",   "runs_dir", "opt_tail"),

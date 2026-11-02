@@ -132,7 +132,7 @@ class DatasetPicker {
       this._renderSingleOptions([]);
       return;
     }
-    this.note.textContent = "listing...";
+    this.note.innerHTML = ThinkingOrb.busy("searching", "listing…");
     const res = await Api.get(`/api/fs/runs?base=${encodeURIComponent(base)}`);
     if (this._singleStale(seq)) return;
     if (!res.ok) {
@@ -147,7 +147,7 @@ class DatasetPicker {
   }
 
   async _fetchDatasets(base, seq) {
-    this.note.textContent = "listing...";
+    this.note.innerHTML = ThinkingOrb.busy("searching", "listing…");
     const res = await Api.get(`/api/fs/datasets?base=${encodeURIComponent(base || "")}`);
     if (this._singleStale(seq)) return;
     if (!res.ok) {
@@ -214,6 +214,7 @@ class DatasetPicker {
     this.filter.className = "picker__filter";
     this.filter.spellcheck = false;
     this.filter.placeholder = `filter ${mode.noun}...`;
+    this.filter.setAttribute("aria-label", "Filter " + mode.noun);
     this.filter.addEventListener("input", () => this._renderItems());
 
     head.appendChild(this.count);
@@ -271,7 +272,7 @@ class DatasetPicker {
     const bases = this._baseList();
     const seq   = ++this.multiLoadSeq;
 
-    this.count.textContent = "listing...";
+    this.count.innerHTML = ThinkingOrb.busy("searching", "listing…");
     this.hint.textContent = "";
 
     const parts = (bases.length ? bases : [""]).map((b) => `base=${encodeURIComponent(b)}`);

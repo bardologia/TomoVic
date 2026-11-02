@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,7 +7,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet" />
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
@@ -17,12 +17,14 @@
 
 <div class="grain" aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
+<canvas class="bg-orb" id="backdrop-orb" aria-hidden="true"></canvas>
 <canvas class="bg-scene" id="radar" aria-hidden="true"></canvas>
 
 <div class="nav-edge" id="nav-edge" aria-hidden="true"></div>
 <header class="nav" id="nav">
   <a class="nav__brand" href="#/home" data-route="home" aria-label="TomoVic home">
     <img class="nav__logo" src="/static/img/dlr-logo.svg" alt="TomoVic" />
+    <thinking-orb class="nav__orb" state="connecting" size="20" cycle="3.5" aria-hidden="true"></thinking-orb>
   </a>
   <nav class="nav__links" aria-label="Sections">
     <div class="nav__group" data-group="reference">
@@ -55,7 +57,8 @@
     </div>
   </nav>
   <div class="nav__status" id="nav-status" title="Backend connection">
-    <span class="dot" id="status-dot"></span>
+    <thinking-orb state="connecting" size="20"></thinking-orb>
+    <span class="dot"></span>
     <span id="status-text">connecting</span>
   </div>
 </header>
@@ -70,15 +73,16 @@
         <i class="deck__tick deck__tick--tr" aria-hidden="true"></i>
         <i class="deck__tick deck__tick--bl" aria-hidden="true"></i>
         <i class="deck__tick deck__tick--br" aria-hidden="true"></i>
-        <header class="deck__mast">
+        <header class="deck__mast mast--flanked" id="home-mast">
+          <hairline-figure name="dish" class="mast__flank mast__flank--left" autopilot="off" aria-hidden="true"></hairline-figure>
           <div class="status__id">
             <p class="hero__kicker">server observatory &middot; SAR tomography</p>
             <h1 class="status__host" id="status-host">&hellip;</h1>
-            <p class="status__sum" id="status-sum">connecting to backend&hellip;</p>
+            <p class="status__sum" id="status-sum"><span class="orb-busy"><thinking-orb state="connecting" size="20"></thinking-orb><span>connecting to backend&hellip;</span></span></p>
           </div>
-          <canvas id="server-anim" class="status__server" role="img" aria-label="Animated server rack"></canvas>
+          <hairline-figure name="surface" class="mast__flank mast__flank--right" autopilot="off" aria-hidden="true"></hairline-figure>
         </header>
-        <div class="status__board" id="status-board"></div>
+        <div class="status__board" id="status-board"><div class="orb-panel"><thinking-orb state="working" size="64"></thinking-orb><span class="orb-panel__text">reading the machine&hellip;</span></div></div>
       </div>
     </div>
   </section>
@@ -86,28 +90,30 @@
 
   <!-- SCRIPTS -->
   <section class="page page--pad" data-page="scripts">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Entry points</h2>
       <p class="page__lead">
         Orchestrated entry scripts. Inspect the source, review the entry configuration
         defaults, override any field, and launch with live output.
       </p>
+      <hairline-figure name="cabinet" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
     <div class="filter-row" id="script-filters"></div>
-    <div class="script-sections" id="script-grid"></div>
+    <div class="script-sections" id="script-grid"><div class="orb-panel"><thinking-orb state="searching" size="64"></thinking-orb><span class="orb-panel__text">listing scripts&hellip;</span></div></div>
   </section>
 
   <!-- SAVED RUNS -->
   <section class="page page--pad" data-page="saved">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Saved runs</h2>
       <p class="page__lead">
         Experiment configurations stored from launch pages. Each card carries the exact
         overrides captured at save time: launch it now, queue it after the current job,
         or delete it.
       </p>
+      <hairline-figure name="drawer" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
-    <div class="saved-grid" id="saved-grid"></div>
+    <div class="saved-grid" id="saved-grid"><div class="orb-panel"><thinking-orb state="searching" size="64"></thinking-orb><span class="orb-panel__text">loading saved runs&hellip;</span></div></div>
   </section>
 
   <!-- LAUNCH -->
@@ -120,6 +126,7 @@
         <p class="launch__purpose" id="launch-purpose"></p>
       </div>
       <dl class="launch__facts" id="launch-facts"></dl>
+      <hairline-figure name="surface" class="launch__figure" aria-hidden="true"></hairline-figure>
       <div class="launch__variants" id="launch-variants" role="tablist" aria-label="Variants"></div>
     </header>
     <div class="launch__body">
@@ -150,9 +157,10 @@
         <kbd class="config-search__kbd" aria-hidden="true">/</kbd>
         <p class="config-meta" id="config-meta" role="status"></p>
       </div>
+      <hairline-figure name="sampler" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
     <div class="master master--config">
-      <aside class="master__list master__list--config" id="config-list" aria-label="Configuration modules"></aside>
+      <aside class="master__list master__list--config" id="config-list" aria-label="Configuration modules"><div class="orb-panel"><thinking-orb state="searching" size="64"></thinking-orb><span class="orb-panel__text">reading the configuration modules&hellip;</span></div></aside>
       <div class="master__detail master__detail--config" id="config-detail"></div>
     </div>
   </section>
@@ -162,27 +170,29 @@
     <div class="console">
       <aside class="console__jobs" id="console-jobs">
         <div class="console__jobs-head">Jobs</div>
-        <ul class="job-list" id="job-list"></ul>
+        <ul class="job-list" id="job-list"><li class="orb-panel"><thinking-orb state="working" size="64"></thinking-orb><span class="orb-panel__text">listing jobs&hellip;</span></li></ul>
+        <hairline-figure name="terminal" class="console__figure" aria-hidden="true"></hairline-figure>
       </aside>
       <div class="console__tiles" id="console-tiles">
-        <div class="console__hint" id="console-hint">Launch a script to see live output.</div>
+        <div class="console__hint" id="console-hint"><hairline-figure name="surface" class="console__hint-figure" aria-hidden="true"></hairline-figure><span>Launch a script to see live output.</span></div>
       </div>
     </div>
   </section>
 
   <!-- RESULTS -->
   <section class="page page--pad" data-page="results">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Results</h2>
       <p class="page__lead">
-        Point the sidebar at your datasets and runs folders once, then pick any stage output
-        &mdash; preprocessing, parameter extraction, training, inference or benchmark &mdash;
-        and browse every plot, config and markdown report inside it. Click any figure to
+        Point the sidebar at your datasets and runs folders once, then pick any preprocessing,
+        parameter extraction or polarimetry output and browse every plot, config and markdown
+        report inside it. Click any figure to
         inspect it at full size, or pin figures into the compare grid.
       </p>
+      <hairline-figure name="tray" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
     <form class="res-pathbar" id="results-path-form">
-      <input type="text" class="res-pathbar__input" id="results-path-input" placeholder="/absolute/path/to/run/directory" spellcheck="false" autocomplete="off" />
+      <input type="text" class="res-pathbar__input" id="results-path-input" placeholder="/absolute/path/to/run/directory" spellcheck="false" autocomplete="off" aria-label="Run directory path" />
       <button type="submit" class="btn btn--primary">Open</button>
     </form>
     <div class="master master--results">
@@ -193,13 +203,14 @@
 
   <!-- CUBE -->
   <section class="page page--pad" data-page="cube">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Tomogram explorer</h2>
       <p class="page__lead">
         Load a saved tomogram cube, then hover the primary SLC image to cut every tomogram
         live along range and azimuth. Click to lock a point and read vertical profiles out
         of the slices.
       </p>
+      <hairline-figure name="voxels" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
 
     <div class="cube-pick">
@@ -208,8 +219,9 @@
         <label for="cube-param-tag" title="Overlay the Gaussian-mixture reconstruction of this cube as a second source">parametrized tomogram</label>
         <select id="cube-param-tag" class="cube-mselect"></select>
       </div>
-      <p class="cube-hint" id="cube-hint">Loading directories&hellip;</p>
+      <p class="cube-hint" id="cube-hint"><span class="orb-busy"><thinking-orb state="searching" size="20"></thinking-orb><span>Loading directories&hellip;</span></span></p>
       <div class="cube-progress" id="cube-progress" hidden>
+        <thinking-orb class="cube-progress__orb" state="searching" size="64"></thinking-orb>
         <div class="cube-progress__track"><i class="cube-progress__fill" id="cube-progress-fill"></i></div>
         <p class="cube-progress__label" id="cube-progress-label">loading&hellip;</p>
       </div>
@@ -229,6 +241,7 @@
         <button type="button" class="cube-mode" data-view="globe">Globe</button>
         <i class="cube-modes__sep" aria-hidden="true"></i>
         <button type="button" class="cube-mode" data-view="passes" title="Browse the raw acquisition stack: per-pass SLC amplitude and interferometric phase against the primary">Passes</button>
+        <button type="button" class="cube-mode" data-view="pauli" title="Pauli decomposition of the primary pass in every polarisation: surface, double-bounce and volume scattering per pixel">Pauli</button>
         <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
         <span class="cube-modes__tools">
           <label class="lb-check" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
@@ -247,7 +260,7 @@
       <div class="cube-story" id="cube-story" hidden>
         <div class="cube-story__bar">
           <h3 class="cube-panel-title">Story</h3>
-          <input type="text" id="cube-story-name" class="sc-name" placeholder="step name (optional)" spellcheck="false" autocomplete="off" />
+          <input type="text" id="cube-story-name" class="sc-name" placeholder="step name (optional)" spellcheck="false" autocomplete="off" aria-label="Story step name" />
           <button type="button" class="btn btn--mini" id="cube-story-add" title="Capture the current cube, view, pixel and settings as one story step">Add step</button>
           <button type="button" class="btn btn--mini" id="cube-story-play" title="Replay the story step by step">Play</button>
           <button type="button" class="btn btn--mini" id="cube-story-export" title="Download the PNG snapshot taken when each step was added">Snapshots</button>
@@ -512,7 +525,7 @@
                 <option value="rg">range</option>
                 <option value="elev">elevation</option>
               </select>
-              <input type="range" id="cube-volume-clip-pos" min="0" max="100" value="50" />
+              <input type="range" id="cube-volume-clip-pos" min="0" max="100" value="50" aria-label="Volume clipping position" />
             </div>
             <span class="cube-elev__at" id="cube-volume-at"></span>
           </div>
@@ -533,6 +546,7 @@
               <div class="cube-spaces" id="cube-globe-color" role="group" aria-label="Colour by">
                 <button type="button" class="cube-space is-active" data-color="mu">colour: elevation</button>
                 <button type="button" class="cube-space" data-color="amp">colour: amplitude</button>
+                <button type="button" class="cube-space" data-color="pauli" title="Colour each scatterer by the Pauli decomposition of its pixel: the composite (red double bounce, green volume, blue surface) or the dominant mechanism, chosen in the scatterers select">colour: mechanism</button>
               </div>
               <div class="cube-mctl" role="group" aria-label="Intensity threshold">
                 <label for="cube-globe-thr" id="cube-globe-thr-label">int &ge;</label>
@@ -569,11 +583,28 @@
                 </select>
                 <input type="range" id="cube-globe-cut-pos" min="0" max="100" value="50" title="Position of the cutting plane along the chosen axis" />
               </div>
-              <label class="lb-check" id="cube-globe-cut-sweep-wrap" title="Animate the cutting plane back and forth through the scene"><input type="checkbox" id="cube-globe-cut-sweep" /> sweep</label>
-              <label class="lb-check" id="cube-globe-clamp-wrap" title="Subtract the median DEM height so the terrain rests on the imagery; untick to place points at their absolute heights above the ellipsoid"><input type="checkbox" id="cube-globe-clamp" checked /> rest on imagery</label>
-              <label class="lb-check" id="cube-globe-points-wrap" title="Hide the scatterers to inspect the imagery underneath"><input type="checkbox" id="cube-globe-points" checked /> points</label>
-              <label class="lb-check" id="cube-globe-tracks-wrap" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
-              <label class="lb-check" id="cube-globe-fly-wrap" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
+              <label class="lb-check" title="Animate the cutting plane back and forth through the scene"><input type="checkbox" id="cube-globe-cut-sweep" /> sweep</label>
+              <label class="lb-check" title="Subtract the median DEM height so the terrain rests on the imagery; untick to place points at their absolute heights above the ellipsoid"><input type="checkbox" id="cube-globe-clamp" checked /> rest on imagery</label>
+              <label class="lb-check" title="Hide the scatterers to inspect the imagery underneath"><input type="checkbox" id="cube-globe-points" checked /> points</label>
+              <label class="lb-check" title="Drape the Pauli decomposition map on the terrain as a north-up image layer"><input type="checkbox" id="cube-globe-metric" /> drape</label>
+              <select id="cube-globe-metric-layer" class="cube-mselect" aria-label="Pauli drape layer"></select>
+              <select id="cube-globe-pauli-stretch" class="cube-mselect" aria-label="Pauli stretch" title="dB stretch of every Pauli component: each over its own 1st to 99th percentile, or one range pooled over all three" hidden>
+                <option value="channel">stretch: per channel</option>
+                <option value="shared">stretch: shared dB</option>
+              </select>
+              <select id="cube-globe-pauli-cmap" class="cube-mselect" aria-label="Pauli colormap" title="Colormap painting the power of a single Pauli component" hidden>
+                <option value="viridis">colormap: viridis</option>
+                <option value="inferno">colormap: inferno</option>
+                <option value="turbo">colormap: turbo</option>
+                <option value="gray">colormap: gray</option>
+                <option value="jet">colormap: jet</option>
+              </select>
+              <select id="cube-globe-pauli-points" class="cube-mselect" aria-label="Scatterer colouring" title="What colours the scatterers: the Pauli composite of their pixel under the chosen stretch, or the dominant mechanism in three fixed colours" hidden>
+                <option value="rgb">scatterers: composite</option>
+                <option value="dominant">scatterers: dominant mechanism</option>
+              </select>
+              <label class="lb-check" title="Draw the flight track of every pass over the run region, the aircraft at mid-track on the reference pass, and the radar beam segment down to the imaged swath"><input type="checkbox" id="cube-globe-tracks" /> tracks</label>
+              <label class="lb-check" title="Loop a flight animation: the aircraft flies the reference pass, the beam sweeps with it, and scatterers appear as their swath is scanned"><input type="checkbox" id="cube-globe-fly" /> fly</label>
               <button type="button" class="btn btn--mini" id="cube-globe-reframe" title="Fly the camera back to the scene">Reframe</button>
               <button type="button" class="btn btn--mini" id="cube-globe-full" title="Grow the globe to the whole screen; press Esc or the button again to come back">Full screen</button>
               <div class="cube-mctl" role="group" aria-label="Camera tour">
@@ -600,7 +631,7 @@
               <button type="button" class="btn btn--mini" id="cube-transect-download" hidden title="Download the visible transect panels as PNG files">PNG</button>
             </div>
             <div class="cube-mctl" role="group" aria-label="Saved transects">
-              <input type="text" id="cube-transect-name" class="sc-name" placeholder="line name" spellcheck="false" autocomplete="off" />
+              <input type="text" id="cube-transect-name" class="sc-name" placeholder="line name" spellcheck="false" autocomplete="off" aria-label="Transect line name" />
               <button type="button" class="btn btn--mini" id="cube-transect-save" title="Remember this polyline for every cube with the same footprint">Save line</button>
               <select id="cube-transect-saved" class="cube-mselect" title="Replay a saved polyline on the loaded cube"><option value="">saved lines…</option></select>
               <button type="button" class="btn btn--mini" id="cube-transect-delete" hidden title="Forget the selected saved line">Delete</button>
@@ -629,6 +660,63 @@
         </div>
       </div>
 
+
+      <div class="cube-view" data-view="pauli" hidden>
+        <div class="cube-pview">
+          <div class="cube-pview__bar">
+            <div class="cube-spaces" id="cube-pauli-mode" role="group" aria-label="Pauli map">
+              <button type="button" class="cube-space is-active" data-mode="rgb" title="Red double bounce, green volume, blue surface">Pauli RGB</button>
+              <button type="button" class="cube-space" data-mode="surface" title="Multilooked power of (HH + VV) / &radic;2, the odd-bounce term">Surface</button>
+              <button type="button" class="cube-space" data-mode="double" title="Multilooked power of (HH &minus; VV) / &radic;2, the even-bounce term">Double bounce</button>
+              <button type="button" class="cube-space" data-mode="volume" title="Multilooked power of the cross-polar term &radic;2 HV">Volume</button>
+              <button type="button" class="cube-space" data-mode="dominant" title="Mechanism with the largest multilooked power at each pixel; over natural ground the co-polar terms usually win, so the map reads surface almost everywhere and the composite shows the balance">Dominant</button>
+            </div>
+            <div class="cube-spaces" id="cube-pauli-stretch" role="group" aria-label="Colour stretch">
+              <button type="button" class="cube-space is-active" data-stretch="channel" title="Each component stretched over its own 1st to 99th percentile, the usual Pauli RGB look">Per channel</button>
+              <button type="button" class="cube-space" data-stretch="shared" title="One dB range for all three components, so the hue follows the true power balance">Shared scale</button>
+            </div>
+            <div class="cube-jump" role="group" aria-label="Multilook window">
+              <span class="cube-jump__cell">
+                <label for="cube-pauli-win-az">window az</label>
+                <input type="number" id="cube-pauli-win-az" class="cube-jump__input" min="1" step="1" inputmode="numeric" />
+              </span>
+              <span class="cube-jump__cell">
+                <label for="cube-pauli-win-rg">rg</label>
+                <input type="number" id="cube-pauli-win-rg" class="cube-jump__input" min="1" step="1" inputmode="numeric" />
+              </span>
+            </div>
+            <div class="cube-spaces" id="cube-pauli-aspect" role="group" aria-label="Pixel aspect">
+              <button type="button" class="cube-space" data-aspect="px" title="One screen pixel per radar pixel, whatever the pixel spacings">pixels</button>
+              <button type="button" class="cube-space" data-aspect="slant" title="Azimuth and slant-range metres drawn to the same scale">slant</button>
+              <button type="button" class="cube-space" data-aspect="ground" title="Ground metres: the slant-range spacing divided by the sine of the mean incidence over the cube, the shape the globe drape shows">ground</button>
+            </div>
+            <button type="button" class="btn btn--mini" id="cube-pauli-download" title="Download the current map as a PNG file on the pixel grid">PNG</button>
+            <span class="cube-elev__at" id="cube-pauli-at"></span>
+          </div>
+          <div class="cube-pview__deck">
+            <figure class="cube-pmap">
+              <div class="cube-pmap__media" id="cube-pauli-media">
+                <canvas id="cube-pauli-canvas" data-fig="pauli decomposition"></canvas>
+                <i class="cube-cross" id="cube-pauli-cross" hidden></i>
+              </div>
+              <figcaption class="cube-pmap__legend">
+                <span class="cube-pmap__bound" id="cube-pauli-min"></span>
+                <img class="cube-pmap__cbar" id="cube-pauli-cbar" alt="colour scale" />
+                <span class="cube-pmap__bound" id="cube-pauli-max"></span>
+                <span class="cube-pmap__classes" id="cube-pauli-classes" hidden></span>
+              </figcaption>
+            </figure>
+            <aside class="cube-pside">
+              <h3 class="cube-panel-title">Scene balance</h3>
+              <p class="cube-hint" id="cube-pauli-note"></p>
+              <div class="cube-pside__table" id="cube-pauli-summary"></div>
+              <h3 class="cube-panel-title">Pixel readout</h3>
+              <p class="cube-coords" id="cube-pauli-coords">Hover the map to read the mechanism balance under the cursor; click to lock a pixel.</p>
+              <div class="cube-pside__table" id="cube-pauli-readout"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
 
       <div class="cube-view" data-view="passes" hidden>
         <div class="cube-pview">
@@ -713,38 +801,25 @@
 
   <!-- SLICE COLLECTOR -->
   <section class="page page--pad" data-page="slices">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Slice collector</h2>
       <p class="page__lead">
-        Pick any number of preprocessing runs, set one cut position, and read the same
-        slice from every run side by side. Collect renders the paper-style figures for all
-        selected runs and queued points into a single comparison folder, so nobody has to
-        load each run and print its slices one at a time.
+        Pick any number of preprocessing runs, then hover the primary SLC image to preview
+        the same cuts in every run side by side. Click the image to put those cuts in the
+        basket, or add single slices with their + button. The basket renders the paper-style
+        figures into one comparison folder, and can mail that folder as a zip.
       </p>
+      <hairline-figure name="slices" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
 
     <div class="cube-pick">
       <div class="run-strip" id="sc-strip" aria-label="Saved cubes"></div>
-      <p class="cube-hint" id="sc-hint">Loading directories&hellip;</p>
+      <p class="cube-hint" id="sc-hint"><span class="orb-busy"><thinking-orb state="searching" size="20"></thinking-orb><span>Loading directories&hellip;</span></span></p>
     </div>
 
     <div class="sc-stage" id="sc-stage" hidden>
       <div class="sc-bar">
         <div class="sc-bar__controls">
-          <div class="cube-jump" role="group" aria-label="Cut position">
-            <span class="cube-jump__cell">
-              <label for="sc-az">az</label>
-              <input type="number" id="sc-az" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
-              <span class="cube-jump__range" id="sc-az-range"></span>
-            </span>
-            <span class="cube-jump__cell">
-              <label for="sc-rg">rg</label>
-              <input type="number" id="sc-rg" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
-              <span class="cube-jump__range" id="sc-rg-range"></span>
-            </span>
-            <button type="button" class="btn btn--mini" id="sc-add" title="Queue this point so Collect saves it for every selected run">Add point</button>
-            <button type="button" class="btn btn--mini" id="sc-clear" hidden>Clear points</button>
-          </div>
           <div class="cube-spaces" id="sc-axes" role="group" aria-label="Cut axes">
             <button type="button" class="cube-space is-active" data-axis="range">Range cut</button>
             <button type="button" class="cube-space" data-axis="azimuth">Azimuth cut</button>
@@ -769,30 +844,78 @@
             <option value="gray">gray</option>
           </select>
         </div>
-        <div class="sc-points" id="sc-points"></div>
-        <div class="sc-bar__actions">
-          <input id="sc-name" class="sc-name" type="text" spellcheck="false" autocomplete="off" placeholder="collection name (optional)" />
-          <button type="button" class="btn btn--primary" id="sc-collect" title="Render paper-style figures for every selected run at every queued point">Collect figures</button>
+      </div>
+      <section class="sc-basket" id="sc-basket" aria-label="Slice basket">
+        <header class="sc-basket__head">
+          <h3 class="cube-panel-title">Basket</h3>
+          <span class="sc-basket__sum" id="sc-basket-sum"></span>
+          <div class="sc-basket__tools">
+            <button type="button" class="btn btn--mini" id="sc-basket-toggle" aria-expanded="false" aria-controls="sc-basket-body">Show slices</button>
+            <button type="button" class="btn btn--mini" id="sc-basket-clear" hidden>Empty basket</button>
+          </div>
+        </header>
+        <div class="sc-basket__body" id="sc-basket-body" hidden></div>
+        <div class="sc-export">
+          <div class="sc-export__group">
+            <input id="sc-name" class="sc-name" type="text" spellcheck="false" autocomplete="off" placeholder="collection name (optional)" aria-label="Slice collection name" />
+            <button type="button" class="btn btn--primary" id="sc-collect" title="Render the paper-style figures of every basket slice into one folder under the runs root">Save to folder</button>
+          </div>
+          <div class="sc-export__group">
+            <input id="sc-mail-to" class="sc-name" type="text" spellcheck="false" autocomplete="off" placeholder="recipients, comma separated" aria-label="Mail recipients" />
+            <input id="sc-mail-note" class="sc-name sc-name--wide" type="text" autocomplete="off" placeholder="note for the message (optional)" aria-label="Mail note" />
+            <button type="button" class="btn" id="sc-mail" title="Render the basket into a folder, zip it and mail it">Mail as zip</button>
+          </div>
           <span class="sc-msg" id="sc-msg"></span>
         </div>
+      </section>
+      <div class="sc-deck">
+        <aside class="sc-map">
+          <div class="cube-map__head">
+            <h3 class="cube-panel-title">Primary SLC amplitude</h3>
+            <select id="sc-map-run" class="cube-mselect sc-map__run" aria-label="Run whose primary SLC is shown" hidden></select>
+          </div>
+          <div class="cube-map__frame">
+            <span class="cube-axis cube-axis--y">azimuth &rarr;</span>
+            <div class="cube-map__wrap sc-map__wrap" id="sc-map-wrap">
+              <img id="sc-map-img" alt="Primary SLC amplitude" />
+              <i class="cube-cross" id="sc-cross" hidden></i>
+              <div class="sc-marks" id="sc-marks"></div>
+            </div>
+            <span class="cube-axis cube-axis--x">range &rarr;</span>
+          </div>
+          <p class="cube-coords" id="sc-coords">Hover the image to preview the cuts &middot; click to put them in the basket</p>
+          <div class="sc-pixrow" role="group" aria-label="Cut position by index">
+            <span class="cube-jump__cell">
+              <label for="sc-az">az</label>
+              <input type="number" id="sc-az" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
+              <span class="cube-jump__range" id="sc-az-range"></span>
+            </span>
+            <span class="cube-jump__cell">
+              <label for="sc-rg">rg</label>
+              <input type="number" id="sc-rg" class="cube-jump__input" min="0" step="1" inputmode="numeric" />
+              <span class="cube-jump__range" id="sc-rg-range"></span>
+            </span>
+            <button type="button" class="btn btn--mini" id="sc-add" title="Put the cuts shown at this point in the basket, for every selected run, source and axis">Add to basket</button>
+            <span class="sc-count" id="sc-basket-count" title="Slices in the basket">0</span>
+          </div>
+        </aside>
+        <div class="sc-rows" id="sc-rows"></div>
       </div>
-      <div class="sc-rows" id="sc-rows"></div>
     </div>
   </section>
 
-
-
   <!-- REPO MAP -->
   <section class="page page--pad page--repomap" data-page="repomap">
-    <div class="page__head">
+    <div class="page__head page__head--figure">
       <h2 class="page__title">Repo map</h2>
       <p class="page__lead">
         Every pipeline as a wiring schematic &mdash; the classes that do the work, the data they
         hand to each other, and the artifacts that cross the boundary. Open a subsystem folder,
         pick a stage, and watch the flow.
       </p>
+      <hairline-figure name="repo" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
-    <div class="repomap" id="repomap"></div>
+    <div class="repomap" id="repomap"><div class="orb-panel"><thinking-orb state="connecting" size="64"></thinking-orb><span class="orb-panel__text">mapping the repository&hellip;</span></div></div>
   </section>
 
 </main>
@@ -850,18 +973,24 @@
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/mp4-muxer.js"></script>
+<script src="/static/vendor/thinking-orbs-engine.js"></script>
+<script src="/static/vendor/hairline-kernel.js"></script>
+<script src="/static/vendor/hairline-figures.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 
 <script src="/static/js/api.js"></script>
+<script src="/static/js/stream_hub.js"></script>
 <script src="/static/js/results_sources.js"></script>
 <script src="/static/js/shared_charts.js"></script>
 <script src="/static/js/canvas_base.js"></script>
+<script src="/static/js/thinking_orb.js"></script>
+<script src="/static/js/hairline_tomosar.js"></script>
+<script src="/static/js/hairline_figure.js"></script>
 <script src="/static/js/figure_export.js"></script>
 <script src="/static/js/figure_saver.js"></script>
 <script src="/static/js/tomo_anim.js"></script>
 <script src="/static/js/gauges.js"></script>
-<script src="/static/js/server_anim.js"></script>
 <script src="/static/js/home.js"></script>
 <script src="/static/js/process_anim.js"></script>
 <script src="/static/js/diagram.js"></script>

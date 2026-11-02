@@ -359,3 +359,119 @@ def test_a_tour_needs_the_cube_it_names_to_be_loaded(tmp_path):
     result = explorer.save_globe_tour("wrong", "orbit", b"clip")
     assert not result["ok"]
     assert result["error"] == "cube not loaded"
+
+
+def test_globe_pauli_image_covers_the_footprint(tmp_path):
+    """Checks every Pauli mode renders a north-up RGBA PNG whose rectangle matches the scene bounding box to within a fifth of its span."""
+    import io
+    import matplotlib.pyplot as plt
+
+    from globe_drape                import FootprintImage
+    from tests.webui.pauli_fixtures import loaded_polarimetric_run
+
+    explorer, cube_id, _ = loaded_polarimetric_run(tmp_path, with_geo=True)
+    bbox                 = explorer.load_status()["cube"]["globe"]["bbox"]
+
+    for mode in explorer.PAULI_MODES:
+        png, rect, window = explorer.globe_pauli_png(cube_id, mode, 2, 2, True, "viridis", width=96)
+        image             = plt.imread(io.BytesIO(png))
+
+        assert png[:4] == b"\x89PNG", mode
+        assert image.ndim == 3 and image.shape[2] == 4 and FootprintImage.MIN_WIDTH <= max(image.shape[:2]) <= 96, mode
+        assert image[..., 3].max() == 1.0, mode
+        assert window == (2, 2), mode
+        span_lon, span_lat = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        assert abs(rect[0] - bbox[0]) < 0.2 * span_lon and abs(rect[2] - bbox[2]) < 0.2 * span_lon, (mode, rect, bbox)
+        assert abs(rect[1] - bbox[1]) < 0.2 * span_lat and abs(rect[3] - bbox[3]) < 0.2 * span_lat, (mode, rect, bbox)
+
+
+def test_globe_pauli_image_guards(tmp_path):
+    """Checks unknown modes or colormaps, runs without polarimetry and runs without geocoding yield nothing."""
+    from tests.webui.pauli_fixtures import loaded_polarimetric_run
+
+    explorer, cube_id, _ = loaded_polarimetric_run(tmp_path, with_geo=True)
+
+    assert explorer.globe_pauli_png(cube_id, "banana", 2, 2, True, "viridis") is None
+    assert explorer.globe_pauli_png(cube_id, "rgb", 2, 2, True, "rainbow") is None
+
+    plain, plain_id = loaded_run(tmp_path / "plain", with_geo=True)
+    assert plain.globe_pauli_png(plain_id, "rgb", 2, 2, True, "viridis") is None
+
+    flat, flat_id, _ = loaded_polarimetric_run(tmp_path / "flat")
+    assert flat.globe_pauli_png(flat_id, "rgb", 2, 2, True, "viridis") is None
+
+
+def test_globe_pauli_builds_the_footprint_once_and_widens_the_window(tmp_path, monkeypatch):
+    """Checks the footprint lookup is built once per width cap and reused across modes and schemes, and the rendered window is at least the stride and at most the clamp."""
+    from globe_drape                import FootprintImage
+    from tests.webui.pauli_fixtures import loaded_polarimetric_run
+
+    explorer, cube_id, _ = loaded_polarimetric_run(tmp_path, with_geo=True)
+    builds               = []
+    original             = FootprintImage.geometry
+
+    def counting(self, width, step):
+        builds.append((width, step))
+        return original(self, width, step)
+
+    monkeypatch.setattr(FootprintImage, "geometry", counting)
+
+    rects = set()
+    for mode, shared in (("rgb", True), ("rgb", False), ("dominant", True), ("volume", False)):
+        _, rect, window = explorer.globe_pauli_png(cube_id, mode, 1, 1, shared, "viridis", width=96)
+        rects.add(tuple(rect))
+        assert window == (max(1, builds[0][1][0]), max(1, builds[0][1][1]))
+
+    assert len(builds) == 1 and len(rects) == 1
+
+    _, _, clamped = explorer.globe_pauli_png(cube_id, "rgb", 500, 500, True, "viridis", width=96)
+    assert clamped == (explorer.PAULI_WINDOW_MAX, explorer.PAULI_WINDOW_MAX)
+    assert len(builds) == 1
+
+    explorer.globe_pauli_png(cube_id, "rgb", 1, 1, True, "viridis", width=64)
+    assert len(builds) == 2
+
+
+def test_globe_points_carry_the_mechanism_colour_when_asked(tmp_path):
+    """Checks a Pauli mode appends the pixel colour to every point row, and its absence keeps five columns."""
+    from tests.webui.pauli_fixtures import loaded_polarimetric_run
+
+    explorer, cube_id, _ = loaded_polarimetric_run(tmp_path, with_geo=True)
+
+    plain = np.frombuffer(explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0)[:16], dtype=np.float32)
+    assert plain[2] == 5
+
+    blob    = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0, pauli_mode="dominant", win_az=2, win_rg=2)
+    header  = np.frombuffer(blob[:16], dtype=np.float32)
+    rows    = np.frombuffer(blob[16:], dtype=np.float32).reshape(-1, 8)
+    palette = explorer._pauli_palette().astype(np.float32)
+
+    assert header[2] == 8 and rows.shape[0] == plain[0]
+    assert all(any(np.allclose(row[5:], colour, atol=1e-6) for colour in palette) for row in rows)
+
+    assert explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0, pauli_mode="banana") is None
+
+    plain_explorer, plain_id = loaded_run(tmp_path / "plain", with_geo=True)
+    assert plain_explorer.globe_points_bin(plain_id, "full", amp_min=0.0, max_points=0, pauli_mode="dominant") is None
+
+
+def test_globe_points_composite_colours_follow_the_pixel_and_dominant_ignores_the_scheme(tmp_path):
+    """Checks the composite mode paints every point with its pixel's Pauli RGB, while the dominant mode serves one blob whatever stretch or colormap is sent."""
+    from tests.webui.pauli_fixtures import loaded_polarimetric_run
+
+    explorer, cube_id, _ = loaded_polarimetric_run(tmp_path, with_geo=True)
+
+    blob    = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0, pauli_mode="rgb", win_az=2, win_rg=2, shared=False)
+    rows    = np.frombuffer(blob[16:], dtype=np.float32).reshape(-1, 8)
+    palette = explorer._pauli_palette().astype(np.float32)
+
+    assert np.frombuffer(blob[:16], dtype=np.float32)[2] == 8
+    assert len({tuple(np.round(row[5:], 3)) for row in rows}) > 3
+    assert not all(any(np.allclose(row[5:], colour, atol=1e-6) for colour in palette) for row in rows)
+
+    before = explorer.globe_blobs.size()
+    first  = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0, pauli_mode="dominant", win_az=2, win_rg=2, shared=False, cmap="viridis")
+    second = explorer.globe_points_bin(cube_id, "full", amp_min=0.0, max_points=0, pauli_mode="dominant", win_az=2, win_rg=2, shared=True, cmap="jet")
+
+    assert first == second
+    assert explorer.globe_blobs.size() == before + 1

@@ -31,6 +31,7 @@ class ProjectPaths:
     SCRIPT_PRIORITY = {
         "generate_tomogram"       : ["conda:stetools"],
         "generate_interferograms" : ["conda:stetools"],
+        "measure_scene_extent"    : ["conda:stetools"],
     }
 
     ENTRY_OVERRIDES = {}
@@ -85,13 +86,16 @@ class ProjectPaths:
         return self.tree_signature(sorted(self.config_dir.rglob("*.py")))
 
     SCRIPT_DIRS = {
-        "pre_process"                  : "processing",
-        "generate_tomogram"            : "processing",
-        "generate_interferograms"      : "processing",
-        "extract_params"               : "processing",
-        "analyze_preprocessing"        : "analysis",
-        "analyze_param_extraction"     : "analysis",
-        "compare_preprocessing_trials" : "analysis",
+        "pre_process"                   : "processing",
+        "generate_tomogram"             : "processing",
+        "generate_interferograms"       : "processing",
+        "measure_scene_extent"          : "processing",
+        "extract_params"                : "processing",
+        "extract_polarimetry"           : "processing",
+        "generate_polarimetric_primary" : "processing",
+        "analyze_preprocessing"         : "analysis",
+        "analyze_param_extraction"      : "analysis",
+        "compare_preprocessing_trials"  : "analysis",
     }
 
     def has_script(self, key: str) -> bool:

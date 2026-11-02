@@ -18,8 +18,8 @@ class ResultsBrowser:
     """Serves directory trees, folder contents, galleries and catalogs of result roots.
 
     Attributes:
-        logger: Console logger used for open/read diagnostics.
-        roots: Registry of roots the browser has opened and is allowed to read from.
+        logger : Console logger used for open/read diagnostics.
+        roots  : Registry of roots the browser has opened and is allowed to read from.
     """
 
     IMAGE_SUFFIXES     = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
@@ -47,7 +47,7 @@ class ResultsBrowser:
         """Opens a results root and returns its recursive file-count tree.
 
         Args:
-            raw_path: Absolute path of the directory to open.
+            raw_path : Absolute path of the directory to open.
 
         Returns:
             Payload with `ok`, the resolved `root`, its `name`, the detected pipeline
@@ -72,8 +72,8 @@ class ResultsBrowser:
         """Returns the classified file listing of one folder inside an opened root.
 
         Args:
-            raw_root: Root previously opened through `tree`.
-            rel: Path of the folder relative to the root, empty for the root itself.
+            raw_root : Root previously opened through `tree`.
+            rel      : Path of the folder relative to the root, empty for the root itself.
 
         Returns:
             Payload with the markdown, images, animations, configs, logs and other
@@ -125,8 +125,8 @@ class ResultsBrowser:
         """Returns the dataset and run catalogs used to populate the browser pickers.
 
         Args:
-            datasets_raw: Path of the datasets root.
-            logs_raw: Path of the runs/logs root.
+            datasets_raw : Path of the datasets root.
+            logs_raw     : Path of the runs/logs root.
 
         Returns:
             Payload with a `datasets` entry (each dataset and its parameter runs) and a
@@ -142,7 +142,7 @@ class ResultsBrowser:
         """Collects every image and animation under an opened root, grouped by folder.
 
         Args:
-            raw_root: Root previously opened through `tree`.
+            raw_root : Root previously opened through `tree`.
 
         Returns:
             Payload with the total image count and one group per folder holding images.
@@ -163,7 +163,7 @@ class ResultsBrowser:
             return None
 
         target = Path(raw_path).resolve()
-        if not target.is_relative_to(raw_root):
+        if not target.is_relative_to(Path(raw_root).resolve()):
             return None
         if not target.is_file():
             return None
