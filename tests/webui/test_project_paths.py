@@ -1,9 +1,13 @@
-"""Tests for repository root validation and the configuration signature.
+"""Tests for repository root validation, the configuration signature and the interpreter default.
 
 Covers acceptance of the real repository layout, the error naming the missing
-top-level directories, and the stability of the configuration mtime signature.
+top-level directories, the stability of the configuration mtime signature, and
+the interpreter a job defaults to.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -48,3 +52,19 @@ def test_the_configuration_signature_tracks_file_mtimes(tmp_path):
 
     assert before
     assert before == paths.config_signature()
+
+
+def test_a_priority_environment_is_preferred():
+    """An interpreter whose label is in the priority list wins over the others."""
+    paths        = ProjectPaths(REPO_ROOT)
+    interpreters = [{"label": "conda:base", "path": "/base/bin/python", "current": False}, {"label": "conda:Dune", "path": "/envs/Dune/bin/python", "current": False}]
+
+    assert paths.preferred_interpreter(interpreters) == "/envs/Dune/bin/python"
+
+
+def test_the_running_interpreter_is_preferred_when_no_priority_environment_exists():
+    """Without a priority environment the console defaults jobs to its own interpreter, not to the first one found."""
+    paths        = ProjectPaths(REPO_ROOT)
+    interpreters = [{"label": "conda:base", "path": "/base/bin/python", "current": False}]
+
+    assert paths.preferred_interpreter(interpreters) == str(Path(sys.executable))

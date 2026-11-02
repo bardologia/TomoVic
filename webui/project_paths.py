@@ -166,13 +166,14 @@ class ProjectPaths:
             script_key: Script key whose per-script priority list is consulted first.
 
         Returns:
-            Path of the highest-priority matching interpreter, the first
-            discovered one when none match, or the running interpreter when the
-            list is empty.
+            Path of the highest-priority matching interpreter, or the
+            interpreter this server runs under when none match, so a console
+            started inside its own environment launches jobs in that
+            environment.
         """
         priority = self.SCRIPT_PRIORITY.get(script_key, []) + self.PRIORITY
         for wanted in priority:
             for item in interpreters:
                 if item["label"] == wanted:
                     return item["path"]
-        return interpreters[0]["path"] if interpreters else sys.executable
+        return str(Path(sys.executable))
