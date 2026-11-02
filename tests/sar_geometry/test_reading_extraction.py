@@ -19,9 +19,9 @@ def _fake_track(n_azimuth: int = 50, h: float = 5.0, v: float = 3700.0) -> np.nd
     """Builds a synthetic track array in the RAT row layout the extractor expects.
 
     Args:
-        n_azimuth: Number of azimuth samples.
-        h: Mean horizontal track position in metres.
-        v: Mean vertical track position in metres.
+        n_azimuth : Number of azimuth samples.
+        h         : Mean horizontal track position in metres.
+        v         : Mean vertical track position in metres.
 
     Returns:
         Array of shape (4, n_azimuth) with the horizontal and vertical rows filled.
@@ -122,6 +122,38 @@ def test_resolver_raises_when_the_polarisation_is_absent(tmp_path):
 
     with pytest.raises(ValueError, match="no single product"):
         TrackFileResolver().resolve(tmp_path / "PS02", "hv")
+
+
+def test_resolver_lists_the_polarisations_of_a_pass(tmp_path):
+    """Verifies every product file is listed under its polarisation code."""
+    track_dir = tmp_path / "PS02" / "INF" / "INF-TRACK"
+    track_dir.mkdir(parents=True)
+    for pol in ("Lhh", "Lhv", "Lvv"):
+        (track_dir / f"track_sar_resa_17sartom0102_{pol}_t01L.rat").write_text("stub")
+
+    listed = TrackFileResolver().polarisations(tmp_path / "PS02")
+
+    assert sorted(listed) == ["hh", "hv", "vv"]
+    assert listed["hv"].name == "track_sar_resa_17sartom0102_Lhv_t01L.rat"
+
+
+def test_resolver_listing_rejects_two_files_of_one_polarisation(tmp_path):
+    """Verifies two products carrying the same polarisation are refused."""
+    track_dir = tmp_path / "PS02" / "INF" / "INF-TRACK"
+    track_dir.mkdir(parents=True)
+    (track_dir / "track_sar_resa_17sartom0102_Lhv_t01L.rat").write_text("stub")
+    (track_dir / "track_sar_resa_17sartom0102b_Lhv_t01L.rat").write_text("stub")
+
+    with pytest.raises(ValueError, match="carry polarisation 'hv'"):
+        TrackFileResolver().polarisations(tmp_path / "PS02")
+
+
+def test_resolver_listing_raises_when_missing(tmp_path):
+    """Verifies an empty product directory raises FileNotFoundError."""
+    (tmp_path / "PS02" / "INF" / "INF-TRACK").mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError):
+        TrackFileResolver().polarisations(tmp_path / "PS02")
 
 
 def test_resolver_raises_when_several_candidates_carry_no_polarisation(tmp_path):

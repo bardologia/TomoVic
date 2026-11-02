@@ -7,11 +7,13 @@ trade-off the window size controls.
 
 from __future__ import annotations
 
+import json
 import os
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses        import dataclass, field
 from pathlib            import Path
+from time               import perf_counter
 
 import matplotlib.pyplot as plt
 import numpy             as np
@@ -29,13 +31,14 @@ class WindowTrial:
     """One preprocessing run identified by its multilook window.
 
     Attributes:
-        name: Run tag under the preprocessing runs root.
-        run_dir: Directory of the preprocessing run.
-        tomogram_path: Path of the full complex tomogram cube.
-        window: Multilook window as (height, width) in pixels.
-        window_label: Window rendered as "heightxwidth".
-        window_area: Number of pixels the window averages over.
-        metrics: Measured metrics, filled in by WindowMetrics.
+        name          : Run tag under the preprocessing runs root.
+        run_dir       : Directory of the preprocessing run.
+        tomogram_path : Path of the full complex tomogram cube.
+        window        : Multilook window as (height, width) in pixels.
+        window_label  : Window rendered as "heightxwidth".
+        window_area   : Number of pixels the window averages over.
+        scene         : Scene identity of the run beyond its window: crop, stack identifier, polarisation, track selection and height range.
+        metrics       : Measured metrics, filled in by WindowMetrics.
     """
 
     name          : str
@@ -44,45 +47,91 @@ class WindowTrial:
     window        : tuple
     window_label  : str
     window_area   : int
+    scene         : dict
     metrics       : dict = field(default_factory=dict)
 
 
-class WindowTrialCollector:
-    """Discovers preprocessing runs and reads their multilook window.
+@dataclass
+class WindowMeasurement:
+    """Outcome of measuring one preprocessing trial.
 
     Attributes:
-        runs_dir: Root directory holding preprocessing runs.
-        run_tags: Explicitly requested run tags; empty means discover all.
-        logger: Logger used for discovery reporting.
+        metrics      : Comparison scalars as produced by `WindowMetrics._summarise`.
+        chunks_read  : Number of range chunks measured.
+        chunks_total : Number of range chunks the tomogram holds.
+        duration_s   : Wall-clock seconds the measurement took.
     """
+
+    metrics      : dict
+    chunks_read  : int
+    chunks_total : int
+    duration_s   : float
+
+
+class WindowTrialCollector:
+    """Discovers preprocessing runs and reads their multilook window and scene identity.
+
+    Attributes:
+        REQUIRED_FILES : Outputs a run must hold to be measured, relative to the run directory.
+        SCENE_FIELDS   : Config-state fields that must agree across the trials for the comparison to be about the window.
+        runs_dir       : Root directory holding preprocessing runs.
+        run_tags       : Explicitly requested run tags; empty means discover all.
+        logger         : Logger used for discovery reporting.
+    """
+
+    REQUIRED_FILES = ("data/tomogram_full.npy", "meta/config_state.json")
+    SCENE_FIELDS   = ("crop", "stack_identifier", "polarisation", "track_selection", "height_range")
 
     def __init__(self, runs_dir: Path, run_tags: list[str], logger: Logger) -> None:
         """Binds the collector to a runs root and the tags to compare.
 
         Args:
-            runs_dir: Root directory holding preprocessing runs.
-            run_tags: Run tags to compare; empty triggers discovery.
-            logger: Logger used for discovery reporting.
+            runs_dir : Root directory holding preprocessing runs.
+            run_tags : Run tags to compare; empty triggers discovery.
+            logger   : Logger used for discovery reporting.
         """
         self.runs_dir = runs_dir
         self.run_tags = run_tags
         self.logger   = logger
 
     def _discover_tags(self) -> list[str]:
-        """Returns the configured tags, or every run with a tomogram and config state."""
+        """Returns the configured tags, or every run holding the required outputs, warning for each candidate directory that lacks one."""
         if self.run_tags:
             return list(self.run_tags)
 
-        found = [
-            entry.name
-            for entry in sorted(self.runs_dir.iterdir())
-            if entry.is_dir() and (entry / "data" / "tomogram_full.npy").exists() and (entry / "meta" / "config_state.json").exists()
-        ]
+        found   = []
+        skipped = []
+        for entry in sorted(self.runs_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith((".", "_")):
+                continue
+
+            missing = [relative for relative in self.REQUIRED_FILES if not (entry / relative).exists()]
+            if missing:
+                skipped.append(entry.name)
+                self.logger.warning(f"{entry.name}: skipped, no {' or '.join(missing)}; its preprocessing is incomplete or failed")
+                continue
+
+            found.append(entry.name)
+
+        if skipped:
+            self.logger.warning(f"{len(skipped)} of {len(found) + len(skipped)} directories under {self.runs_dir} skipped for lacking preprocessing outputs: {', '.join(skipped)}")
 
         return found
 
+    def _scene(self, state: dict) -> dict:
+        """Returns the scene identity recorded in a run's config state: crop, stack identifier, polarisation, track selection and height range."""
+        tomogram = state["tomogram_config"]
+
+        return {
+            "crop"             : state["crop"],
+            "stack_identifier" : state["stack_identifier"],
+            "polarisation"     : tomogram["polarisation"],
+            "track_selection"  : tomogram["track_selection"],
+            "height_range"     : list(tomogram["height_range"]),
+        }
+
     def _build_trial(self, tag: str) -> WindowTrial:
-        """Builds a trial by reading the tomogram filter window from the run's config state."""
+        """Builds a trial by reading the tomogram filter window and the scene identity from the run's config state."""
         run_dir = self.runs_dir / tag
         state   = FileIO.load_json(run_dir / "meta" / "config_state.json")
 
@@ -97,24 +146,47 @@ class WindowTrialCollector:
             window        = window,
             window_label  = label,
             window_area   = area,
+            scene         = self._scene(state),
         )
+
+    def _check_same_scene(self, trials: list[WindowTrial]) -> None:
+        """Rejects trials that differ in anything but the window, since the report attributes every difference to it.
+
+        Args:
+            trials : Collected trials.
+
+        Raises:
+            ValueError : If a scene field takes more than one value across the trials, naming the field and every trial's value.
+        """
+        for key in self.SCENE_FIELDS:
+            values = {trial.name: trial.scene[key] for trial in trials}
+
+            if len({json.dumps(value, sort_keys=True) for value in values.values()}) > 1:
+                listing = "; ".join(f"{name}: {value}" for name, value in values.items())
+                raise ValueError(f"Preprocessing trials differ in {key}, so their windows are not comparable: {listing}. Name the runs of one scene in run_tags")
 
     def collect(self) -> list[WindowTrial]:
         """Collects the preprocessing trials to compare.
 
         Returns:
             Trials sorted by increasing multilook window area.
+
+        Raises:
+            ValueError : If the trials do not share crop, stack, polarisation, track selection and height range.
         """
         self.logger.section("Collecting preprocessing trials")
 
         trials = []
         for tag in self._discover_tags():
             trial = self._build_trial(tag)
-            self.logger.info(f"{trial.name:<48} window {trial.window_label}")
+            scene = ", ".join(f"{key}={value}" for key, value in trial.scene.items())
+            self.logger.info(f"{trial.name:<48} window {trial.window_label}; {scene}")
             trials.append(trial)
 
         if not trials:
             self.logger.error(f"No preprocessing trials found under {self.runs_dir}")
+
+        self._check_same_scene(trials)
 
         return sorted(trials, key=lambda item: item.window_area)
 
@@ -123,11 +195,10 @@ class WindowMetrics:
     """Measures tomogram sharpness and speckle statistics for one run.
 
     Attributes:
-        pixel_sample: Approximate pixel budget; range chunks are subsampled to
-            stay under it. Non-positive means measure every chunk.
-        block_size: Side length in pixels of the speckle-statistic blocks.
-        range_chunk: Number of range columns loaded per chunk.
-        logger: Logger used for progress reporting.
+        pixel_sample : Approximate pixel budget; range chunks are subsampled to stay under it. Non-positive means measure every chunk.
+        block_size   : Side length in pixels of the speckle-statistic blocks.
+        range_chunk  : Number of range columns loaded per chunk.
+        logger       : Logger used for progress reporting.
     """
 
     SPURIOUS_FRACTION = 0.3
@@ -137,10 +208,10 @@ class WindowMetrics:
         """Configures the sampling, block size, and chunking of the measurements.
 
         Args:
-            pixel_sample: Approximate pixel budget, non-positive to use all.
-            block_size: Side length in pixels of the speckle-statistic blocks.
-            range_chunk: Number of range columns loaded per chunk.
-            logger: Logger used for progress reporting.
+            pixel_sample : Approximate pixel budget, non-positive to use all.
+            block_size   : Side length in pixels of the speckle-statistic blocks.
+            range_chunk  : Number of range columns loaded per chunk.
+            logger       : Logger used for progress reporting.
         """
         self.pixel_sample = pixel_sample
         self.block_size   = block_size
@@ -151,9 +222,8 @@ class WindowMetrics:
         """Returns the range column indices at which chunks start.
 
         Args:
-            ranges: Total number of range columns in the tomogram.
-            azimuths: Number of azimuth lines, used to convert the pixel budget
-                into a column budget.
+            ranges   : Total number of range columns in the tomogram.
+            azimuths : Number of azimuth lines, used to convert the pixel budget into a column budget.
 
         Returns:
             Chunk start indices, evenly spread when the pixel budget forces a
@@ -181,7 +251,7 @@ class WindowMetrics:
         the profile peak and is not the dominant peak itself.
 
         Args:
-            amp: Tomogram amplitude of shape (elevation, azimuth, range_chunk).
+            amp : Tomogram amplitude of shape (elevation, azimuth, range_chunk).
 
         Returns:
             A tuple (contrast, peak, spurious) of shape (azimuth, range_chunk)
@@ -202,9 +272,9 @@ class WindowMetrics:
         """Reduces the per-pixel maps to the comparison scalars.
 
         Args:
-            contrast: Peak-to-floor contrast in dB, shape (azimuth, range).
-            peak_map: Peak amplitude per profile, shape (azimuth, range).
-            spurious_map: Spurious peak count per profile, same shape.
+            contrast     : Peak-to-floor contrast in dB, shape (azimuth, range).
+            peak_map     : Peak amplitude per profile, shape (azimuth, range).
+            spurious_map : Spurious peak count per profile, same shape.
 
         Returns:
             Mapping with the valid-pixel fraction, contrast median and deciles
@@ -223,23 +293,24 @@ class WindowMetrics:
             "autocorr_length_az"    : SpatialDispersion.autocorr_length(peak_map, axis=0),
         }
 
-    def compute(self, trial: WindowTrial) -> dict:
-        """Streams a trial's tomogram in range chunks and returns its metrics.
+    def compute(self, trial: WindowTrial) -> WindowMeasurement:
+        """Streams a trial's tomogram in range chunks and returns its metrics with the chunk counts and the time taken.
 
         Args:
-            trial: Trial whose tomogram of shape (elevation, azimuth, range) is
-                memory-mapped and read chunk by chunk.
+            trial : Trial whose tomogram of shape (elevation, azimuth, range) is memory-mapped and read chunk by chunk.
 
         Returns:
-            Mapping of metric name to scalar as produced by `_summarise`.
+            The measurement holding the metrics produced by `_summarise`.
         """
+        started = perf_counter()
+
         tomogram             = np.load(trial.tomogram_path, mmap_mode="r")
         _, azimuths, ranges  = tomogram.shape
 
         starts = self._range_starts(ranges, azimuths)
+        total  = len(range(0, ranges, self.range_chunk))
 
-        sampled = "all" if len(starts) == len(range(0, ranges, self.range_chunk)) else f"{len(starts)} of {len(range(0, ranges, self.range_chunk))}"
-        self.logger.subsection(f"Measuring {trial.name} (range chunks: {sampled})")
+        self.logger.subsection(f"Measuring {trial.name} (range chunks: {'all' if len(starts) == total else f'{len(starts)} of {total}'})")
 
         contrast_columns = []
         peak_columns     = []
@@ -261,14 +332,14 @@ class WindowMetrics:
         peak_map     = np.concatenate(peak_columns,     axis=1)
         spurious_map = np.concatenate(spurious_columns, axis=1)
 
-        return self._summarise(contrast_map, peak_map, spurious_map)
+        return WindowMeasurement(self._summarise(contrast_map, peak_map, spurious_map), len(starts), total, perf_counter() - started)
 
 
 class WindowComparisonPlots(PlotBase):
     """Bar plots of each comparison metric against the multilook window.
 
     Attributes:
-        out_dir: Report directory; figures are written under `images/`.
+        out_dir : Report directory; figures are written under `images/`.
     """
 
     PANELS = [
@@ -286,23 +357,23 @@ class WindowComparisonPlots(PlotBase):
         """Draws and saves one bar chart of a metric across windows.
 
         Args:
-            labels: Window labels forming the x axis.
-            values: Metric value per window, aligned with `labels`.
-            y_label: Axis label including units where applicable.
-            title: Figure title.
-            path: Destination file for the figure.
+            labels  : Tick label per bar, the window over the dataset name.
+            values  : Metric value per window, aligned with `labels`.
+            y_label : Axis label including units where applicable.
+            title   : Figure title.
+            path    : Destination file for the figure.
 
         Returns:
             Path of the saved figure.
         """
         self._apply_style()
 
-        fig, ax = plt.subplots(figsize=(6.0, 4.0))
+        fig, ax = plt.subplots(figsize=(max(6.0, 1.8 * len(labels)), 4.6))
         ax.bar(range(len(labels)), values, color="#3b6ea5", width=0.6)
 
         ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels)
-        ax.set_xlabel("Window (height x width)")
+        ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=7)
+        ax.set_xlabel("Window (height x width) and dataset")
         ax.set_ylabel(y_label)
         ax.set_title(title)
 
@@ -313,12 +384,12 @@ class WindowComparisonPlots(PlotBase):
         """Renders one bar chart per configured panel.
 
         Args:
-            trials: Measured trials, ordered by window area.
+            trials : Measured trials, ordered by window area.
 
         Returns:
             Paths of the saved figures, in panel order.
         """
-        labels  = [trial.window_label for trial in trials]
+        labels  = [f"{trial.window_label}\n{trial.name}" for trial in trials]
         written = []
 
         for key, y_label, title in self.PANELS:
@@ -333,8 +404,8 @@ class WindowComparisonReport:
     """Markdown report of the multilook window bias-variance trade-off.
 
     Attributes:
-        out_dir: Directory the report is written to.
-        logger: Logger used for progress reporting.
+        out_dir : Directory the report is written to.
+        logger  : Logger used for progress reporting.
     """
 
     METRIC_COLUMNS = [
@@ -357,8 +428,8 @@ class WindowComparisonReport:
         """Binds the report to its output directory.
 
         Args:
-            out_dir: Directory the report is written to.
-            logger: Logger used for progress reporting.
+            out_dir : Directory the report is written to.
+            logger  : Logger used for progress reporting.
         """
         self.out_dir = out_dir
         self.logger  = logger
@@ -367,7 +438,7 @@ class WindowComparisonReport:
         """Appends the per-window metric table to the document."""
         rows = MetricTableRenderer.render(
             rows           = trials,
-            leading        = [("Window", lambda trial: trial.window_label)],
+            leading        = [("Dataset", lambda trial: f"`{trial.name}`"), ("Window", lambda trial: trial.window_label)],
             metric_columns = self.METRIC_COLUMNS,
             orientation    = self.ORIENTATION,
         )
@@ -391,8 +462,8 @@ class WindowComparisonReport:
         """Writes the window comparison report.
 
         Args:
-            trials: Measured trials to report on.
-            plots: Figures to embed; may be empty.
+            trials : Measured trials to report on.
+            plots  : Figures to embed; may be empty.
 
         Returns:
             Path of the written `report.md`.
@@ -415,18 +486,18 @@ class PreprocessingComparisonPipeline:
     """Orchestrates collection, measurement, plotting, and reporting of window trials.
 
     Attributes:
-        config: Comparison entry configuration.
-        out_dir: Directory the report and figures are written to.
-        logger: Logger used for progress reporting.
+        config  : Comparison entry configuration.
+        out_dir : Directory the report and figures are written to.
+        logger  : Logger used for progress reporting.
     """
 
     def __init__(self, config, out_dir: Path, logger: Logger) -> None:
         """Binds the pipeline to its configuration and output directory.
 
         Args:
-            config: Comparison entry configuration.
-            out_dir: Directory the report and figures are written to.
-            logger: Logger used for progress reporting.
+            config  : Comparison entry configuration.
+            out_dir : Directory the report and figures are written to.
+            logger  : Logger used for progress reporting.
         """
         self.config  = config
         self.out_dir = out_dir
@@ -446,28 +517,39 @@ class PreprocessingComparisonPipeline:
         return max(1, min(n_trials, (os.cpu_count() or 2)))
 
     def _measure(self, trials: list[WindowTrial]) -> None:
-        """Fills each trial's `metrics` mapping in place, in parallel where allowed."""
+        """Fills each trial's `metrics` mapping in place, in parallel where allowed, logging one line as each trial finishes."""
+        self.logger.section("Measuring trials")
+
         metrics = WindowMetrics(self.config.pixel_sample, self.config.block_size, self.config.range_chunk, self.logger)
         workers = self._worker_count(len(trials))
 
-        if workers <= 1:
-            for trial in trials:
-                trial.metrics = metrics.compute(trial)
-            return
+        self.logger.info(f"Measuring {len(trials)} trial(s) across {workers} worker(s)")
 
-        self.logger.info(f"Measuring {len(trials)} trials across {workers} workers")
+        finished = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for trial, result in zip(trials, pool.map(metrics.compute, trials)):
-                trial.metrics = result
+            futures = {pool.submit(metrics.compute, trial): trial for trial in trials}
+
+            for future in as_completed(futures):
+                trial         = futures[future]
+                result        = future.result()
+                trial.metrics = result.metrics
+                finished     += 1
+
+                self.logger.ok(f"[{finished}/{len(trials)}] {trial.name}: {result.chunks_read} of {result.chunks_total} range chunks measured in {result.duration_s:.1f}s")
 
     def _plot(self, trials: list[WindowTrial]) -> list[Path]:
         """Returns the rendered comparison figures, empty when plotting is disabled."""
         if not self.config.make_plots:
             return []
+
+        self.logger.section("Rendering comparison plots")
+
         return WindowComparisonPlots(self.out_dir).render(trials)
 
     def _report(self, trials: list[WindowTrial], plots: list[Path]) -> Path:
         """Returns the path of the written markdown report."""
+        self.logger.section("Writing comparison report")
+
         return WindowComparisonReport(self.out_dir, self.logger).write(trials, plots)
 
     def run(self) -> Path:
@@ -477,7 +559,7 @@ class PreprocessingComparisonPipeline:
             Path of the written `report.md`.
 
         Raises:
-            RuntimeError: If no preprocessing trial could be collected.
+            RuntimeError : If no preprocessing trial could be collected.
         """
         trials = self._collect()
         if not trials:
@@ -486,4 +568,12 @@ class PreprocessingComparisonPipeline:
         self._measure(trials)
         plots = self._plot(trials)
 
-        return self._report(trials, plots)
+        report_path = self._report(trials, plots)
+
+        self.logger.kv_table({
+            "Trials Compared" : len(trials),
+            "Plots Rendered"  : len(plots),
+            "Report Path"     : str(report_path),
+        })
+
+        return report_path

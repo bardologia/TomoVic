@@ -36,7 +36,13 @@ class FiniteScalar:
 
 
 class R2:
-    """Coefficient of determination computed along one axis."""
+    """Coefficient of determination computed along one axis.
+
+    A reference that is constant along the reduced axis has no variance to
+    explain, so its coefficient is undefined: such entries are NaN instead of
+    the 1.0 (matching prediction) or the huge negative value (any other
+    prediction) a stabilised denominator would print.
+    """
 
     EPSILON = 1e-12
 
@@ -51,11 +57,22 @@ class R2:
                 the elevation axis of a profile stack.
 
         Returns:
-            Float32 array with axis removed, holding 1 - SS_res / SS_tot.
+            Float32 array with axis removed, holding 1 - SS_res / SS_tot where SS_tot exceeds EPSILON and NaN where the reference is constant.
         """
         ref_mean = ref.mean(axis=axis, keepdims=True, dtype=np.float64)
 
         ss_res = ((pred - ref) ** 2).sum(axis=axis, dtype=np.float64)
         ss_tot = ((ref - ref_mean) ** 2).sum(axis=axis, dtype=np.float64)
 
-        return (1.0 - ss_res / (ss_tot + R2.EPSILON)).astype(np.float32)
+        defined = ss_tot > R2.EPSILON
+        r2      = np.full(ss_tot.shape, np.nan, dtype=np.float64)
+
+        r2[defined] = 1.0 - ss_res[defined] / ss_tot[defined]
+
+        return r2.astype(np.float32)
+
+    @staticmethod
+    def undefined_count(r2_map: np.ndarray) -> int:
+        """Returns how many entries of a coefficient map are undefined, meaning not finite."""
+        return int(np.count_nonzero(~np.isfinite(r2_map)))
+

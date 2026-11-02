@@ -21,9 +21,9 @@ class StackInferencePipeline:
     """Plots and profiles one preprocessed stack run directory.
 
     Attributes:
-        run_dir: Preprocessing run directory holding ``data/`` and ``images/``.
-        data_dir: The ``data/`` subdirectory carrying the layout and the .npy artifacts.
-        logger: Logger the plotting and distribution stages write through.
+        run_dir  : Preprocessing run directory holding ``data/`` and ``images/``.
+        data_dir : The ``data/`` subdirectory carrying the layout and the .npy artifacts.
+        logger   : Logger the plotting and distribution stages write through.
     """
 
     LAYOUT_FILENAME = "dataset.json"
@@ -32,8 +32,8 @@ class StackInferencePipeline:
         """Binds the pipeline to a preprocessing run directory.
 
         Args:
-            run_dir: Run directory produced by the preprocessing pipeline.
-            logger: Logger for section and progress output.
+            run_dir : Run directory produced by the preprocessing pipeline.
+            logger  : Logger for section and progress output.
         """
         self.run_dir  = Path(run_dir)
         self.data_dir = self.run_dir / "data"
@@ -50,7 +50,7 @@ class StackInferencePipeline:
         """Renders the stack overview figures declared by the layout.
 
         Args:
-            layout: Dataset layout mapping artifact names to paths relative to ``data/``.
+            layout : Dataset layout mapping artifact names to paths relative to ``data/``.
 
         Returns:
             Mapping from figure name to the saved PNG path.
@@ -75,7 +75,7 @@ class StackInferencePipeline:
         """Profiles the value distributions of the SLC, interferogram and DEM arrays.
 
         Args:
-            layout: Dataset layout mapping artifact names to paths relative to ``data/``.
+            layout : Dataset layout mapping artifact names to paths relative to ``data/``.
 
         Returns:
             Mapping from artifact name to the saved distribution figure or JSON path.
@@ -110,6 +110,12 @@ class StackInferencePipeline:
         gc.collect()
 
         self.logger.section("[Pre-Processing Inference Completed]")
+        self.logger.kv_table({
+            "Run Directory"      : str(self.run_dir),
+            "Images Directory"   : str(self.run_dir / "images"),
+            "Figures Written"    : len(saved),
+            "Distributions JSON" : str(distributions["value_distributions_json"]),
+        })
 
         return {
             "images"             : self.run_dir / "images",
@@ -123,42 +129,66 @@ class StackInferenceTrialCollector:
     """Resolves the preprocessing trial directories that inference should visit.
 
     Attributes:
-        runs_dir: Directory holding one subdirectory per preprocessing trial.
-        run_tags: Explicit trial names; empty means discover every valid trial.
-        logger: Logger used to report the collected trials.
+        MAX_SKIPPED_NAMED : Largest number of skipped directory names spelled out in the warning.
+        runs_dir          : Directory holding one subdirectory per preprocessing trial.
+        run_tags          : Explicit trial names; empty means discover every valid trial.
+        logger            : Logger used to report the collected trials.
+        skipped           : Names of the subdirectories discovery left out for lacking a dataset layout, in sorted order.
     """
+
+    MAX_SKIPPED_NAMED = 10
 
     def __init__(self, runs_dir: Path, run_tags: list[str], logger: Logger) -> None:
         """Binds the collector to a runs directory and an optional tag filter.
 
         Args:
-            runs_dir: Directory holding the preprocessing trial subdirectories.
-            run_tags: Trial names to restrict to; empty enables discovery.
-            logger: Logger for the collection report.
+            runs_dir : Directory holding the preprocessing trial subdirectories.
+            run_tags : Trial names to restrict to; empty enables discovery.
+            logger   : Logger for the collection report.
         """
         self.runs_dir = Path(runs_dir)
         self.run_tags = run_tags
         self.logger   = logger
+        self.skipped  = []
 
     def _discover_tags(self) -> list[str]:
-        """Returns the configured tags, or every subdirectory carrying a dataset layout."""
+        """Returns the configured tags, or every subdirectory carrying a dataset layout, recording the others in ``skipped``."""
         if self.run_tags:
             return list(self.run_tags)
 
-        return [
-            entry.name
-            for entry in sorted(self.runs_dir.iterdir())
-            if entry.is_dir() and (entry / "data" / StackInferencePipeline.LAYOUT_FILENAME).exists()
-        ]
+        tags = []
+
+        for entry in sorted(self.runs_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+
+            if (entry / "data" / StackInferencePipeline.LAYOUT_FILENAME).exists():
+                tags.append(entry.name)
+            else:
+                self.skipped.append(entry.name)
+
+        return tags
+
+    def _report_skipped(self) -> None:
+        """Warns about the directories discovery left out, naming the first MAX_SKIPPED_NAMED of them."""
+        if not self.skipped:
+            return
+
+        names = ", ".join(self.skipped[:self.MAX_SKIPPED_NAMED])
+
+        if len(self.skipped) > self.MAX_SKIPPED_NAMED:
+            names += f" and {len(self.skipped) - self.MAX_SKIPPED_NAMED} more"
+
+        self.logger.warning(f"Skipped {len(self.skipped)} directories under {self.runs_dir} without data/{StackInferencePipeline.LAYOUT_FILENAME} (preprocessing failed or still running): {names}")
 
     def collect(self) -> list[Path]:
-        """Returns the run directories of every requested preprocessing trial.
+        """Returns the run directories of every requested preprocessing trial and reports the directories discovery skipped.
 
         Returns:
             List of trial run directories, in discovery order.
 
         Raises:
-            FileNotFoundError: If a requested tag has no dataset layout on disk.
+            FileNotFoundError : If a requested tag has no dataset layout on disk.
         """
         self.logger.section("Collecting preprocessing trials")
 
@@ -172,6 +202,9 @@ class StackInferenceTrialCollector:
             self.logger.info(tag)
             run_dirs.append(run_dir)
 
+        self._report_skipped()
+        self.logger.info(f"Collected {len(run_dirs)} trials; skipped {len(self.skipped)} directories without a dataset layout")
+
         if not run_dirs:
             self.logger.error(f"No preprocessing trials found under {self.runs_dir}")
 
@@ -182,7 +215,7 @@ class StackInferenceSession:
     """One schedulable unit of preprocessing inference over a single run directory.
 
     Attributes:
-        run_dir: Preprocessing run directory this session processes.
+        run_dir : Preprocessing run directory this session processes.
     """
 
     def __init__(self, run_dir: Path) -> None:
@@ -192,15 +225,18 @@ class StackInferenceSession:
     def execute(self) -> dict[str, Path]:
         """Creates the session logger and runs the stack inference pipeline.
 
+        The logger is closed with any escaping exception, so a failed analysis
+        ends its logs/preprocessing_inference.log with the ABORTED banner and the
+        traceback rather than a clean END.
+
         Returns:
             The result dictionary returned by ``StackInferencePipeline.run``.
         """
         log_dir = self.run_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        logger = Logger(log_dir=str(log_dir), name="preprocessing_inference", level="INFO")
-
-        return StackInferencePipeline(self.run_dir, logger=logger).run()
+        with Logger(log_dir=str(log_dir), name="preprocessing_inference", level="INFO") as logger:
+            return StackInferencePipeline(self.run_dir, logger=logger).run()
 
 
 def run_stack_inference_session(session: StackInferenceSession) -> dict[str, Path]:
@@ -212,7 +248,7 @@ class PreprocessingInferenceScheduler(SequentialSessionScheduler):
     """Runs preprocessing inference sequentially over every collected trial.
 
     Attributes:
-        config: Entry configuration carrying ``runs_dir`` and ``run_tags``.
+        config : Entry configuration carrying ``runs_dir`` and ``run_tags``.
     """
 
     EMPTY_MESSAGE = "No preprocessing trials to infer"
@@ -222,8 +258,8 @@ class PreprocessingInferenceScheduler(SequentialSessionScheduler):
         """Binds the scheduler to the preprocessing-inference entry configuration.
 
         Args:
-            config: Entry configuration exposing ``runs_dir`` and ``run_tags``.
-            logger: Logger shared with the base scheduler.
+            config : Entry configuration exposing ``runs_dir`` and ``run_tags``.
+            logger : Logger shared with the base scheduler.
         """
         super().__init__(logger)
         self.config = config

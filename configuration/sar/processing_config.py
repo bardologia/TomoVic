@@ -22,19 +22,19 @@ class TomogramConfig:
     """PyRAT beamforming settings producing the tomographic cube.
 
     Attributes:
-        fusar_project_path: F-SAR project CSV describing the available passes.
-        base_directory: Root under which the raw campaign data lives.
-        polarisation: Polarimetric channel processed, e.g. "hv".
-        track_selection: Glob selecting which tracks enter the stack.
-        height_range: Elevation axis extent of the tomogram in metres.
-        filter_method: Covariance estimation filter, e.g. "Boxcar".
-        filter_arguments: Keyword arguments of that filter; "win" is the per-axis window in (azimuth, range) pixels.
-        beamforming_method: Spectral estimator inverting the stack, e.g. "Capon".
-        beamforming_arguments: Positional arguments of the beamformer.
-        max_crop_azimuth_width: Azimuth width in pixels of each processed subsection.
-        apply_resampling: Whether the stack is resampled before beamforming.
-        apply_presumming: Whether the stack is presummed before beamforming.
-        max_amplitude_clip: Multiple of the mean amplitude at which the tomogram is clipped.
+        fusar_project_path     : F-SAR project CSV describing the available passes.
+        base_directory         : Root under which the raw campaign data lives.
+        polarisation           : Polarimetric channel processed, e.g. "hv".
+        track_selection        : Glob selecting which tracks enter the stack.
+        height_range           : Elevation axis extent of the tomogram in metres.
+        filter_method          : Covariance estimation filter, e.g. "Boxcar".
+        filter_arguments       : Keyword arguments of that filter; "win" is the per-axis window in (azimuth, range) pixels.
+        beamforming_method     : Spectral estimator inverting the stack, e.g. "Capon".
+        beamforming_arguments  : Positional arguments of the beamformer.
+        max_crop_azimuth_width : Azimuth width in pixels of each processed subsection.
+        apply_resampling       : Whether the stack is resampled before beamforming.
+        apply_presumming       : Whether the stack is presummed before beamforming.
+        max_amplitude_clip     : Absolute ceiling, in linear amplitude units, on the secondary SLC amplitude carried by the interferograms; the tomogram is not clipped.
     """
 
     fusar_project_path     : str                 = ""
@@ -57,11 +57,11 @@ class ParallelConfig:
     """CPU budget split between tomogram worker processes and PyRAT threads.
 
     Attributes:
-        effort: Fraction of the machine claimed, one of "low", "medium" or "high".
-        tomogram_workers: Fixed worker count, or None to solve for one.
-        pyrat_threads: Fixed thread count per worker, or None to solve for one.
-        EFFORT_FRACTIONS: Core fraction claimed by each effort level.
-        THREAD_CAP: Largest thread count a solved plan assigns to one worker.
+        effort           : Fraction of the machine claimed, one of "low", "medium" or "high".
+        tomogram_workers : Fixed worker count, or None to solve for one.
+        pyrat_threads    : Fixed thread count per worker, or None to solve for one.
+        EFFORT_FRACTIONS : Core fraction claimed by each effort level.
+        THREAD_CAP       : Largest thread count a solved plan assigns to one worker.
     """
 
     effort           : str           = "high"
@@ -83,7 +83,7 @@ class ParallelConfig:
         """Returns the core count claimed at the configured effort level.
 
         Raises:
-            ValueError: If the effort level is unknown.
+            ValueError : If the effort level is unknown.
         """
         if self.effort not in self.EFFORT_FRACTIONS:
             raise ValueError(f"Unknown effort '{self.effort}', expected one of {sorted(self.EFFORT_FRACTIONS)}")
@@ -103,13 +103,13 @@ class ParallelConfig:
         sequential waves wins, breaking ties toward more threads per worker.
 
         Args:
-            subsection_count: Number of azimuth subsections to process.
+            subsection_count : Number of azimuth subsections to process.
 
         Returns:
             The number of concurrent tomogram workers and the PyRAT threads each gets.
 
         Raises:
-            ValueError: If the subsection count is below one.
+            ValueError : If the subsection count is below one.
         """
         if subsection_count < 1:
             raise ValueError(f"resolve_plan needs at least one subsection, got {subsection_count}")
@@ -145,12 +145,12 @@ class PathConfig:
     """On-disk layout of a preprocessing run.
 
     Attributes:
-        main_directory: Root holding all dataset runs.
-        pyrat_directory: PyRAT source directory used by the workers.
-        data_subdirectory: Subdirectory receiving the processed arrays.
-        metadata_subdirectory: Subdirectory receiving the run metadata.
-        temporary_subdirectory: Subdirectory receiving intermediate products.
-        run_subdirectory: Name of this run's directory, filled in when absent.
+        main_directory         : Root holding all dataset runs.
+        pyrat_directory        : PyRAT source directory used by the workers.
+        data_subdirectory      : Subdirectory receiving the processed arrays.
+        metadata_subdirectory  : Subdirectory receiving the run metadata.
+        temporary_subdirectory : Subdirectory receiving intermediate products.
+        run_subdirectory       : Name of this run's directory, filled in when absent.
     """
 
     main_directory         : Path          = field(default_factory=lambda: Path("/ste/rnd/User/vice_vi/Dataset"))
@@ -188,15 +188,15 @@ class ProcessingConfig:
     """Resolved settings of one preprocessing run over a scene crop.
 
     Attributes:
-        crop: Azimuth and range extent of the scene being processed.
-        tomogram_config: PyRAT beamforming settings.
-        parallel: CPU budget split between workers and threads.
-        paths: On-disk layout of the run.
-        dataset_type: Sensor family of the source data, e.g. "FSAR".
-        stack_identifier: Identifier distinguishing stacks of the same crop.
-        tomogram_output_tag: PyRAT output tag of the tomogram product.
-        parameter_output_tag: PyRAT output tag of the parameter product.
-        tomogram_env_name: Conda environment providing PyRAT to the workers.
+        crop                 : Azimuth and range extent of the scene being processed.
+        tomogram_config      : PyRAT beamforming settings.
+        parallel             : CPU budget split between workers and threads.
+        paths                : On-disk layout of the run.
+        dataset_type         : Sensor family of the source data, e.g. "FSAR".
+        stack_identifier     : ID column of the F-SAR project row that selects the stack, e.g. "1" or "Lope-tomo1".
+        tomogram_output_tag  : PyRAT output tag of the tomogram product.
+        parameter_output_tag : PyRAT output tag of the parameter product.
+        tomogram_env_name    : Conda environment providing PyRAT to the workers.
     """
 
     crop            : CropRegion
@@ -230,34 +230,38 @@ class ProcessingConfig:
 class PreProcessEntryConfig:
     """Entry-point settings turning a crop and a window list into dataset runs.
 
-    One run is produced per multilook window in `win_list`.
+    One run is produced per multilook window in `win_list`. When all four crop
+    fields are zero the crop covers the whole scene, sized from the header of the
+    primary pass's RGI-SLC product.
 
     Attributes:
-        azimuth_start: First azimuth line of the crop.
-        azimuth_end: Last azimuth line of the crop.
-        range_start: First range sample of the crop.
-        range_end: Last range sample of the crop.
-        fusar_project_path: F-SAR project CSV describing the available passes.
-        base_directory: Root under which the raw campaign data lives.
-        track_selection: Glob selecting which tracks enter the stack.
-        polarisation: Polarimetric channel processed, e.g. "hv".
-        beamforming_method: Spectral estimator inverting the stack.
-        filter_method: Covariance estimation filter.
-        height_range: Elevation axis extent of the tomogram in metres.
-        win_list: Multilook windows swept, each as (azimuth, range) pixels.
-        max_crop_azimuth_width: Azimuth width in pixels of each processed subsection.
-        apply_resampling: Whether the stack is resampled before beamforming.
-        apply_presumming: Whether the stack is presummed before beamforming.
-        max_amplitude_clip: Multiple of the mean amplitude at which the tomogram is clipped.
-        effort: Fraction of the machine claimed by the parallel plan.
-        tomogram_workers: Fixed worker count, or None to solve for one.
-        pyrat_threads: Fixed thread count per worker, or None to solve for one.
-        dataset_name: Explicit dataset name, or None to derive one from the crop.
-        dataset_type: Sensor family of the source data.
-        stack_identifier: Identifier distinguishing stacks of the same crop.
-        tomogram_output_tag: PyRAT output tag of the tomogram product.
-        parameter_output_tag: PyRAT output tag of the parameter product.
-        tomogram_env_name: Conda environment providing PyRAT to the workers.
+        azimuth_start          : First azimuth line of the crop; all four crop fields at 0 select the whole scene.
+        azimuth_end            : Last azimuth line of the crop, exclusive; all four crop fields at 0 select the whole scene.
+        range_start            : First range sample of the crop; all four crop fields at 0 select the whole scene.
+        range_end              : Last range sample of the crop, exclusive; all four crop fields at 0 select the whole scene.
+        fusar_project_path     : F-SAR project CSV describing the available passes.
+        base_directory         : Root under which the raw campaign data lives.
+        track_selection        : Glob selecting which tracks enter the stack.
+        polarisation           : Polarimetric channel processed, e.g. "hv".
+        beamforming_method     : Spectral estimator inverting the stack.
+        filter_method          : Covariance estimation filter.
+        height_range           : Elevation axis extent of the tomogram in metres.
+        win_list               : Multilook windows swept, each as (azimuth, range) pixels.
+        max_crop_azimuth_width : Azimuth width in pixels of each processed subsection.
+        apply_resampling       : Whether the stack is resampled before beamforming.
+        apply_presumming       : Whether the stack is presummed before beamforming.
+        max_amplitude_clip     : Absolute ceiling, in linear amplitude units, on the secondary SLC amplitude carried by the interferograms; the tomogram is not clipped.
+        effort                 : Fraction of the machine claimed by the parallel plan.
+        tomogram_workers       : Fixed worker count, or None to solve for one.
+        pyrat_threads          : Fixed thread count per worker, or None to solve for one.
+        dataset_name           : Explicit dataset name, or None to derive one from the crop.
+        dataset_type           : Sensor family of the source data.
+        stack_identifier       : ID column of the F-SAR project row that selects the stack, e.g. "1" or "Lope-tomo1".
+        tomogram_output_tag    : PyRAT output tag of the tomogram product.
+        parameter_output_tag   : PyRAT output tag of the parameter product.
+        tomogram_env_name      : Conda environment providing PyRAT to the workers.
+        main_directory         : Root holding the dataset runs, forwarded into each session's PathConfig.
+        pyrat_directory        : PyRAT checkout, forwarded into each session's PathConfig and the scene-extent probe.
     """
 
     azimuth_start : int = 1000
@@ -291,6 +295,14 @@ class PreProcessEntryConfig:
     parameter_output_tag : str           = "Xparams_id2X"
     tomogram_env_name    : str           = "stetools"
 
+    main_directory  : Path = field(default_factory=lambda: Path("/ste/rnd/User/vice_vi/Dataset"))
+    pyrat_directory : Path = field(default_factory=lambda: Path("/ste/rnd/User/vice_vi/pyrat"))
+
+    @property
+    def spans_full_scene(self) -> bool:
+        """Whether every crop field is zero, which selects the whole scene."""
+        return (self.azimuth_start, self.azimuth_end, self.range_start, self.range_end) == (0, 0, 0, 0)
+
     def resolve_dataset_name(self, win: List[int], run_identifier: str) -> str:
         """Builds the dataset directory name for one multilook window.
 
@@ -299,8 +311,8 @@ class PreProcessEntryConfig:
         project file, the crop, the window, the polarisation and the stack.
 
         Args:
-            win: Multilook window as (azimuth, range) pixels.
-            run_identifier: Timestamp or tag disambiguating repeated runs.
+            win            : Multilook window as (azimuth, range) pixels.
+            run_identifier : Timestamp or tag disambiguating repeated runs.
 
         Returns:
             The dataset directory name for this window.
@@ -321,8 +333,8 @@ class PreprocessInferenceConfig:
     """Settings for the analysis pass over already-preprocessed dataset runs.
 
     Attributes:
-        runs_dir: Root directory holding the dataset runs.
-        run_tags: Run directory names to analyse; empty selects all.
+        runs_dir : Root directory holding the dataset runs.
+        run_tags : Run directory names to analyse; empty selects all.
     """
 
     runs_dir : Path = Path("/ste/rnd/User/vice_vi/Dataset")

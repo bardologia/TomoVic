@@ -2,7 +2,9 @@
 
 Summarises amplitude and phase of every pass and interferogram, plus the DEM
 height field, as percentile statistics and histograms, writing one figure per
-field and a single JSON payload for the run.
+field and a single JSON payload for the run. Fields holding non-finite values,
+and histograms that leave finite values out of their bins (zero amplitudes on a
+log axis), are tabled and warned about at the end of the run.
 """
 
 from __future__ import annotations
@@ -25,10 +27,10 @@ class ValueDistribution:
     """Percentile statistics and a histogram of one scalar field.
 
     Attributes:
-        values: Flattened field values.
-        scale: Histogram binning, "linear" or "log".
-        n_bins: Number of histogram bins.
-        value_range: Explicit (low, high) binning range, or None to use the data extent.
+        values      : Flattened field values.
+        scale       : Histogram binning, "linear" or "log".
+        n_bins      : Number of histogram bins.
+        value_range : Explicit (low, high) binning range, or None to use the data extent.
     """
 
     PERCENTILES = [1, 5, 25, 50, 75, 95, 99]
@@ -37,10 +39,10 @@ class ValueDistribution:
         """Flattens the field and stores the binning settings.
 
         Args:
-            values: Scalar field of any shape; it is flattened.
-            scale: Histogram binning, "linear" or "log".
-            n_bins: Number of histogram bins.
-            value_range: Explicit (low, high) binning range, or None.
+            values      : Scalar field of any shape; it is flattened.
+            scale       : Histogram binning, "linear" or "log".
+            n_bins      : Number of histogram bins.
+            value_range : Explicit (low, high) binning range, or None.
         """
         self.values      = np.asarray(values).reshape(-1)
         self.scale       = scale
@@ -51,7 +53,7 @@ class ValueDistribution:
         """Returns the finite values of the field.
 
         Raises:
-            ValueError: If the field holds no finite value.
+            ValueError : If the field holds no finite value.
         """
         finite = self.values[np.isfinite(self.values)]
         if finite.size == 0:
@@ -62,7 +64,7 @@ class ValueDistribution:
         """Summarises the finite values.
 
         Args:
-            finite: Flattened finite values of the field.
+            finite : Flattened finite values of the field.
 
         Returns:
             Dict with the finite and non-finite counts, min, max, mean, standard
@@ -85,15 +87,14 @@ class ValueDistribution:
         """Builds the histogram bin edges for the configured scale and range.
 
         Args:
-            finite: Flattened finite values of the field.
+            finite : Flattened finite values of the field.
 
         Returns:
             Array of n_bins + 1 edges, geometrically spaced under the log scale and
             linearly spaced otherwise.
 
         Raises:
-            ValueError: If a log-scale histogram is requested without an explicit
-                range and the field holds no strictly positive value.
+            ValueError : If a log-scale histogram is requested without an explicit range and the field holds no strictly positive value.
         """
         if self.value_range is not None:
             lo, hi = float(self.value_range[0]), float(self.value_range[1])
@@ -117,18 +118,21 @@ class ValueDistribution:
         """Bins the finite values.
 
         Args:
-            finite: Flattened finite values of the field.
-            edges: Histogram bin edges.
+            finite : Flattened finite values of the field.
+            edges  : Histogram bin edges.
 
         Returns:
-            Dict with the scale label, the bin edges and the per-bin counts.
+            Dict with the scale label, the bin edges, the per-bin counts and
+            n_excluded, the finite values outside the bins; under the log scale
+            with a data-derived range these are the non-positive values.
         """
         counts, _ = np.histogram(finite, bins=edges)
 
         return {
-            "scale"     : self.scale,
-            "bin_edges" : [float(e) for e in edges],
-            "counts"    : [int(c) for c in counts],
+            "scale"      : self.scale,
+            "bin_edges"  : [float(e) for e in edges],
+            "counts"     : [int(c) for c in counts],
+            "n_excluded" : int(finite.size - counts.sum()),
         }
 
     def compute(self) -> Dict[str, object]:
@@ -150,33 +154,33 @@ class HistogramPlotter(PlotBase):
     """Draws a single histogram figure with the median marked.
 
     Attributes:
-        logger: Logger available to the plotter.
-        fig_dpi: Figure display resolution.
-        save_dpi: Resolution the figure is written at.
+        logger   : Logger available to the plotter.
+        fig_dpi  : Figure display resolution.
+        save_dpi : Resolution the figure is written at.
     """
 
     def __init__(self, logger: Logger, fig_dpi: int = 150, save_dpi: int = 300) -> None:
         """Initializes the plotter.
 
         Args:
-            logger: Logger available to the plotter.
-            fig_dpi: Figure display resolution.
-            save_dpi: Resolution the figure is written at.
+            logger   : Logger available to the plotter.
+            fig_dpi  : Figure display resolution.
+            save_dpi : Resolution the figure is written at.
         """
         self.logger   = logger
         self.fig_dpi  = fig_dpi
         self.save_dpi = save_dpi
 
     def plot(self, histogram: Dict[str, object], statistics: Dict[str, object], title: str, x_label: str, out_path: Path, phase_ticks: bool = False) -> Path:
-        """Writes a bar histogram with a dashed median line.
+        """Writes a bar histogram with a dashed median line and, when values fall outside the bins, their count in the legend.
 
         Args:
-            histogram: Histogram dict with the scale, bin edges and counts.
-            statistics: Statistics dict; its median marks the vertical line.
-            title: Figure title.
-            x_label: Abscissa label, including units.
-            out_path: Path the figure is written to.
-            phase_ticks: Whether to label the abscissa in radians over [-pi, pi].
+            histogram   : Histogram dict with the scale, bin edges, counts and the count of finite values outside the bins.
+            statistics  : Statistics dict; its median marks the vertical line.
+            title       : Figure title.
+            x_label     : Abscissa label, including units.
+            out_path    : Path the figure is written to.
+            phase_ticks : Whether to label the abscissa in radians over [-pi, pi].
 
         Returns:
             Path of the written figure.
@@ -191,6 +195,10 @@ class HistogramPlotter(PlotBase):
         ax.bar(edges[:-1], counts, width=widths, align="edge", color="#3b6ea5", edgecolor="none", zorder=2)
 
         ax.axvline(float(statistics["median"]), color="#b5482a", lw=1.3, ls="--", zorder=3, label=f"median = {float(statistics['median']):.3g}")
+
+        if histogram["n_excluded"] > 0:
+            excluded = "non-positive values" if histogram["scale"] == "log" else "values outside the bins"
+            ax.plot([], [], ls="none", label=f"{histogram['n_excluded']} {excluded} not shown")
 
         if histogram["scale"] == "log":
             ax.set_xscale("log")
@@ -214,12 +222,12 @@ class StackDistributionAnalyzer:
     """Computes and writes the value distributions of a generated stack.
 
     Attributes:
-        interferogram_amplitude_clip: Amplitude clip applied to interferograms during
-            generation, recorded in the payload for provenance.
-        n_bins: Number of histogram bins used for every field.
-        logger: Logger for the per-field progress messages.
-        distributions_dir: Directory receiving the figures and the JSON payload.
-        plotter: Histogram figure writer.
+        interferogram_amplitude_clip : Amplitude clip applied to interferograms during generation, recorded in the payload for provenance.
+        n_bins                       : Number of histogram bins used for every field.
+        logger                       : Logger for the per-field progress messages.
+        distributions_dir            : Directory receiving the figures and the JSON payload.
+        plotter                      : Histogram figure writer.
+        coverage                     : One record per summarised field with its title, value count, non-finite count and count of finite values outside the bins.
     """
 
     JSON_FILENAME = "value_distributions.json"
@@ -228,18 +236,19 @@ class StackDistributionAnalyzer:
         """Initializes the analyzer against a run directory.
 
         Args:
-            run_directory: Run directory whose images/distributions subtree is written.
-            interferogram_amplitude_clip: Amplitude clip recorded in the payload.
-            logger: Logger for the per-field progress messages.
-            n_bins: Number of histogram bins.
-            fig_dpi: Figure display resolution.
-            save_dpi: Resolution the figures are written at.
+            run_directory                : Run directory whose images/distributions subtree is written.
+            interferogram_amplitude_clip : Amplitude clip recorded in the payload.
+            logger                       : Logger for the per-field progress messages.
+            n_bins                       : Number of histogram bins.
+            fig_dpi                      : Figure display resolution.
+            save_dpi                     : Resolution the figures are written at.
         """
         self.interferogram_amplitude_clip = float(interferogram_amplitude_clip)
         self.n_bins                       = int(n_bins)
         self.logger                       = logger
         self.distributions_dir            = Path(run_directory) / "images" / "distributions"
         self.plotter                      = HistogramPlotter(logger, fig_dpi=fig_dpi, save_dpi=save_dpi)
+        self.coverage                     = []
 
     def _setup_output_dirs(self) -> Dict[str, Path]:
         """Creates and returns the per-family figure directories keyed by family name."""
@@ -255,11 +264,10 @@ class StackDistributionAnalyzer:
         """Summarises the amplitude and phase of the primary and every secondary SLC.
 
         Args:
-            primary_path: Path of the primary SLC of shape (azimuth, range).
-            secondaries_path: Path of the secondary SLCs of shape (track, azimuth, range).
-            pass_labels: Track labels in acquisition order, primary first, or None to
-                fall back on positional labels.
-            out_dir: Directory receiving the SLC figures.
+            primary_path     : Path of the primary SLC of shape (azimuth, range).
+            secondaries_path : Path of the secondary SLCs of shape (track, azimuth, range).
+            pass_labels      : Track labels in acquisition order, primary first, or None to fall back on positional labels.
+            out_dir          : Directory receiving the SLC figures.
 
         Returns:
             Tuple of the per-pass entries keyed by label and the primary pass label.
@@ -295,11 +303,10 @@ class StackDistributionAnalyzer:
         """Summarises the amplitude and phase of every interferogram.
 
         Args:
-            interferograms_path: Path of the interferogram cube of shape
-                (track, azimuth, range).
-            pass_labels: Track labels in acquisition order, primary first, or None.
-            primary_label: Label of the reference pass, recorded on every entry.
-            out_dir: Directory receiving the interferogram figures.
+            interferograms_path : Path of the interferogram cube of shape (track, azimuth, range).
+            pass_labels         : Track labels in acquisition order, primary first, or None.
+            primary_label       : Label of the reference pass, recorded on every entry.
+            out_dir             : Directory receiving the interferogram figures.
 
         Returns:
             Per-interferogram entries keyed by the secondary pass label.
@@ -326,8 +333,8 @@ class StackDistributionAnalyzer:
         """Summarises the DEM height field.
 
         Args:
-            dem_path: Path of the DEM of shape (azimuth, range), in metres.
-            out_dir: Directory receiving the DEM figure.
+            dem_path : Path of the DEM of shape (azimuth, range), in metres.
+            out_dir  : Directory receiving the DEM figure.
 
         Returns:
             Dict with the "height" distribution result.
@@ -346,11 +353,11 @@ class StackDistributionAnalyzer:
         """Summarises the amplitude and phase of one complex field.
 
         Args:
-            field: Complex field of shape (azimuth, range).
-            label: Pass or pass-pair label shown in the figure titles.
-            kind: Field family shown in the figure titles, e.g. "Primary SLC".
-            stem: Filename stem of the two written figures.
-            out_dir: Directory receiving the figures.
+            field   : Complex field of shape (azimuth, range).
+            label   : Pass or pass-pair label shown in the figure titles.
+            kind    : Field family shown in the figure titles, e.g. "Primary SLC".
+            stem    : Filename stem of the two written figures.
+            out_dir : Directory receiving the figures.
 
         Returns:
             Dict with the "amplitude" result on a log scale and the "phase" result in
@@ -365,16 +372,16 @@ class StackDistributionAnalyzer:
         return {"amplitude": amplitude_result, "phase": phase_result}
 
     def _field_distribution(self, values: np.ndarray, scale: str, title: str, x_label: str, out_path: Path, value_range: Optional[Tuple[float, float]] = None, phase_ticks: bool = False) -> Dict[str, object]:
-        """Computes one field's distribution and writes its histogram figure.
+        """Computes one field's distribution, writes its histogram figure and records its coverage.
 
         Args:
-            values: Scalar field of shape (azimuth, range).
-            scale: Histogram binning, "linear" or "log".
-            title: Figure title.
-            x_label: Abscissa label, including units.
-            out_path: Path the figure is written to.
-            value_range: Explicit (low, high) binning range, or None.
-            phase_ticks: Whether to label the abscissa in radians over [-pi, pi].
+            values      : Scalar field of shape (azimuth, range).
+            scale       : Histogram binning, "linear" or "log".
+            title       : Figure title.
+            x_label     : Abscissa label, including units.
+            out_path    : Path the figure is written to.
+            value_range : Explicit (low, high) binning range, or None.
+            phase_ticks : Whether to label the abscissa in radians over [-pi, pi].
 
         Returns:
             Dict with the "statistics" and "histogram" sub-dicts.
@@ -383,6 +390,13 @@ class StackDistributionAnalyzer:
 
         self.plotter.plot(result["histogram"], result["statistics"], title, x_label, out_path, phase_ticks=phase_ticks)
 
+        self.coverage.append({
+            "Field"      : title,
+            "Values"     : int(values.size),
+            "Non-finite" : result["statistics"]["n_nonfinite"],
+            "Not binned" : result["histogram"]["n_excluded"],
+        })
+
         return result
 
     def _write_json(self, payload: Dict[str, object]) -> Path:
@@ -390,15 +404,29 @@ class StackDistributionAnalyzer:
         path = self.distributions_dir / self.JSON_FILENAME
         return FileIO.save_json(payload, path)
 
+    def _report_coverage(self) -> None:
+        """Tables every field holding non-finite values or values outside its bins and warns with their counts."""
+        affected = [record for record in self.coverage if record["Non-finite"] > 0 or record["Not binned"] > 0]
+
+        if not affected:
+            self.logger.subsection(f"All {len(self.coverage)} fields are finite and fully binned")
+            return
+
+        nonfinite_fields = sum(1 for record in affected if record["Non-finite"] > 0)
+        unbinned_fields  = sum(1 for record in affected if record["Not binned"] > 0)
+
+        self.logger.metrics_table(affected, columns=["Field", "Values", "Non-finite", "Not binned"], title="Fields with non-finite or unbinned values")
+        self.logger.warning(f"{nonfinite_fields} of {len(self.coverage)} fields hold non-finite values and {unbinned_fields} histograms leave finite values out of their bins (zero amplitudes on a log axis, such as zero-filled scene margins, or phases that float32 rounding puts just past +-pi); the statistics count the unbinned values, the bars do not")
+
     def run(self, primary_path: Path, secondaries_path: Path, interferograms_path: Path, dem_path: Path, pass_labels: Optional[List[str]] = None) -> Dict[str, Path]:
         """Summarises every field of the stack and writes the figures and JSON payload.
 
         Args:
-            primary_path: Path of the primary SLC of shape (azimuth, range).
-            secondaries_path: Path of the secondary SLCs of shape (track, azimuth, range).
-            interferograms_path: Path of the interferograms of shape (track, azimuth, range).
-            dem_path: Path of the DEM of shape (azimuth, range), in metres.
-            pass_labels: Track labels in acquisition order, primary first, or None.
+            primary_path        : Path of the primary SLC of shape (azimuth, range).
+            secondaries_path    : Path of the secondary SLCs of shape (track, azimuth, range).
+            interferograms_path : Path of the interferograms of shape (track, azimuth, range).
+            dem_path            : Path of the DEM of shape (azimuth, range), in metres.
+            pass_labels         : Track labels in acquisition order, primary first, or None.
 
         Returns:
             Dict with the JSON payload path and the distributions directory.
@@ -423,6 +451,8 @@ class StackDistributionAnalyzer:
 
         json_path = self._write_json(payload)
         self.logger.subsection(f"Wrote value distributions → {json_path}")
+
+        self._report_coverage()
 
         return {
             "value_distributions_json" : json_path,

@@ -20,7 +20,7 @@ class TrackReader:
         """Stores the reader used for track files.
 
         Args:
-            reader: Callable mapping a path string to an array, or None for the STEtools reader.
+            reader : Callable mapping a path string to an array, or None for the STEtools reader.
         """
         self._reader = reader
 
@@ -28,14 +28,14 @@ class TrackReader:
         """Reads one track file and checks it carries the expected position rows.
 
         Args:
-            path: Path of the track file.
+            path : Path of the track file.
 
         Returns:
             Raw track array of shape (>= 4, n_azimuth); rows 2 and 3 hold the
             horizontal and vertical positions in metres.
 
         Raises:
-            ValueError: If the file is not 2-dimensional or has too few rows.
+            ValueError : If the file is not 2-dimensional or has too few rows.
         """
         reader = self._reader if self._reader is not None else self._default_reader()
         data   = np.asarray(reader(str(path)))
@@ -100,15 +100,15 @@ class PassProductResolver:
         """Resolves the product file of one pass directory.
 
         Args:
-            pass_directory: Directory of the acquisition pass.
-            polarisation: Two-letter polarisation code used to disambiguate candidates.
+            pass_directory : Directory of the acquisition pass.
+            polarisation   : Two-letter polarisation code used to disambiguate candidates.
 
         Returns:
             Path of the selected product file.
 
         Raises:
-            FileNotFoundError: If no file matches the configured patterns.
-            ValueError: If no single candidate can be selected.
+            FileNotFoundError : If no file matches the configured patterns.
+            ValueError        : If no single candidate can be selected.
         """
         directory = Path(pass_directory) / self.PRODUCT_SUBDIR
 
@@ -119,18 +119,49 @@ class PassProductResolver:
 
         raise FileNotFoundError(f"No file matching {self.PRODUCT_PATTERNS} under {directory}")
 
+    def polarisations(self, pass_directory: str | Path) -> dict:
+        """Lists the product files of one pass directory by polarisation.
+
+        Args:
+            pass_directory : Directory of the acquisition pass.
+
+        Returns:
+            Mapping of lower-case two-letter polarisation code to product path, from the first pattern that matches any file.
+
+        Raises:
+            FileNotFoundError : If no file matches the configured patterns.
+            ValueError        : If a file name carries no polarisation or two files carry the same one.
+        """
+        directory = Path(pass_directory) / self.PRODUCT_SUBDIR
+
+        for pattern in self.PRODUCT_PATTERNS:
+            candidates = sorted(directory.glob(pattern))
+            if not candidates:
+                continue
+
+            mapping = {}
+            for candidate in candidates:
+                polarisation = self._polarisation_of(candidate)
+                if polarisation in mapping:
+                    raise ValueError(f"Both {mapping[polarisation].name} and {candidate.name} under {directory} carry polarisation '{polarisation}'; the product cannot be told apart by polarisation.")
+                mapping[polarisation] = candidate
+
+            return mapping
+
+        raise FileNotFoundError(f"No file matching {self.PRODUCT_PATTERNS} under {directory}")
+
     def resolve_passes(self, pass_directories: list, polarisation: str) -> dict:
         """Resolves one product file per pass directory, keyed by pass label.
 
         Args:
-            pass_directories: Directories of the acquisition passes, reference first.
-            polarisation: Two-letter polarisation code used to disambiguate candidates.
+            pass_directories : Directories of the acquisition passes, reference first.
+            polarisation     : Two-letter polarisation code used to disambiguate candidates.
 
         Returns:
             Mapping of pass label to resolved product path, in input order.
 
         Raises:
-            ValueError: If two pass directories resolve to the same label.
+            ValueError : If two pass directories resolve to the same label.
         """
         mapping = {}
 

@@ -3,7 +3,9 @@
 Loads the primary and secondary SLCs, removes the DEM-induced phase ramp from each
 secondary, and writes the primary, the secondary stack and the flattened
 interferograms alongside the extracted track baselines, profiles and acquisition
-parameters.
+parameters. Every secondary pass is audited for the samples the amplitude ceiling
+clips and for its zero and non-finite samples, so the stage result records how much
+of each interferogram's amplitude saturated.
 """
 
 from __future__ import annotations
@@ -24,32 +26,134 @@ from tools.monitoring.logger              import Logger
 from tools.data.regions                   import CropRegion
 from pipelines.processing.generation.base import GeneratorBase
 from tools.baselines                      import BaselineExtractor, TrackBaselines, TrackProfiles
-from tools.sar                            import TrackParameterCollector, TrackParameters
+from tools.sar.track_parameters            import TrackParameterCollector, TrackParameters
+
+
+class SecondaryAmplitudeAudit:
+    """Counts, per secondary pass, the samples the amplitude ceiling clips and the zero and non-finite samples.
+
+    The interferograms carry the secondary amplitude clipped at an absolute
+    ceiling in linear units, so the clipped share of a pass is the share of its
+    interferogram amplitude that saturated. Zero samples, which zero-filled scene
+    margins hold, become zero interferogram samples; non-finite samples pass into
+    the interferograms unchanged.
+
+    Attributes:
+        CLIPPED_WARN_FRACTION : Clipped share of a pass above which a warning is logged.
+        clip                  : Absolute ceiling on the secondary SLC amplitude, linear units.
+        passes                : One count record per secondary pass in acquisition order, with pass, samples, clipped, zero and nonfinite.
+    """
+
+    CLIPPED_WARN_FRACTION = 0.01
+
+    def __init__(self, clip: float) -> None:
+        """Starts an empty audit for one amplitude ceiling.
+
+        Args:
+            clip : Absolute ceiling on the secondary SLC amplitude, linear units.
+        """
+        self.clip   = float(clip)
+        self.passes = []
+
+    def add_pass(self, label: str, amplitude: np.ndarray) -> None:
+        """Accounts one secondary pass.
+
+        Args:
+            label     : Pass label of the secondary.
+            amplitude : Unclipped secondary SLC amplitude of shape (azimuth, range), linear units.
+        """
+        self.passes.append({
+            "pass"      : str(label),
+            "samples"   : int(amplitude.size),
+            "clipped"   : int(np.count_nonzero(amplitude > self.clip)),
+            "zero"      : int(np.count_nonzero(amplitude == 0)),
+            "nonfinite" : int(np.count_nonzero(~np.isfinite(amplitude))),
+        })
+
+    def summary(self) -> dict:
+        """Returns the ceiling and the per-pass counts as a JSON-ready mapping."""
+        return {"clip": self.clip, "passes": list(self.passes)}
+
+    @staticmethod
+    def fraction(record: dict, key: str) -> float:
+        """Returns the share of a pass's samples counted under one key, or 0 for an empty pass."""
+        return record[key] / record["samples"] if record["samples"] else 0.0
+
+    @classmethod
+    def describe(cls, content: dict) -> dict[str, str]:
+        """Returns the text metadata entries of an audit summary, as written into meta_inputs.txt.
+
+        Args:
+            content : Summary as returned by ``summary``.
+
+        Returns:
+            Mapping from metadata key to its string value, one entry per secondary pass after the ceiling.
+        """
+        entries = {"amplitude_clip": f"{content['clip']:g}"}
+
+        for record in content["passes"]:
+            entries[f"secondary_{record['pass']}"] = f"clipped {cls.fraction(record, 'clipped'):.4%}, zero {cls.fraction(record, 'zero'):.4%}, nonfinite {record['nonfinite']} of {record['samples']}"
+
+        return entries
+
+    @classmethod
+    def log_summary(cls, content: dict, logger: Logger) -> None:
+        """Prints the per-pass table and warns about every pass clipped above the threshold or holding non-finite samples.
+
+        Args:
+            content : Summary as returned by ``summary``, read back from the stage result when called in the parent process.
+            logger  : Logger the table and the warnings go to.
+        """
+        rows = [
+            {
+                "Pass"       : record["pass"],
+                "Clipped %"  : f"{100.0 * cls.fraction(record, 'clipped'):.4f}",
+                "Zero %"     : f"{100.0 * cls.fraction(record, 'zero'):.4f}",
+                "Non-finite" : record["nonfinite"],
+            }
+            for record in content["passes"]
+        ]
+        logger.metrics_table(rows, columns=["Pass", "Clipped %", "Zero %", "Non-finite"], title=f"Secondary amplitude (clip {content['clip']:g})")
+
+        for record in content["passes"]:
+            clipped_fraction = cls.fraction(record, "clipped")
+
+            if clipped_fraction > cls.CLIPPED_WARN_FRACTION:
+                logger.warning(f"Secondary {record['pass']}: {clipped_fraction:.2%} of its amplitude samples exceed the ceiling {content['clip']:g} and saturate in the interferograms; the ceiling is absolute, so check it against this campaign's amplitude scale")
+
+            if record["nonfinite"] > 0:
+                logger.warning(f"Secondary {record['pass']}: {record['nonfinite']} of {record['samples']} samples are non-finite and pass into the interferograms unchanged")
 
 
 class InterferogramProcessor:
     """Assembles the flattened interferometric stack for one F-SAR crop.
 
     Attributes:
-        config: Processing configuration naming the F-SAR project, crop and paths.
-        logger: Logger for the stage report.
-        track_baselines: Baseline table of the loaded passes, or None before ``build``.
-        track_profiles: Per-azimuth baseline profiles, or None before ``build``.
-        track_parameters: Acquisition parameters of the loaded passes, or None before ``build``.
+        config              : Processing configuration naming the F-SAR project, crop and paths.
+        logger              : Logger for the stage report.
+        track_baselines     : Baseline table of the loaded passes, or None before ``build``.
+        track_profiles      : Per-azimuth baseline profiles, or None before ``build``.
+        track_parameters    : Acquisition parameters of the loaded passes, or None before ``build``.
+        secondary_amplitude : Summary of the per-pass amplitude audit, or None before ``build``.
+        project_options     : Raw Options string of the F-SAR project row, or None before ``build``.
+        inf_suffix          : Coregistration suffix selecting the INF-SLC and phadem products, empty when the row declares none, or None before ``build``.
     """
 
     def __init__(self, config: ProcessingConfig, logger: Logger) -> None:
         """Configures the processor and puts the PyRat root on ``sys.path``.
 
         Args:
-            config: Processing configuration for this stack.
-            logger: Logger for initialization and stage output.
+            config : Processing configuration for this stack.
+            logger : Logger for initialization and stage output.
         """
         self.config           = config
         self.logger           = logger
-        self.track_baselines  = None
-        self.track_profiles   = None
-        self.track_parameters = None
+        self.track_baselines     = None
+        self.track_profiles      = None
+        self.track_parameters    = None
+        self.secondary_amplitude = None
+        self.project_options     = None
+        self.inf_suffix          = None
 
         self.logger.section("[InterferogramProcessor Initialization]")
         self.logger.subsection(f"Dataset Type  : {self.config.dataset_type}")
@@ -61,7 +165,7 @@ class InterferogramProcessor:
         """Builds the stack from an F-SAR project and records its track metadata.
 
         Args:
-            crop_tuple: Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
+            crop_tuple : Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
 
         Returns:
             Tuple of the primary SLC of shape (azimuth, range), the secondary stack of
@@ -94,7 +198,7 @@ class InterferogramProcessor:
         self.track_baselines, self.track_profiles = self._extract_baselines(pass_directories, crop_tuple, tomogram_config.polarisation)
         self.track_parameters                     = self._extract_parameters(pass_directories, tomogram_config.polarisation)
 
-        primary, secondaries, interferograms = self._compute_interferograms(tomography_object)
+        primary, secondaries, interferograms = self._compute_interferograms(tomography_object, self.track_baselines.labels[1:])
         self.logger.subsection(f"FSAR stack built — primary: {primary.shape}, secondaries: {secondaries.shape}, interferograms: {interferograms.shape}")
         return primary, secondaries, interferograms
 
@@ -102,9 +206,9 @@ class InterferogramProcessor:
         """Extracts the baseline table and per-azimuth baseline profiles of the passes.
 
         Args:
-            pass_directories: Pass directories, primary first, then the secondaries.
-            crop_tuple: Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
-            polarisation: Polarisation channel the baselines are read for.
+            pass_directories : Pass directories, primary first, then the secondaries.
+            crop_tuple       : Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
+            polarisation     : Polarisation channel the baselines are read for.
 
         Returns:
             Tuple of the baseline table and the per-azimuth baseline profiles.
@@ -120,8 +224,8 @@ class InterferogramProcessor:
         """Collects the acquisition parameters of the loaded passes.
 
         Args:
-            pass_directories: Pass directories, primary first, then the secondaries.
-            polarisation: Polarisation channel the parameters are read for.
+            pass_directories : Pass directories, primary first, then the secondaries.
+            polarisation     : Polarisation channel the parameters are read for.
 
         Returns:
             Acquisition parameters (wavelength, incidence, ranges) of every pass.
@@ -131,14 +235,17 @@ class InterferogramProcessor:
         self.logger.kv_table(parameters.describe(), title="Track Parameters")
         return parameters
 
-    def _compute_interferograms(self, tomography_object) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Loads every SLC and forms the DEM-flattened interferograms.
+    def _compute_interferograms(self, tomography_object, secondary_labels: list) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Loads every SLC, forms the DEM-flattened interferograms and audits the secondary amplitudes.
 
         Each interferogram carries the clipped secondary amplitude and the phase of the
-        primary against the DEM-deramped secondary.
+        primary against the DEM-deramped secondary. The per-pass counts of clipped,
+        zero and non-finite secondary samples are logged and kept in
+        ``secondary_amplitude``.
 
         Args:
-            tomography_object: PyRat ``FuSARtomo`` object naming the primary and secondaries.
+            tomography_object : PyRat ``FuSARtomo`` object naming the primary and secondaries.
+            secondary_labels  : Pass labels of the secondaries, in the order of ``tomography_object.slaves``.
 
         Returns:
             Tuple of the primary SLC of shape (azimuth, range), the secondary stack of
@@ -148,13 +255,7 @@ class InterferogramProcessor:
         import pyrat as pyrat_module
         from pyrat import getdata
 
-        raw_options  = tomography_object.project.get("options", "")
-        options_list = [opt.split("=") for opt in raw_options.split(",") if opt]
-        options      = {opt[0].lower().strip(): True if len(opt) == 1 else opt[1].strip() for opt in options_list}
-        suffix       = options.get("suffix", "")
-
-        if not suffix:
-            self.logger.subsection("[FSAR] Project options declare no 'suffix' entry — loading INF products without a coregistration suffix")
+        suffix = self._resolve_project_options(tomography_object)
 
         self.logger.subsection("[FSAR] Loading primary SLC")
         primary_slc = getdata(
@@ -173,6 +274,7 @@ class InterferogramProcessor:
 
         secondaries    = np.empty((n_secondaries,) + primary.shape, dtype=np.complex64)
         interferograms = np.empty((n_secondaries,) + primary.shape, dtype=np.complex64)
+        audit          = SecondaryAmplitudeAudit(self.config.tomogram_config.max_amplitude_clip)
 
         for secondary_index, secondary in enumerate(tomography_object.slaves):
             self.logger.subsection(f"[FSAR] Loading secondary SLC {secondary_index + 1}/{n_secondaries}: {secondary}")
@@ -200,22 +302,59 @@ class InterferogramProcessor:
 
             secondaries[secondary_index] = secondary_slc
 
-            secondary_amplitude = np.clip(np.abs(secondary_slc), 0.0, self.config.tomogram_config.max_amplitude_clip)
+            amplitude = np.abs(secondary_slc)
+            audit.add_pass(secondary_labels[secondary_index], amplitude)
+
+            secondary_amplitude = np.clip(amplitude, 0.0, audit.clip)
             phasor              = self._compute_phasor(primary_slc, secondary_slc, dem_phase)
 
             interferograms[secondary_index] = secondary_amplitude * phasor
 
-            del secondary_slc, dem_phase, phasor, secondary_amplitude
+            del secondary_slc, dem_phase, phasor, amplitude, secondary_amplitude
+
+        self.secondary_amplitude = audit.summary()
+        SecondaryAmplitudeAudit.log_summary(self.secondary_amplitude, self.logger)
 
         return primary, secondaries, interferograms
+
+    def _resolve_project_options(self, tomography_object) -> str:
+        """Parses the Options column of the F-SAR project row, logs it and returns the INF coregistration suffix.
+
+        The suffix selects which coregistered INF-SLC and phadem products feed the
+        secondaries and the DEM phase, and the project CSV lives outside the run,
+        so the raw options and the resolved suffix are logged and kept in
+        ``project_options`` and ``inf_suffix`` for the stage result.
+
+        Args:
+            tomography_object : PyRat ``FuSARtomo`` object whose ``project`` mapping holds the project row.
+
+        Returns:
+            The suffix named by the row's options, or an empty string when the row declares none.
+        """
+        raw_options  = tomography_object.project.get("options", "")
+        options_list = [opt.split("=") for opt in raw_options.split(",") if opt]
+        options      = {opt[0].lower().strip(): True if len(opt) == 1 else opt[1].strip() for opt in options_list}
+        suffix       = options.get("suffix", "")
+
+        self.project_options = raw_options
+        self.inf_suffix      = suffix
+
+        self.logger.kv_table({
+            "Options"      : raw_options if raw_options else "(empty)",
+            "INF suffix"   : suffix if suffix else "(none: INF products load without a coregistration suffix)",
+            "Bands"        : str(tomography_object.band),
+            "Polarisation" : str(tomography_object.polarisation),
+        }, title="FSAR project row")
+
+        return suffix
 
     def _compute_phasor(self, primary_slc: np.ndarray, secondary_slc: np.ndarray, dem_phase: np.ndarray) -> np.ndarray:
         """Returns the unit-modulus DEM-flattened interferometric phasor.
 
         Args:
-            primary_slc: Primary SLC of shape (azimuth, range), complex.
-            secondary_slc: Secondary SLC of the same shape, complex.
-            dem_phase: DEM-induced phase of the same shape, in radians.
+            primary_slc   : Primary SLC of shape (azimuth, range), complex.
+            secondary_slc : Secondary SLC of the same shape, complex.
+            dem_phase     : DEM-induced phase of the same shape, in radians.
 
         Returns:
             Complex phasor of shape (azimuth, range) with unit magnitude, carrying the
@@ -231,7 +370,7 @@ class InterferogramProcessor:
         """Builds the interferometric stack for the requested crop.
 
         Args:
-            crop_tuple: Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
+            crop_tuple : Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
 
         Returns:
             Tuple of the primary SLC of shape (azimuth, range), the secondary stack of
@@ -239,7 +378,7 @@ class InterferogramProcessor:
             same shape.
 
         Raises:
-            NotImplementedError: If the configured dataset type is not ``FSAR``.
+            NotImplementedError : If the configured dataset type is not ``FSAR``.
         """
         self.logger.section(f"[Building Stack] Crop parameters: {crop_tuple}")
 
@@ -262,10 +401,10 @@ class InterferogramProcessor:
         """Builds the stack and saves the three arrays as .npy files.
 
         Args:
-            crop_tuple: Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
-            primary_path: Destination .npy path for the primary SLC.
-            secondaries_path: Destination .npy path for the secondary stack.
-            interferograms_path: Destination .npy path for the flattened interferograms.
+            crop_tuple          : Crop as (azimuth_start, azimuth_end, range_start, range_end) in pixels.
+            primary_path        : Destination .npy path for the primary SLC.
+            secondaries_path    : Destination .npy path for the secondary stack.
+            interferograms_path : Destination .npy path for the flattened interferograms.
 
         Returns:
             Tuple of the primary, secondary and interferogram array shapes.
@@ -274,13 +413,14 @@ class InterferogramProcessor:
 
         FileIO.ensure_dirs(primary_path.parent, secondaries_path.parent, interferograms_path.parent)
 
-        np.save(str(primary_path),        primary,        allow_pickle=False)
-        np.save(str(secondaries_path),    secondaries,    allow_pickle=False)
-        np.save(str(interferograms_path), interferograms, allow_pickle=False)
+        with self.logger.timer("Saving interferometric stack"):
+            np.save(str(primary_path),        primary,        allow_pickle=False)
+            np.save(str(secondaries_path),    secondaries,    allow_pickle=False)
+            np.save(str(interferograms_path), interferograms, allow_pickle=False)
 
-        self.logger.subsection(f"Primary saved        : {primary_path}        (shape: {primary.shape})")
-        self.logger.subsection(f"Secondaries saved    : {secondaries_path}    (shape: {secondaries.shape})")
-        self.logger.subsection(f"Interferograms saved : {interferograms_path} (shape: {interferograms.shape})")
+        self.logger.subsection(f"Primary saved        : {primary_path}        (shape: {primary.shape}, {primary.nbytes / 1e9:.2f} GB)")
+        self.logger.subsection(f"Secondaries saved    : {secondaries_path}    (shape: {secondaries.shape}, {secondaries.nbytes / 1e9:.2f} GB)")
+        self.logger.subsection(f"Interferograms saved : {interferograms_path} (shape: {interferograms.shape}, {interferograms.nbytes / 1e9:.2f} GB)")
 
         shapes = tuple(primary.shape), tuple(secondaries.shape), tuple(interferograms.shape)
         del primary, secondaries, interferograms
@@ -338,6 +478,10 @@ class InterferogramGenerator(GeneratorBase):
             "secondaries_shape"    : list(secondaries_shape),
             "interferograms_shape" : list(interferograms_shape),
             "pass_labels"          : pass_labels,
+            "secondary_amplitude"  : processor.secondary_amplitude,
+            "project_options"      : processor.project_options,
+            "inf_suffix"           : processor.inf_suffix,
+            "provenance"           : self.provenance(),
         }
 
         FileIO.save_json(result, Path(self.spec["result_path"]))

@@ -24,19 +24,21 @@ class PlotBase:
     """Base class carrying the project's figure style and plotting helpers.
 
     Attributes:
-        PHASE_TICKS: Radian tick positions spanning one phase cycle.
-        PHASE_LABELS: LaTeX labels matching PHASE_TICKS.
-        FULL_WIDTH: Full text-column figure width in inches.
-        HALF_WIDTH: Half text-column figure width in inches.
-        OKABE_ITO: Colour-blind-safe categorical palette used in paper style.
-        SCIENTIFIC_RC: rcParams shared by both styles.
-        REPORT_RC: Larger-type rcParams for screen reports.
-        PAPER_RC: Smaller-type rcParams for camera-ready figures.
-        STYLE_RC: Style name to rcParams mapping.
-        PAPER_DPI: Raster resolution used in paper style.
-        style: Active style name, shared across all subclasses.
-        fig_dpi: Display resolution used in report style.
-        save_dpi: Save resolution used in report style.
+        PHASE_TICKS   : Radian tick positions spanning one phase cycle.
+        PHASE_LABELS  : LaTeX labels matching PHASE_TICKS.
+        FULL_WIDTH    : Full text-column figure width in inches.
+        HALF_WIDTH    : Half text-column figure width in inches.
+        OKABE_ITO     : Colour-blind-safe categorical palette used in the paper and slide styles.
+        SCIENTIFIC_RC : rcParams shared by every style.
+        REPORT_RC     : Larger-type rcParams for screen reports.
+        PAPER_RC      : Smaller-type rcParams for camera-ready figures.
+        SLIDE_RC      : Paper-style rcParams for figures drawn at the exact size they print on a slide, saved without trimming.
+        STYLE_RC      : Style name to rcParams mapping.
+        PRINT_STYLES  : Styles that save at PAPER_DPI and write figures holding no image as vector PDF.
+        PAPER_DPI     : Raster resolution used in the paper and slide styles.
+        style         : Active style name, shared across all subclasses.
+        fig_dpi       : Display resolution used in report style.
+        save_dpi      : Save resolution used in report style.
     """
 
     PHASE_TICKS  = [-np.pi, -np.pi / 2, 0.0, np.pi / 2, np.pi]
@@ -49,7 +51,7 @@ class PlotBase:
 
     SCIENTIFIC_RC: dict = {
         "font.family"         : "serif",
-        "font.serif"          : ["Times New Roman", "DejaVu Serif"],
+        "font.serif"          : ["Times New Roman", "STIXGeneral", "DejaVu Serif"],
         "axes.linewidth"      : 0.8,
         "xtick.direction"     : "in",
         "ytick.direction"     : "in",
@@ -87,7 +89,38 @@ class PlotBase:
         "lines.markersize" : 4.0,
     }
 
-    STYLE_RC = {"report": REPORT_RC, "paper": PAPER_RC}
+    SLIDE_RC: dict = {
+        "font.size"                       : 7,
+        "axes.titlesize"                  : 7,
+        "axes.labelsize"                  : 7,
+        "xtick.labelsize"                 : 6,
+        "ytick.labelsize"                 : 6,
+        "legend.fontsize"                 : 6,
+        "mathtext.fontset"                : "stix",
+        "axes.linewidth"                  : 0.6,
+        "xtick.major.width"               : 0.6,
+        "ytick.major.width"               : 0.6,
+        "xtick.minor.width"               : 0.4,
+        "ytick.minor.width"               : 0.4,
+        "xtick.major.size"                : 2.5,
+        "ytick.major.size"                : 2.5,
+        "xtick.minor.size"                : 1.5,
+        "ytick.minor.size"                : 1.5,
+        "xtick.major.pad"                 : 2.0,
+        "ytick.major.pad"                 : 2.0,
+        "axes.labelpad"                   : 2.0,
+        "lines.linewidth"                 : 0.9,
+        "lines.markersize"                : 2.5,
+        "legend.handlelength"             : 1.6,
+        "figure.constrained_layout.use"   : True,
+        "figure.constrained_layout.w_pad" : 0.02,
+        "figure.constrained_layout.h_pad" : 0.02,
+        "savefig.bbox"                    : "standard",
+    }
+
+    STYLE_RC = {"report": REPORT_RC, "paper": PAPER_RC, "slide": SLIDE_RC}
+
+    PRINT_STYLES = ("paper", "slide")
 
     PAPER_DPI: int = 300
 
@@ -101,10 +134,10 @@ class PlotBase:
         """Selects the figure style used by every plotter.
 
         Args:
-            style: Either 'report' or 'paper'.
+            style : One of 'report', 'paper' or 'slide'.
 
         Raises:
-            ValueError: If the style name is not registered.
+            ValueError : If the style name is not registered.
         """
         if style not in PlotBase.STYLE_RC:
             raise ValueError(f"unknown figure style '{style}', expected one of {sorted(PlotBase.STYLE_RC)}")
@@ -120,7 +153,7 @@ class PlotBase:
         plt.rcParams.update(self.SCIENTIFIC_RC)
         plt.rcParams.update(self.STYLE_RC[PlotBase.style])
 
-        if PlotBase.style == "paper":
+        if PlotBase.style in self.PRINT_STYLES:
             plt.rcParams["axes.prop_cycle"] = plt.cycler(color=self.OKABE_ITO)
             plt.rcParams["figure.dpi"]      = self.PAPER_DPI
             plt.rcParams["savefig.dpi"]     = self.PAPER_DPI
@@ -133,17 +166,17 @@ class PlotBase:
     def _save(fig: plt.Figure, path: Path) -> Path:
         """Saves and closes a figure, returning the path actually written.
 
-        In paper style a raster target holding no images is redirected to PDF so
-        vector content stays vector.
+        In the paper and slide styles a raster target holding no images is
+        redirected to PDF so vector content stays vector.
 
         Args:
-            fig: Figure to write and close.
-            path: Requested output path.
+            fig  : Figure to write and close.
+            path : Requested output path.
 
         Returns:
             The path the figure was written to.
         """
-        if PlotBase.style == "paper" and path.suffix == ".png" and not any(ax.images for ax in fig.axes):
+        if PlotBase.style in PlotBase.PRINT_STYLES and path.suffix == ".png" and not any(ax.images for ax in fig.axes):
             path = path.with_suffix(".pdf")
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,19 +185,103 @@ class PlotBase:
         return path
 
     @staticmethod
+    def _lattice_step(sample: np.ndarray, max_multiple: int = 8, share: float = 0.5) -> float:
+        """Returns the coarsest value spacing that carries most of a sample's mass.
+
+        Parameters read off a discrete height axis take only multiples of that axis'
+        step, and a sample can mix several such lattices: a quantity built from one
+        grid value alone sits on the base step, one built from a sum of several sits
+        on a multiple of it. The base spacing is the smallest gap between distinct
+        values, and the returned step is the largest multiple of it that at least
+        ``share`` of the values still lie on.
+
+        Args:
+            sample       : Values to inspect, of any shape, assumed finite.
+            max_multiple : Largest multiple of the base spacing considered.
+            share        : Fraction of values that must sit on a multiple for it to be accepted.
+
+        Returns:
+            The spacing in the sample's own units, or zero when the values are continuous.
+        """
+        flat  = np.asarray(sample, dtype=float).reshape(-1)
+        scale = float(np.abs(flat).max()) if flat.size else 0.0
+
+        if scale <= 0.0:
+            return 0.0
+
+        gaps = np.diff(np.unique(flat))
+        gaps = gaps[gaps > 1e-6 * scale]
+
+        if gaps.size == 0:
+            return 0.0
+
+        base = float(gaps.min())
+        step = base
+
+        for multiple in range(2, max_multiple + 1):
+            candidate = base * multiple
+            quotient  = flat / candidate
+
+            if float(np.mean(np.abs(quotient - np.round(quotient)) < 1e-6)) >= share:
+                step = candidate
+
+        return step
+
+    @staticmethod
+    def _quantised_bins(sample: np.ndarray, target_bins: int = 64, span: Tuple[float, float] = (0.5, 99.5)) -> np.ndarray:
+        """Returns histogram edges aligned to the value grid the sample lives on.
+
+        Parameters read off a discrete height axis take only multiples of that axis'
+        step, so bin edges that are not a whole number of steps wide catch alternating
+        numbers of grid values and comb the histogram. The spacing is measured by
+        :meth:`_lattice_step`, the bin width is raised to a multiple of it, and the
+        first edge is offset half a step so every bin spans the same number of grid
+        values. A continuous sample reports no spacing and keeps plain equal-width bins.
+
+        Args:
+            sample      : Values to be histogrammed, of any shape, assumed finite.
+            target_bins : Bin count aimed for before the width is snapped to the grid.
+            span        : Percentiles the edges cover, trimming the heavy tails.
+
+        Returns:
+            Monotonic bin edges of shape (n_bins + 1,).
+
+        Raises:
+            ValueError : If the sample holds no values.
+        """
+        flat = np.asarray(sample).reshape(-1)
+
+        if flat.size == 0:
+            raise ValueError("_quantised_bins received an empty sample; cannot derive bin edges")
+
+        low, high = (float(value) for value in np.percentile(flat, span))
+
+        if not high > low:
+            return np.linspace(low, low + 1.0, target_bins + 1)
+
+        width = (high - low) / target_bins
+        step  = PlotBase._lattice_step(flat[(flat >= low) & (flat <= high)])
+
+        if step > 0.0 and step > 1e-3 * (high - low):
+            width = max(int(np.ceil(width / step)), 1) * step
+            low   = np.floor(low / step) * step - 0.5 * step
+
+        return np.arange(low, high + width, width)
+
+    @staticmethod
     def _shared_clim(*arrays: np.ndarray, q_low: float = 1.0, q_high: float = 99.0) -> Tuple[float, float]:
         """Returns a percentile colour range shared by several arrays.
 
         Args:
-            *arrays: Arrays of any shape, pooled after flattening.
-            q_low: Lower percentile mapped to vmin.
-            q_high: Upper percentile mapped to vmax.
+            *arrays : Arrays of any shape, pooled after flattening.
+            q_low   : Lower percentile mapped to vmin.
+            q_high  : Upper percentile mapped to vmax.
 
         Returns:
             Tuple of (vmin, vmax).
 
         Raises:
-            ValueError: If no finite values are present.
+            ValueError : If no finite values are present.
         """
         flat = np.concatenate([a.reshape(-1) for a in arrays])
         flat = flat[np.isfinite(flat)]
@@ -177,13 +294,13 @@ class PlotBase:
         """Returns the project's amplitude colour range, zero to three times the mean.
 
         Args:
-            *arrays: Amplitude arrays of any shape, pooled after flattening.
+            *arrays : Amplitude arrays of any shape, pooled after flattening.
 
         Returns:
             Tuple of (0.0, 3 * mean amplitude).
 
         Raises:
-            ValueError: If no finite values are present or the mean is not positive.
+            ValueError : If no finite values are present or the mean is not positive.
         """
         flat = np.concatenate([np.asarray(a).reshape(-1) for a in arrays])
         flat = flat[np.isfinite(flat)]
@@ -213,13 +330,13 @@ class PlotBase:
         """Rescales an array to [0, 1] using its finite minimum and maximum.
 
         Args:
-            arr: Array of any shape.
+            arr : Array of any shape.
 
         Returns:
             Float32 array of the same shape scaled to [0, 1].
 
         Raises:
-            ValueError: If the field is constant or degenerate.
+            ValueError : If the field is constant or degenerate.
         """
         lo, hi = float(np.nanmin(arr)), float(np.nanmax(arr))
         if hi - lo < 1e-12:
@@ -250,24 +367,23 @@ class PlotBase:
         """Renders one labelled image panel with a colorbar.
 
         Args:
-            data: Field of shape (rows, columns) to display.
-            x_label: Horizontal axis label, including units.
-            y_label: Vertical axis label, including units.
-            title: Axes title.
-            cmap: Colormap used in continuous mode.
-            vmin: Lower colour limit, or None to autoscale.
-            vmax: Upper colour limit, or None to autoscale.
-            extent: Data coordinates of the image edges, or None for pixel indices.
-            origin: Row origin, 'upper' or 'lower'.
-            colorbar_label: Colorbar label, including units.
-            interpolation: Image interpolation mode.
-            aspect: Axes aspect handling.
-            figsize: Figure size in inches.
-            discrete: Draws integer class levels with a boundary norm when True.
-            levels: Integer levels shown in discrete mode; inferred from the data
-                maximum when omitted.
-            text_overlay: Optional annotation drawn in the upper-left corner.
-            path: Output path; the figure is returned instead when omitted.
+            data           : Field of shape (rows, columns) to display.
+            x_label        : Horizontal axis label, including units.
+            y_label        : Vertical axis label, including units.
+            title          : Axes title.
+            cmap           : Colormap used in continuous mode.
+            vmin           : Lower colour limit, or None to autoscale.
+            vmax           : Upper colour limit, or None to autoscale.
+            extent         : Data coordinates of the image edges, or None for pixel indices.
+            origin         : Row origin, 'upper' or 'lower'.
+            colorbar_label : Colorbar label, including units.
+            interpolation  : Image interpolation mode.
+            aspect         : Axes aspect handling.
+            figsize        : Figure size in inches.
+            discrete       : Draws integer class levels with a boundary norm when True.
+            levels         : Integer levels shown in discrete mode; inferred from the data maximum when omitted.
+            text_overlay   : Optional annotation drawn in the upper-left corner.
+            path           : Output path; the figure is returned instead when omitted.
 
         Returns:
             The written path when path is given, otherwise the open figure.
@@ -315,9 +431,9 @@ class PlotBase:
         """Returns at most n_max finite values, drawn without replacement.
 
         Args:
-            values: Array of any shape holding the candidate values.
-            n_max: Maximum number of values to keep.
-            seed: Seed of the sampling generator.
+            values : Array of any shape holding the candidate values.
+            n_max  : Maximum number of values to keep.
+            seed   : Seed of the sampling generator.
 
         Returns:
             One-dimensional array of finite values, at most n_max long.
@@ -333,9 +449,9 @@ class PlotBase:
         """Subsamples several co-registered arrays on a shared set of finite indices.
 
         Args:
-            arrays: Arrays of identical size, flattened before sampling.
-            n_max: Maximum number of elements to keep.
-            seed: Seed of the sampling generator.
+            arrays : Arrays of identical size, flattened before sampling.
+            n_max  : Maximum number of elements to keep.
+            seed   : Seed of the sampling generator.
 
         Returns:
             One flattened array per input, all indexed by the same positions.
@@ -358,10 +474,10 @@ class PlotBase:
         """Computes the median of y inside equal-width bins of x.
 
         Args:
-            x: One-dimensional binning variable.
-            y: One-dimensional response variable aligned with x.
-            n_bins: Number of equal-width bins spanning the range of x.
-            min_count: Minimum samples a bin needs before its median is reported.
+            x         : One-dimensional binning variable.
+            y         : One-dimensional response variable aligned with x.
+            n_bins    : Number of equal-width bins spanning the range of x.
+            min_count : Minimum samples a bin needs before its median is reported.
 
         Returns:
             Tuple of (bin centres, medians), both of length n_bins, with NaN in
@@ -387,9 +503,9 @@ class PlotBase:
         fewer than four samples get a violin but no quartile overlay.
 
         Args:
-            ax: Axes to draw on.
-            data_by_slot: One flat sample array per slot, in slot order.
-            palette: Colour per slot, aligned with data_by_slot.
+            ax           : Axes to draw on.
+            data_by_slot : One flat sample array per slot, in slot order.
+            palette      : Colour per slot, aligned with data_by_slot.
         """
         drawn_positions = [i + 1 for i, d in enumerate(data_by_slot) if d.size > 0]
         drawn_data      = [d     for    d in data_by_slot           if d.size > 0]
@@ -433,18 +549,16 @@ class PlotBase:
         """Draws one image per axes from a list of panel specifications.
 
         Args:
-            fig: Figure owning the axes, used to attach the colorbars.
-            axes: Axes to fill, paired with panels in order.
-            panels: Tuples of (data of shape (rows, columns), title, colormap,
-                vmin, vmax).
-            x_label: Horizontal axis label shared by every panel, including units.
-            extent: Data coordinates of the image edges.
-            origin: Row origin, 'upper' or 'lower'.
-            interpolation: Image interpolation mode.
-            title_size: Font size of the panel titles.
-            label_size: Font size of the axis labels.
-            colorbar_label: Callable mapping a panel's colormap to its colorbar
-                label, or None to leave the colorbars unlabelled.
+            fig            : Figure owning the axes, used to attach the colorbars.
+            axes           : Axes to fill, paired with panels in order.
+            panels         : Tuples of (data of shape (rows, columns), title, colormap, vmin, vmax).
+            x_label        : Horizontal axis label shared by every panel, including units.
+            extent         : Data coordinates of the image edges.
+            origin         : Row origin, 'upper' or 'lower'.
+            interpolation  : Image interpolation mode.
+            title_size     : Font size of the panel titles.
+            label_size     : Font size of the axis labels.
+            colorbar_label : Callable mapping a panel's colormap to its colorbar label, or None to leave the colorbars unlabelled.
         """
 
         for ax_i, (data, label, cm_used, vlo, vhi) in zip(axes, panels):
@@ -473,14 +587,13 @@ class PlotBase:
         int_label; the remaining ones are labelled '|error|'.
 
         Args:
-            fig: Figure owning the axes.
-            axes: Axes to fill, paired with panels in order.
-            panels: Tuples of (data of shape (rows, columns), title, colormap,
-                vmin, vmax).
-            x_label: Horizontal axis label shared by every panel, including units.
-            int_label: Colorbar label for the panels sharing the first colormap.
-            extent: Data coordinates of the image edges.
-            origin: Row origin, 'upper' or 'lower'.
+            fig       : Figure owning the axes.
+            axes      : Axes to fill, paired with panels in order.
+            panels    : Tuples of (data of shape (rows, columns), title, colormap, vmin, vmax).
+            x_label   : Horizontal axis label shared by every panel, including units.
+            int_label : Colorbar label for the panels sharing the first colormap.
+            extent    : Data coordinates of the image edges.
+            origin    : Row origin, 'upper' or 'lower'.
         """
 
         PlotBase._render_panels(

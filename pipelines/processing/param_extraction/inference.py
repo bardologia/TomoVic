@@ -14,23 +14,23 @@ from pipelines.processing.param_extraction.metrics    import FittingMetricsCalcu
 from pipelines.processing.param_extraction.io         import ParameterIO, ParameterRunMeta
 from pipelines.processing.param_extraction.plots      import FittingResultPlotter, ResolutionPlotter
 from pipelines.processing.param_extraction.resolution import ResolutionAnalyzer, ResolutionArtifactWriter
-from tools.sar.geometry_field                         import GeometryField
 from pipelines.shared.orchestration.session_scheduler import SequentialSessionScheduler
 from tools.data.io                                    import FileIO
 from tools.monitoring.logger                          import Logger
+from tools.runtime.git_state                          import GitState
 
 
 class ParamRunInferencePipeline:
     """Scores and plots one fitted parameter-extraction run.
 
     Attributes:
-        run_dir: Parameter run directory holding the fitted arrays and metadata.
-        logger: Logger for the stage report.
-        make_plots: Whether the figure stages run.
-        kz_grid_max: Upper end of the evaluated kz axis, in rad/m.
-        kz_grid_points: Number of samples on the kz axis.
-        noise_coherence: Speckle/SNR coherence ceiling multiplied onto the profile coherence.
-        parameter_io: Reader for the parameter, diagnostics and metadata files.
+        run_dir         : Parameter run directory holding the fitted arrays and metadata.
+        logger          : Logger for the stage report.
+        make_plots      : Whether the figure stages run.
+        kz_grid_max     : Upper end of the evaluated kz axis, in rad/m.
+        kz_grid_points  : Number of samples on the kz axis.
+        noise_coherence : Speckle/SNR coherence ceiling multiplied onto the profile coherence.
+        parameter_io    : Reader for the parameter, diagnostics and metadata files.
     """
 
     META_FILENAME    = ParameterRunMeta.FILENAME
@@ -40,12 +40,12 @@ class ParamRunInferencePipeline:
         """Configures the inference pipeline for one parameter run directory.
 
         Args:
-            run_dir: Parameter run directory produced by ``extract_params``.
-            logger: Logger for the stage report.
-            make_plots: Whether the figure stages run.
-            kz_grid_max: Upper end of the evaluated kz axis, in rad/m.
-            kz_grid_points: Number of samples on the kz axis.
-            noise_coherence: Speckle/SNR coherence ceiling in (0, 1].
+            run_dir         : Parameter run directory produced by ``extract_params``.
+            logger          : Logger for the stage report.
+            make_plots      : Whether the figure stages run.
+            kz_grid_max     : Upper end of the evaluated kz axis, in rad/m.
+            kz_grid_points  : Number of samples on the kz axis.
+            noise_coherence : Speckle/SNR coherence ceiling in (0, 1].
         """
         self.run_dir         = Path(run_dir)
         self.logger          = logger
@@ -57,6 +57,19 @@ class ParamRunInferencePipeline:
 
         self.logger.section("[Param Extraction Inference]")
         self.logger.subsection(f"Run directory : {self.run_dir}")
+
+    def _clear_previous_analysis(self) -> None:
+        """Removes the resolution curves and the summary of an earlier analysis of this run.
+
+        The dataset browser, the mail picker and the symbolic gate count a run
+        as analysed once resolution_curves.npz exists, so an analysis that
+        fails part-way must not leave the earlier archive, or its summary,
+        beside a half-written new one.
+        """
+        ResolutionArtifactWriter(self.run_dir, self.logger).clear()
+        (self.run_dir / self.SUMMARY_FILENAME).unlink(missing_ok=True)
+
+        self.logger.subsection(f"Cleared any earlier {ResolutionArtifactWriter.CURVES_FILENAME} and {self.SUMMARY_FILENAME}; the curves are written last, once every stage has finished")
 
     def _load(self) -> tuple:
         """Loads the run metadata, parameter stack, fit diagnostics and tomogram path.
@@ -78,10 +91,10 @@ class ParamRunInferencePipeline:
         """Computes the fit-quality maps and summaries for the run.
 
         Args:
-            parameters: Parameter stack of shape (3 * k_max, azimuth, range).
-            meta: Run metadata carrying the fit settings and height range.
-            diagnostics: Per-K MSE and model-order selection arrays from the fitter.
-            tomogram_path: Path of the tomogram the fit was performed on.
+            parameters    : Parameter stack of shape (3 * k_max, azimuth, range).
+            meta          : Run metadata carrying the fit settings and height range.
+            diagnostics   : Per-K MSE and model-order selection arrays from the fitter.
+            tomogram_path : Path of the tomogram the fit was performed on.
 
         Returns:
             Dictionary of metric maps and summary dictionaries.
@@ -96,25 +109,12 @@ class ParamRunInferencePipeline:
 
         return calculator.run(parameters, meta, tomogram_path, diagnostics)
 
-    def _dataset_dir(self) -> Path:
-        """Returns the dataset root above the ``params`` directory holding this run.
-
-        Raises:
-            ValueError: If the run directory does not sit under a ``params`` directory,
-                so the geometry field cannot be located.
-        """
-        for parent in self.run_dir.parents:
-            if parent.name == "params":
-                return parent.parent
-
-        raise ValueError(f"Parameter run {self.run_dir} does not sit under a 'params' directory, so the dataset root holding meta/{GeometryField.FILENAME} cannot be located for the kz-resolution analysis.")
-
     def _resolution(self, parameters, meta: dict) -> tuple:
-        """Analyses vertical resolution against kz and saves the resolution curves.
+        """Analyses vertical resolution against kz; the curves are saved by ``_mark_analysed`` once every stage has finished.
 
         Args:
-            parameters: Parameter stack of shape (3 * k_max, azimuth, range).
-            meta: Run metadata carrying ``k_max`` and the activity threshold.
+            parameters : Parameter stack of shape (3 * k_max, azimuth, range).
+            meta       : Run metadata carrying ``k_max`` and the activity threshold.
 
         Returns:
             Tuple of the resolution summary dictionary, the curve arrays over the kz
@@ -123,7 +123,7 @@ class ParamRunInferencePipeline:
         analyzer = ResolutionAnalyzer(
             parameters_array = parameters,
             meta             = meta,
-            dataset_dir      = self._dataset_dir(),
+            dataset_dir      = ParameterRunMeta.dataset_dir(self.run_dir),
             logger           = self.logger,
             kz_grid_max      = self.kz_grid_max,
             kz_grid_points   = self.kz_grid_points,
@@ -131,21 +131,21 @@ class ParamRunInferencePipeline:
         )
 
         summary, arrays = analyzer.run()
-        ResolutionArtifactWriter(self.run_dir, self.logger).save(arrays)
 
         return summary, arrays, analyzer.table
 
     def _summary(self, metrics_dict: dict, resolution_summary: dict) -> Path:
-        """Writes the combined metrics and resolution summary JSON.
+        """Writes the combined metrics and resolution summary JSON, stamped with the analysing commit.
 
         Args:
-            metrics_dict: Metric maps and summaries from the metrics stage.
-            resolution_summary: Summary produced by the resolution analysis.
+            metrics_dict       : Metric maps and summaries from the metrics stage.
+            resolution_summary : Summary produced by the resolution analysis.
 
         Returns:
             Path of the written summary JSON.
         """
         payload = {
+            "git_commit"         : GitState.commit(),
             "global_summary"     : metrics_dict["global_summary"],
             "per_k_summary"      : metrics_dict["per_k_summary"],
             "snr_summary"        : metrics_dict["snr_summary"],
@@ -162,10 +162,10 @@ class ParamRunInferencePipeline:
         """Renders the fit-result figures unless plotting is disabled.
 
         Args:
-            parameters: Parameter stack of shape (3 * k_max, azimuth, range).
-            meta: Run metadata carrying the fit settings.
-            metrics_dict: Metric maps and summaries from the metrics stage.
-            tomogram_path: Path of the tomogram the fit was performed on.
+            parameters    : Parameter stack of shape (3 * k_max, azimuth, range).
+            meta          : Run metadata carrying the fit settings.
+            metrics_dict  : Metric maps and summaries from the metrics stage.
+            tomogram_path : Path of the tomogram the fit was performed on.
 
         Returns:
             Mapping from figure name to the saved PNG path; empty when plotting is off.
@@ -184,13 +184,30 @@ class ParamRunInferencePipeline:
 
         return plotter.run(parameters, metrics_dict, meta, tomogram_path)
 
+    def _mark_analysed(self, arrays: dict) -> Path:
+        """Writes the resolution curves as the last artifact of the analysis, the mark every reader takes for an analysed run.
+
+        Args:
+            arrays : Resolution curve arrays over the kz grid, in rad/m.
+
+        Returns:
+            Path of the written archive.
+        """
+        return ResolutionArtifactWriter(self.run_dir, self.logger).save(arrays)
+
     def run(self) -> dict[str, Path]:
         """Runs the metrics, resolution, summary and plot stages for the run.
+
+        The previous analysis's curves and summary are removed first and the
+        curves are written last, so a run counts as analysed only once every
+        stage of this analysis has finished.
 
         Returns:
             Dictionary with the summary JSON path, the output directory and the
             mapping of saved figure paths.
         """
+        self._clear_previous_analysis()
+
         meta, parameters, diagnostics, tomogram_path = self._load()
 
         metrics_dict                          = self._metrics(parameters, meta, diagnostics, tomogram_path)
@@ -201,10 +218,18 @@ class ParamRunInferencePipeline:
         if self.make_plots:
             plot_paths.update(ResolutionPlotter(logger=self.logger).run(arrays, resolution_summary, gaussians, self.run_dir / "images"))
 
+        curves_path = self._mark_analysed(arrays)
+
         del parameters, diagnostics
         gc.collect()
 
         self.logger.section("[Param Extraction Inference Completed]")
+        self.logger.kv_table({
+            "Run Directory"     : str(self.run_dir),
+            "Metrics Summary"   : str(summary_path),
+            "Resolution Curves" : str(curves_path),
+            "Plots Rendered"    : len(plot_paths),
+        })
 
         return {
             "metrics_summary"  : summary_path,
@@ -217,33 +242,56 @@ class ParamInferenceTrialCollector:
     """Resolves the parameter-extraction runs that inference should visit.
 
     Attributes:
-        params_dir: Directory holding the parameter runs, possibly nested.
-        run_tags: Explicit run paths relative to ``params_dir``; empty means discover.
-        logger: Logger used to report the collected runs.
+        params_dir : Directory holding the parameter runs, possibly nested.
+        run_tags   : Explicit run paths relative to ``params_dir``; empty means discover.
+        logger     : Logger used to report the collected runs.
     """
 
     def __init__(self, params_dir: Path, run_tags: list[str], logger: Logger) -> None:
         """Binds the collector to a params directory and an optional tag filter.
 
         Args:
-            params_dir: Directory holding the parameter runs.
-            run_tags: Run paths relative to ``params_dir``; empty enables discovery.
-            logger: Logger for the collection report.
+            params_dir : Directory holding the parameter runs.
+            run_tags   : Run paths relative to ``params_dir``; empty enables discovery.
+            logger     : Logger for the collection report.
         """
         self.params_dir = Path(params_dir)
         self.run_tags   = run_tags
         self.logger     = logger
 
     def _discover_tags(self) -> list[str]:
-        """Returns the configured tags, or every fitted (non-external) run found below."""
+        """Returns the configured tags, or every fitted run found below, naming each run discovery leaves out.
+
+        An injected run is analysed by analyze_external_params and is listed at
+        info level; a run whose metadata has no parameter stack beside it
+        cannot be scored and is warned about. The counts close the discovery.
+        """
         if self.run_tags:
             return list(self.run_tags)
 
-        return [
-            str(marker.parent.relative_to(self.params_dir))
-            for marker in sorted(self.params_dir.rglob(ParamRunInferencePipeline.META_FILENAME))
-            if (marker.parent / "parameters.npy").exists() and not ParameterRunMeta.is_external(marker.parent)
-        ]
+        tags       = []
+        external   = []
+        incomplete = []
+
+        for marker in sorted(self.params_dir.rglob(ParamRunInferencePipeline.META_FILENAME)):
+            run_dir = marker.parent
+            tag     = str(run_dir.relative_to(self.params_dir))
+
+            if ParameterRunMeta.is_external(run_dir):
+                external.append(tag)
+            elif not (run_dir / ParameterRunMeta.PARAMETERS_FILENAME).is_file():
+                incomplete.append(tag)
+            else:
+                tags.append(tag)
+
+        for tag in external:
+            self.logger.info(f"Skipped {tag}: injected from external files, so analyze_external_params analyses it")
+
+        for tag in incomplete:
+            self.logger.warning(f"Skipped {tag}: it holds {ParamRunInferencePipeline.META_FILENAME} but no {ParameterRunMeta.PARAMETERS_FILENAME}, so the run cannot be scored; refit it or delete the directory")
+
+        self.logger.subsection(f"Discovered {len(tags)} fitted runs; skipped {len(external)} injected and {len(incomplete)} without {ParameterRunMeta.PARAMETERS_FILENAME}")
+        return tags
 
     def collect(self) -> list[Path]:
         """Returns the run directories of every requested parameter-extraction trial.
@@ -252,8 +300,8 @@ class ParamInferenceTrialCollector:
             List of run directories, in discovery order.
 
         Raises:
-            FileNotFoundError: If a requested tag has no run metadata on disk.
-            ValueError: If a requested run was injected from external parameters.
+            FileNotFoundError : If a requested tag has no run metadata on disk.
+            ValueError        : If a requested run was injected from external parameters.
         """
         self.logger.section("Collecting parameter-extraction trials")
 
@@ -279,22 +327,22 @@ class ParamInferenceSession:
     """One schedulable unit of parameter-extraction inference over a single run.
 
     Attributes:
-        run_dir: Parameter run directory this session processes.
-        make_plots: Whether the figure stages run.
-        kz_grid_max: Upper end of the evaluated kz axis, in rad/m.
-        kz_grid_points: Number of samples on the kz axis.
-        noise_coherence: Speckle/SNR coherence ceiling in (0, 1].
+        run_dir         : Parameter run directory this session processes.
+        make_plots      : Whether the figure stages run.
+        kz_grid_max     : Upper end of the evaluated kz axis, in rad/m.
+        kz_grid_points  : Number of samples on the kz axis.
+        noise_coherence : Speckle/SNR coherence ceiling in (0, 1].
     """
 
     def __init__(self, run_dir: Path, make_plots: bool, kz_grid_max: float, kz_grid_points: int, noise_coherence: float) -> None:
         """Binds the session to a parameter run and its resolution-analysis settings.
 
         Args:
-            run_dir: Parameter run directory to process.
-            make_plots: Whether the figure stages run.
-            kz_grid_max: Upper end of the evaluated kz axis, in rad/m.
-            kz_grid_points: Number of samples on the kz axis.
-            noise_coherence: Speckle/SNR coherence ceiling in (0, 1].
+            run_dir         : Parameter run directory to process.
+            make_plots      : Whether the figure stages run.
+            kz_grid_max     : Upper end of the evaluated kz axis, in rad/m.
+            kz_grid_points  : Number of samples on the kz axis.
+            noise_coherence : Speckle/SNR coherence ceiling in (0, 1].
         """
         self.run_dir         = Path(run_dir)
         self.make_plots      = make_plots
@@ -305,15 +353,17 @@ class ParamInferenceSession:
     def execute(self) -> dict[str, Path]:
         """Creates the session logger and runs the parameter inference pipeline.
 
+        The run's own log closes with the exception, its traceback and an
+        ABORTED banner when a stage raises, so the cause stays beside the run.
+
         Returns:
             The result dictionary returned by ``ParamRunInferencePipeline.run``.
         """
         log_dir = self.run_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        logger = Logger(log_dir=str(log_dir), name="param_extraction_inference", level="INFO")
-
-        return ParamRunInferencePipeline(self.run_dir, logger=logger, make_plots=self.make_plots, kz_grid_max=self.kz_grid_max, kz_grid_points=self.kz_grid_points, noise_coherence=self.noise_coherence).run()
+        with Logger(log_dir=str(log_dir), name="param_extraction_inference", level="INFO") as logger:
+            return ParamRunInferencePipeline(self.run_dir, logger=logger, make_plots=self.make_plots, kz_grid_max=self.kz_grid_max, kz_grid_points=self.kz_grid_points, noise_coherence=self.noise_coherence).run()
 
 
 def run_param_inference_session(session: ParamInferenceSession) -> dict[str, Path]:
@@ -325,7 +375,7 @@ class ParamExtractionInferenceScheduler(SequentialSessionScheduler):
     """Runs parameter-extraction inference sequentially over every collected run.
 
     Attributes:
-        config: Entry configuration carrying the params directory and analysis settings.
+        config : Entry configuration carrying the params directory and analysis settings.
     """
 
     EMPTY_MESSAGE = "No parameter-extraction trials to infer"
@@ -335,9 +385,8 @@ class ParamExtractionInferenceScheduler(SequentialSessionScheduler):
         """Binds the scheduler to the parameter-inference entry configuration.
 
         Args:
-            config: Entry configuration exposing ``params_dir``, ``run_tags``,
-                ``make_plots`` and the kz-grid settings.
-            logger: Logger shared with the base scheduler.
+            config : Entry configuration exposing ``params_dir``, ``run_tags``, ``make_plots`` and the kz-grid settings.
+            logger : Logger shared with the base scheduler.
         """
         super().__init__(logger)
         self.config = config

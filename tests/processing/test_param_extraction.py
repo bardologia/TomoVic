@@ -183,6 +183,343 @@ def test_plan_resolver_allows_fixed_suffix_across_datasets():
     assert len({group.shared.output_directory for group in groups}) == 3
 
 
+def test_plan_resolver_rejects_repeated_sweep_values():
+    """Verifies a repeated k, lambda, mode or dataset is refused instead of refitting and overwriting one run."""
+    for kwargs in ({"fit_k_values": [5, 5]}, {"fit_lambda_values": [1e-2, 0.01]}, {"fit_modes": ["sigma", "sigma"]}):
+        with pytest.raises(ValueError, match="repeats a value"):
+            ExtractionPlanResolver(ExtractParamsEntryConfig(**kwargs), [Path("/data/a")]).resolve()
+
+    with pytest.raises(ValueError, match="queues a dataset twice"):
+        ExtractionPlanResolver(ExtractParamsEntryConfig(), [Path("/data/a"), Path("/data/a")]).resolve()
+
+
+def test_plan_resolver_rejects_modes_colliding_on_one_run_name():
+    """Verifies two modes naming the same free parameters in another order are refused as one run directory."""
+    entry = ExtractParamsEntryConfig(fit_k_values=[5], fit_lambda_values=[1e-2], fit_modes=["sigma_amp", "amp_sigma"])
+
+    with pytest.raises(ValueError, match="collide on one run directory"):
+        ExtractionPlanResolver(entry, [Path("/data/a")]).resolve()
+
+
+def test_plan_resolver_refuses_an_existing_run_unless_overwriting(tmp_path):
+    """Verifies a permutation landing on an existing run raises before fitting and names that run, unless overwrite is set."""
+    entry   = ExtractParamsEntryConfig(fit_k_values=[5], fit_lambda_values=[1e-2], fit_modes=["sigma"])
+    run_dir = tmp_path / "params" / "params_k5_lam0.01_sig4_sigma"
+    run_dir.mkdir(parents=True)
+    (run_dir / "param_extraction_meta.json").write_text(json.dumps({"timestamp": "2026-06-12T18:33:45"}), encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="fitted 2026-06-12T18:33:45"):
+        ExtractionPlanResolver(entry, [tmp_path]).resolve()
+
+    entry.overwrite = True
+
+    assert len(ExtractionPlanResolver(entry, [tmp_path]).resolve()) == 1
+
+
+def _dataset_stub(root):
+    """Writes the tomogram and config state a ParamExtractionPipeline needs under a dataset root."""
+    (root / "data").mkdir(parents=True)
+    (root / "meta").mkdir(parents=True)
+    np.save(root / "data" / "tomogram_full.npy", np.zeros((2, 2, 4), dtype=np.float32))
+    (root / "meta" / "config_state.json").write_text(json.dumps({"tomogram_config": {"height_range": [-20.0, 80.0]}}), encoding="utf-8")
+
+
+def test_stage_save_replaces_an_existing_run_only_when_overwriting(tmp_path, monkeypatch):
+    """Verifies saving over an existing run raises without overwrite, and with it deletes the stale files and names the differing settings."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction import pipeline as pipeline_module
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", lambda **kwargs: None)
+
+    entry  = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"], adam_steps=500, overwrite=True)
+    group  = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+    config = group.configs[("sigma", 1e-2)]
+
+    config.output_directory.mkdir(parents=True)
+    (config.output_directory / "param_extraction_meta.json").write_text(json.dumps({"timestamp": "2026-06-12T18:33:45", "adam_steps": 3000}), encoding="utf-8")
+    (config.output_directory / "fit_metrics_summary.json").write_text("{}", encoding="utf-8")
+
+    parameters  = np.zeros((9, 2, 4), dtype=np.float32)
+    diagnostics = {"best_k_map": np.zeros((2, 4), dtype=np.int16)}
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        pipeline_module.ParamExtractionPipeline(group, logger=RecordingLogger())._stage_save(config, parameters, diagnostics, {})
+
+    logger = RecordingLogger()
+    pipeline_module.ParamExtractionPipeline(group, logger=logger, overwrite=True)._stage_save(config, parameters, diagnostics, {})
+
+    warnings = [message for level, message in logger.messages if level == "warning"]
+
+    assert not (config.output_directory / "fit_metrics_summary.json").exists()
+    assert (config.output_directory / "parameters.npy").is_file()
+    assert any("adam_steps 3000 -> 500" in message for message in warnings)
+
+
+def test_pipeline_names_the_height_range_source_and_warns_on_a_disagreeing_override(tmp_path, monkeypatch):
+    """Verifies the pipeline records where its height range came from and warns when an override differs from the dataset's record."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction import pipeline as pipeline_module
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", lambda **kwargs: None)
+
+    def built(height_range):
+        """Returns the pipeline built with the given override and the warnings it logged."""
+        entry  = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"], height_range=height_range)
+        group  = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+        logger = RecordingLogger()
+        return pipeline_module.ParamExtractionPipeline(group, logger=logger), [message for level, message in logger.messages if level == "warning"]
+
+    recorded, warnings = built(None)
+    assert recorded.height_range_source == "meta/config_state.json"
+    assert warnings == []
+
+    matching, warnings = built((-20.0, 80.0))
+    assert matching.height_range_source == "height_range override, matching meta/config_state.json"
+    assert warnings == []
+
+    differing, warnings = built((-10.0, 70.0))
+    assert differing.height_range        == (-10.0, 70.0)
+    assert differing.height_range_source.startswith("height_range override, differing")
+    assert any("differs from the tomogram height range (-20.0, 80.0)" in message for message in warnings)
+
+
+def test_pipeline_run_records_an_abort_in_the_group_log(tmp_path, monkeypatch):
+    """Verifies a failing extraction ends the group log with the error, the saved count and an ABORTED banner."""
+    from pipelines.processing.param_extraction import pipeline as pipeline_module
+
+    class _FailingExtractor:
+        """Extractor stand-in whose fit raises."""
+
+        def __init__(self, **kwargs):
+            """Ignores the fitter configuration."""
+            pass
+
+        def run(self, tomogram_path, height_range):
+            """Raises in place of fitting."""
+            raise RuntimeError("kernel blew up")
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", _FailingExtractor)
+
+    entry = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"])
+    group = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+
+    with pytest.raises(RuntimeError, match="kernel blew up"):
+        pipeline_module.ParamExtractionPipeline(group).run()
+
+    log_text = (tmp_path / "params" / "logs" / "param_extraction_k3.log").read_text(encoding="utf-8")
+
+    assert "[Group Aborted]" in log_text
+    assert "0 of 1 permutations saved" in log_text
+    assert "RuntimeError: kernel blew up" in log_text
+    assert ">>> ABORTED param_extraction_k3" in log_text
+    assert ">>> END" not in log_text
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_pipeline_run_records_the_fit_outcome_and_commit_in_the_metadata(tmp_path, monkeypatch):
+    """Verifies every saved permutation's metadata carries the commit, the fit outcome and the group log path."""
+    from pipelines.processing.param_extraction                 import pipeline as pipeline_module
+    from pipelines.processing.param_extraction.sigma.extractor import ExtractionOutcome
+
+    class _StubExtractor:
+        """Extractor stand-in returning one fitted permutation and a fixed outcome."""
+
+        def __init__(self, **kwargs):
+            """Records a fixed outcome and clamp-bound shares in place of fitting."""
+            self.outcome      = ExtractionOutcome(n_height_bins=2, total_pixels=8, active_pixels=6, truncation_applied=False, backend="jit (1 cpu device)", devices=["CpuDevice(id=0)"], fit_seconds=1.5)
+            self.bound_shares = {("sigma", 1e-2): {"sigma_at_lower_frac": 0.25, "sigma_at_upper_frac": 0.0, "mu_at_bound_frac": 0.0}}
+
+        def run(self, tomogram_path, height_range):
+            """Returns zero parameters for the single permutation."""
+            return {("sigma", 1e-2): (np.zeros((9, 2, 4), dtype=np.float32), {"best_k_map": np.zeros((2, 4), dtype=np.int16)})}
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", _StubExtractor)
+
+    entry = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"])
+    group = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+    saved = pipeline_module.ParamExtractionPipeline(group).run()
+
+    meta = json.loads(saved[("sigma", 1e-2)]["metadata"].read_text(encoding="utf-8"))
+
+    assert meta["git_commit"]
+    assert meta["n_height_bins"]      == 2
+    assert meta["total_pixels"]       == 8
+    assert meta["active_pixels"]      == 6
+    assert meta["active_fraction"]    == pytest.approx(0.75)
+    assert meta["truncation_applied"] is False
+    assert meta["backend"]            == "jit (1 cpu device)"
+    assert meta["devices"]            == ["CpuDevice(id=0)"]
+    assert meta["fit_seconds"]        == pytest.approx(1.5)
+    assert meta["extraction_log"]     == str(tmp_path / "params" / "logs" / "param_extraction_k3.log")
+    assert meta["adam_steps"]         == entry.adam_steps
+    assert meta["sigma_at_lower_frac"] == pytest.approx(0.25)
+    assert meta["height_range_source"] == "meta/config_state.json"
+    assert meta["mu_at_bound_frac"]    == 0.0
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_pipeline_run_copies_its_part_of_the_group_log_into_the_run(tmp_path, monkeypatch):
+    """Verifies each saved run receives this launch's group-log record, from its RUN banner to END, without earlier launches."""
+    from pipelines.processing.param_extraction                 import pipeline as pipeline_module
+    from pipelines.processing.param_extraction.sigma.extractor import ExtractionOutcome
+
+    class _StubExtractor:
+        """Extractor stand-in returning one fitted permutation and a fixed outcome."""
+
+        def __init__(self, **kwargs):
+            """Records a fixed outcome and clamp-bound shares in place of fitting."""
+            self.outcome      = ExtractionOutcome(n_height_bins=2, total_pixels=8, active_pixels=6, truncation_applied=False, backend="jit (1 cpu device)", devices=["CpuDevice(id=0)"], fit_seconds=1.5)
+            self.bound_shares = {("sigma", 1e-2): {"sigma_at_lower_frac": 0.25, "sigma_at_upper_frac": 0.0, "mu_at_bound_frac": 0.0}}
+
+        def run(self, tomogram_path, height_range):
+            """Returns zero parameters for the single permutation."""
+            return {("sigma", 1e-2): (np.zeros((9, 2, 4), dtype=np.float32), {"best_k_map": np.zeros((2, 4), dtype=np.int16)})}
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", _StubExtractor)
+
+    group_log = tmp_path / "params" / "logs" / "param_extraction_k3.log"
+    group_log.parent.mkdir(parents=True)
+    group_log.write_text("record of an earlier launch\n", encoding="utf-8")
+
+    entry = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"])
+    group = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+    saved = pipeline_module.ParamExtractionPipeline(group).run()
+
+    copied = (saved[("sigma", 1e-2)]["output_directory"] / "logs" / "param_extraction_k3.log").read_text(encoding="utf-8")
+
+    assert "record of an earlier launch" in group_log.read_text(encoding="utf-8")
+    assert "record of an earlier launch" not in copied
+    assert ">>> RUN param_extraction_k3" in copied
+    assert ">>> END param_extraction_k3" in copied
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_pipeline_run_samples_resources_into_the_group_log(tmp_path, monkeypatch):
+    """Verifies a configured resource monitor logs its startup table and peak summary into the group log around the fit."""
+    import time
+
+    from configuration.resources                               import ResourceConfig
+    from pipelines.processing.param_extraction                 import pipeline as pipeline_module
+    from pipelines.processing.param_extraction.sigma.extractor import ExtractionOutcome
+
+    class _SlowStubExtractor:
+        """Extractor stand-in that holds the fit open long enough for several resource samples."""
+
+        def __init__(self, **kwargs):
+            """Records a fixed outcome and clamp-bound shares in place of fitting."""
+            self.outcome      = ExtractionOutcome(n_height_bins=2, total_pixels=8, active_pixels=6, truncation_applied=False, backend="jit (1 cpu device)", devices=["CpuDevice(id=0)"], fit_seconds=0.3)
+            self.bound_shares = {("sigma", 1e-2): {"sigma_at_lower_frac": 0.25, "sigma_at_upper_frac": 0.0, "mu_at_bound_frac": 0.0}}
+
+        def run(self, tomogram_path, height_range):
+            """Waits for the sampler, then returns zero parameters for the single permutation."""
+            time.sleep(0.3)
+            return {("sigma", 1e-2): (np.zeros((9, 2, 4), dtype=np.float32), {"best_k_map": np.zeros((2, 4), dtype=np.int16)})}
+
+    _dataset_stub(tmp_path)
+    monkeypatch.setattr(pipeline_module, "ParameterExtractor", _SlowStubExtractor)
+
+    entry = ExtractParamsEntryConfig(fit_k_values=[3], fit_lambda_values=[1e-2], fit_modes=["sigma"])
+    group = ExtractionPlanResolver(entry, [tmp_path]).resolve()[0]
+
+    pipeline_module.ParamExtractionPipeline(group, resources=ResourceConfig(poll_interval_sec=0.05)).run()
+
+    log_text = (tmp_path / "params" / "logs" / "param_extraction_k3.log").read_text(encoding="utf-8")
+
+    assert ">>> [RESOURCE MONITOR]" in log_text
+    assert ">>> [RESOURCE MONITOR - PEAKS]" in log_text
+    assert log_text.index(">>> [RESOURCE MONITOR]") < log_text.index(">>> [PARAM EXTRACTION PIPELINE EXECUTION]") < log_text.index(">>> [RESOURCE MONITOR - PEAKS]")
+
+
+def test_trial_collector_names_the_runs_discovery_skips(tmp_path):
+    """Verifies discovery keeps fitted runs, lists injected ones at info level and warns about a run without parameters."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.inference import ParamInferenceTrialCollector
+
+    runs = {"fitted": "fitted", "injected": "external", "incomplete": "fitted"}
+    for name, source in runs.items():
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        (run_dir / "param_extraction_meta.json").write_text(json.dumps({"source": source, "timestamp": "2026-06-12T18:33:45"}), encoding="utf-8")
+        if name != "incomplete":
+            np.save(run_dir / "parameters.npy", np.zeros((3, 1, 1), dtype=np.float32))
+
+    logger = RecordingLogger()
+
+    assert ParamInferenceTrialCollector(tmp_path, [], logger).collect() == [tmp_path / "fitted"]
+    assert any(level == "info" and "Skipped injected" in message for level, message in logger.messages)
+    assert any(level == "warning" and "Skipped incomplete" in message and "no parameters.npy" in message for level, message in logger.messages)
+    assert any("Discovered 1 fitted runs; skipped 1 injected and 1 without parameters.npy" in message for level, message in logger.messages)
+
+
+def test_inference_writes_the_resolution_curves_last_and_drops_stale_ones(tmp_path, monkeypatch):
+    """Verifies a failing figure stage leaves no resolution curves or summary behind, and a finished analysis writes the curves."""
+    from tests.conftest import RecordingLogger
+
+    run_dir = tmp_path / "params" / "params_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "resolution_curves.npz").write_bytes(b"stale")
+    (run_dir / "fit_metrics_summary.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(ParamRunInferencePipeline, "_load",       lambda self: ({}, None, None, None))
+    monkeypatch.setattr(ParamRunInferencePipeline, "_metrics",    lambda self, parameters, meta, diagnostics, tomogram_path: {})
+    monkeypatch.setattr(ParamRunInferencePipeline, "_resolution", lambda self, parameters, meta: ({}, {"kz": np.linspace(0.0, 1.0, 4)}, None))
+    monkeypatch.setattr(ParamRunInferencePipeline, "_summary",    lambda self, metrics_dict, resolution_summary: run_dir / "fit_metrics_summary.json")
+
+    def failing_plots(self, parameters, meta, metrics_dict, tomogram_path):
+        """Raises in place of rendering the figures."""
+        raise RuntimeError("figure stage failed")
+
+    monkeypatch.setattr(ParamRunInferencePipeline, "_plots", failing_plots)
+
+    with pytest.raises(RuntimeError, match="figure stage failed"):
+        ParamRunInferencePipeline(run_dir, logger=RecordingLogger()).run()
+
+    assert not (run_dir / "resolution_curves.npz").exists()
+    assert not (run_dir / "fit_metrics_summary.json").exists()
+
+    monkeypatch.setattr(ParamRunInferencePipeline, "_plots", lambda self, parameters, meta, metrics_dict, tomogram_path: {})
+
+    ParamRunInferencePipeline(run_dir, logger=RecordingLogger(), make_plots=False).run()
+
+    with np.load(run_dir / "resolution_curves.npz") as curves:
+        assert np.allclose(curves["kz"], np.linspace(0.0, 1.0, 4))
+
+
+def test_inference_session_records_an_abort_in_the_run_log(tmp_path, monkeypatch):
+    """Verifies a failing inference stage ends the run's own log with the error and an ABORTED banner."""
+    from pipelines.processing.param_extraction import inference as inference_module
+
+    class _FailingPipeline:
+        """Inference pipeline stand-in whose run raises."""
+
+        def __init__(self, run_dir, logger, **kwargs):
+            """Ignores the run directory and settings."""
+            pass
+
+        def run(self):
+            """Raises in place of scoring the run."""
+            raise ValueError("resolution stage failed")
+
+    monkeypatch.setattr(inference_module, "ParamRunInferencePipeline", _FailingPipeline)
+
+    run_dir = tmp_path / "params" / "params_run"
+    run_dir.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="resolution stage failed"):
+        inference_module.ParamInferenceSession(run_dir, True, 5.0, 16, 0.99).execute()
+
+    log_text = (run_dir / "logs" / "param_extraction_inference.log").read_text(encoding="utf-8")
+
+    assert "ValueError: resolution stage failed" in log_text
+    assert ">>> ABORTED param_extraction_inference" in log_text
+    assert ">>> END" not in log_text
+
+
 def test_sigma_guess_matches_the_initialiser_sigmas():
     """Verifies the standalone sigma guess equals the sigmas the peak initialiser emits and stays below the height step."""
     from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
@@ -209,7 +546,7 @@ def test_clamped_sigma_init_divisor_is_reported(tmp_path):
         """Silent logger that records warning messages for assertions.
 
         Attributes:
-            warnings: Messages passed to warning().
+            warnings : Messages passed to warning().
         """
 
         def __init__(self):
@@ -238,6 +575,171 @@ def test_clamped_sigma_init_divisor_is_reported(tmp_path):
 
 
 @pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_sigma_init_divisor_above_the_upper_bound_warns_and_a_non_positive_one_is_refused(tmp_path):
+    """Verifies an initial sigma above h_span / 2 is reported like the lower-bound clamp, and a zero divisor is refused by the resolver and the initialiser."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.extractor   import SigmaFittingExtractor
+    from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
+
+    tomo_path = tmp_path / "tomo.npy"
+    np.save(tomo_path, np.zeros((150, 2, 2), dtype=np.float32))
+
+    logger    = RecordingLogger()
+    extractor = SigmaFittingExtractor(logger=logger, modes=["sigma"], lambda_values=[LAMBDA_K], k_max=K_MAX, sigma_init_divisor=0.01, peak_initialiser=PeakInitialiser(n_workers=1))
+    extractor._prepare_data(tomo_path, HEIGHT_RANGE)
+
+    assert any("sigma_init_divisor 0.01" in message and "above the fit upper bound 50.0000" in message and "every divisor below 0.050" in message for level, message in logger.messages if level == "warning")
+
+    with pytest.raises(ValueError, match="fit_sigma_init_divisor must be positive"):
+        ExtractionPlanResolver(ExtractParamsEntryConfig(fit_sigma_init_divisor=0.0), [Path("/data/a")]).resolve()
+
+    with pytest.raises(ValueError, match="sigma_init_divisor must be positive"):
+        PeakInitialiser.sigma_guess(np.linspace(HEIGHT_RANGE[0], HEIGHT_RANGE[1], 150, dtype=np.float32), K_MAX, 0.0)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_truncation_beyond_the_height_axis_is_reported(tmp_path):
+    """Verifies a truncation index at or past the last height bin is reported as a no-op, and one inside is not."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.extractor   import SigmaFittingExtractor
+    from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
+
+    tomo_path = tmp_path / "tomo.npy"
+    np.save(tomo_path, np.zeros((150, 2, 2), dtype=np.float32))
+
+    def warnings_for(truncation_index):
+        """Returns the warnings data preparation logs at the given truncation index."""
+        logger    = RecordingLogger()
+        extractor = SigmaFittingExtractor(logger=logger, modes=["sigma"], lambda_values=[LAMBDA_K], k_max=K_MAX, sigma_init_divisor=1.0, truncation_index=truncation_index, peak_initialiser=PeakInitialiser(n_workers=1))
+        extractor._prepare_data(tomo_path, HEIGHT_RANGE)
+        return [message for level, message in logger.messages if level == "warning"]
+
+    assert any("truncation_index 170 >= 150 height bins" in message for message in warnings_for(170))
+    assert not any("truncation_index" in message for message in warnings_for(120))
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_memory_budget_warns_and_names_a_range_batch_that_fits(monkeypatch):
+    """Verifies the host-RAM estimate warns near the available RAM and names the largest range batch within budget."""
+    import types
+
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma             import extractor as extractor_module
+    from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
+
+    def warnings_with(available_bytes):
+        """Returns the warnings the budget logs for a 150 x 1000 x 500 tomogram with the given available RAM."""
+        monkeypatch.setattr(extractor_module.psutil, "virtual_memory", lambda: types.SimpleNamespace(available=available_bytes))
+        logger    = RecordingLogger()
+        extractor = extractor_module.SigmaFittingExtractor(logger=logger, modes=["sigma"], lambda_values=[LAMBDA_K], k_max=K_MAX, range_batch_size=100, peak_initialiser=PeakInitialiser(n_workers=1))
+        extractor._log_memory_budget(150, 1000, 500)
+        return [message for level, message in logger.messages if level == "warning"]
+
+    assert warnings_with(10e9) == []
+    assert any("range_batch_size of at most 96" in message for message in warnings_with(0.5e9))
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_extractor_refuses_a_fit_without_active_pixels_and_warns_on_a_sparse_one(tmp_path):
+    """Verifies an all-inactive tomogram raises before anything is returned, and a mostly empty one warns with the unfitted batches."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.extractor   import SigmaFittingExtractor
+    from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
+
+    H      = 40
+    height = np.linspace(-10.0, 30.0, H, dtype=np.float32)
+    layer  = np.exp(-((height - 8.0) ** 2) / (2.0 * 3.0 ** 2)).astype(np.float32)
+
+    def extractor(logger):
+        """Returns a small CPU extractor with two range bins per batch."""
+        return SigmaFittingExtractor(logger=logger, modes=["sigma"], lambda_values=[LAMBDA_K], k_max=2, threshold_factor=0.0, truncation_index=H, range_batch_size=2, adam_steps=5, gpu_pixel_batch_size=8, peak_initialiser=PeakInitialiser(n_workers=1))
+
+    empty_path = tmp_path / "empty.npy"
+    np.save(empty_path, np.zeros((H, 2, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="nothing was fitted"):
+        extractor(RecordingLogger()).run(empty_path, (-10.0, 30.0))
+
+    sparse          = np.zeros((H, 2, 4), dtype=np.float32)
+    sparse[:, :, 3] = layer[:, None]
+    sparse_path     = tmp_path / "sparse.npy"
+    np.save(sparse_path, sparse)
+
+    logger = RecordingLogger()
+    extractor(logger).run(sparse_path, (-10.0, 30.0))
+    warnings = [message for level, message in logger.messages if level == "warning"]
+
+    assert any("1 of 2 range batches held no pixel" in message and "range bins 0-2" in message for message in warnings)
+    assert any("Only 25.0% of the pixels cleared" in message for message in warnings)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_worker_report_names_the_real_pool_and_the_available_cpus():
+    """Verifies a pool larger than the CPUs available to the process warns, 0 workers reads as one in-process worker, and a negative count is refused."""
+    import os
+    import types
+
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.extractor   import SigmaFittingExtractor
+    from pipelines.processing.param_extraction.sigma.initialiser import PeakInitialiser
+
+    available = len(os.sched_getaffinity(0))
+    logger    = RecordingLogger()
+
+    SigmaFittingExtractor(logger=logger, modes=["sigma"], lambda_values=[LAMBDA_K], k_max=K_MAX, peak_initialiser=types.SimpleNamespace(n_workers=available + 1))
+
+    assert any(f"runs {available + 1} worker processes but only {available} CPUs are available" in message for level, message in logger.messages if level == "warning")
+    assert any(f"init_workers       : {available + 1} (process pool, shared by the entry)" in message for level, message in logger.messages)
+    assert PeakInitialiser(n_workers=0).n_workers == 1
+
+    with pytest.raises(ValueError, match="n_workers must be 0 or more"):
+        PeakInitialiser(n_workers=-1)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_kernel_backend_label_names_the_real_platform_and_the_entry_refuses_cpu(monkeypatch):
+    """Verifies the backend label reports the device platform JAX fell back to, and that a GPU-requiring selection refuses it."""
+    from pipelines.processing.param_extraction.sigma import selection as selection_module
+
+    class _CpuDevice:
+        """JAX device stand-in on the CPU platform."""
+
+        platform = "cpu"
+
+        def __repr__(self):
+            """Names the device like JAX does."""
+            return "CpuDevice(id=0)"
+
+    monkeypatch.setattr(selection_module.jax, "devices", lambda: [_CpuDevice()])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1")
+
+    _kernel, n_devices, backend, devices = selection_module.KernelBackendSelector().select()
+
+    assert n_devices == 1
+    assert backend   == "jit (1 cpu device)"
+    assert len(devices) == 1
+
+    with pytest.raises(RuntimeError, match=r"CpuDevice\(id=0\).*CUDA_VISIBLE_DEVICES = 0,1.*gpu_device_ids = \[0, 1\]"):
+        selection_module.KernelBackendSelector(require_gpu=True, requested_gpu_ids=[0, 1]).select()
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_background_scoring_opens_no_logger_section():
+    """Verifies best-K scoring, which runs on the scoring thread, announces itself with a subsection so it never resets the shared section clock."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.selection import BestKSelector
+
+    logger      = RecordingLogger()
+    gpu_results = {K: (None, None, None, np.full(3, float(K), dtype=np.float32)) for K in (1, 2)}
+
+    mse_all = BestKSelector(k_max=2, logger=logger).score(gpu_results, batch_tag="Batch 1/1 | mode sigma")
+
+    assert mse_all.shape == (3, 2)
+    assert [level for level, message in logger.messages] == ["subsection"]
+    assert logger.messages[0][1] == "Batch 1/1 | mode sigma | Phase 3 — best-K selection"
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
 def test_scoring_throttle_reraises_a_failed_future():
     """Verifies the scoring throttle re-raises the exception of a failed background future."""
     from concurrent.futures import ThreadPoolExecutor
@@ -253,6 +755,55 @@ def test_scoring_throttle_reraises_a_failed_future():
 
         with pytest.raises(RuntimeError, match="scoring failed"):
             SigmaFittingExtractor._throttle_scorings(futures, SigmaFittingExtractor.MAX_PENDING_SCORINGS)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_fit_progress_counts_kernel_calls_and_logs_a_periodic_line():
+    """Verifies the fit progress extrapolates its total from the loaded batches and writes a progress line with the chunk, count and ETA."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.sigma.extractor import FitProgress
+
+    class TotalRecorder:
+        """Progress stub recording the totals the bar task is given.
+
+        Attributes:
+            totals   : Totals passed to update().
+            advanced : Number of advance() calls.
+        """
+
+        def __init__(self):
+            """Initialises the empty records."""
+            self.totals   = []
+            self.advanced = 0
+
+        def add_task(self, description, total=None):
+            """Returns a fixed task identifier."""
+            return 0
+
+        def update(self, task, total=None):
+            """Records the new total."""
+            self.totals.append(total)
+
+        def advance(self, task, advance=1):
+            """Counts one advance."""
+            self.advanced += advance
+
+    logger   = RecordingLogger()
+    progress = TotalRecorder()
+    tracker  = FitProgress(logger, progress, n_batches=2)
+
+    tracker.LOG_EVERY_SECONDS = 0.0
+
+    assert tracker.plan_batch(n_active=100, chunk_size=32, n_modes=2, k_max=3) == 4
+    assert progress.totals == [48]
+
+    tracker.advance("Batch 1/2", "sigma", 1, 1, 4)
+
+    assert progress.advanced == 1
+    assert any("Batch 1/2 | mode sigma | K=1 | chunk 1/4 | 1/48 kernel calls" in message and "ETA" in message for level, message in logger.messages if level == "subsection")
+
+    assert tracker.plan_batch(n_active=0, chunk_size=32, n_modes=2, k_max=3) == 0
+    assert progress.totals == [48, 24]
 
 
 @pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
@@ -276,9 +827,9 @@ def test_kernel_masks_freeze_parameter_groups():
         """Runs the Adam kernel with the given amplitude/mean/sigma free flags and returns the fitted arrays.
 
         Args:
-            amp_on: 1.0 to let amplitudes move, 0.0 to freeze them.
-            mu_on: 1.0 to let means move, 0.0 to freeze them.
-            sigma_on: 1.0 to let sigmas move, 0.0 to freeze them.
+            amp_on   : 1.0 to let amplitudes move, 0.0 to freeze them.
+            mu_on    : 1.0 to let means move, 0.0 to freeze them.
+            sigma_on : 1.0 to let sigmas move, 0.0 to freeze them.
 
         Returns:
             List of amplitudes, means and sigmas of shape (pixels, K) plus per-pixel errors of shape (pixels,).
@@ -309,6 +860,41 @@ def test_kernel_masks_freeze_parameter_groups():
     assert np.allclose(a_f, amps)
     assert np.allclose(s_f, sigs)
     assert not np.allclose(m_f, mus)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
+def test_kernels_return_the_loss_trajectory_beside_the_fit():
+    """Verifies both kernels' fit returns the per-step loss and the late per-pixel loss, and that calling the kernel returns the same fit alone."""
+    import jax
+    import jax.numpy as jnp
+    from pipelines.processing.param_extraction.sigma.extractor import AdamConvergence
+    from pipelines.processing.param_extraction.sigma.kernels   import PmapSigmaAdamKernel, SigmaAdamKernel, SigmaScan
+
+    H      = 60
+    height = np.linspace(-10.0, 30.0, H, dtype=np.float32)
+    target = np.exp(-((height - 5.0) ** 2) / (2.0 * 4.0 ** 2)).astype(np.float32)
+    prof   = np.tile(target[None, :], (3, 1))
+    ones   = jnp.float32(1.0)
+    args   = (
+        jnp.array(np.full((3, 1), 0.6, dtype=np.float32)), jnp.array(np.full((3, 1), 2.0, dtype=np.float32)), jnp.array(np.full((3, 1), 6.0, dtype=np.float32)),
+        jnp.array(height), jnp.array(prof), ones, ones, ones,
+        jnp.float32(height[0]), jnp.float32(height[-1]), jnp.float32(0.5), jnp.float32(20.0),
+        50, 0.05, 0.9, 0.999,
+    )
+
+    assert SigmaScan.mark_step(50) == 45
+
+    for kernel in (SigmaAdamKernel(), PmapSigmaAdamKernel(jax.devices()[:1])):
+        a_f, m_f, s_f, e_f, loss_sum, loss_mark = [np.array(out) for out in kernel.fit(*args)]
+        called                                  = [np.array(out) for out in kernel(*args)]
+
+        assert loss_sum.shape  == (50,)
+        assert loss_mark.shape == (3,)
+        assert loss_sum[-1] < loss_sum[0]
+        assert np.all(loss_mark >= e_f)
+        assert len(called) == 4
+        assert np.allclose(called[3], e_f)
+        assert 0 <= AdamConvergence.still_improving(loss_mark, e_f) <= 3
 
 
 @pytest.mark.skipif(not _HAS_JAX, reason="jax not installed in this environment")
@@ -356,6 +942,11 @@ def test_group_extractor_shares_fits_across_modes_and_lambdas(logger, tmp_path):
 
     sigma_only, sigma_amp = results[("sigma", 1e-2)][1], results[("sigma_amp", 1e-2)][1]
     assert not np.allclose(sigma_only["mse_per_k"], sigma_amp["mse_per_k"], equal_nan=True)
+
+    assert sigma_only["adam_loss_curve"].shape     == (2, 40)
+    assert sigma_only["adam_improving_frac"].shape == (2,)
+    assert np.all(sigma_only["adam_loss_curve"][:, -1] <= sigma_only["adam_loss_curve"][:, 0])
+    assert np.all((sigma_only["adam_improving_frac"] >= 0.0) & (sigma_only["adam_improving_frac"] <= 1.0))
 
 
 @pytest.fixture(scope="module")
@@ -611,6 +1202,128 @@ def test_r2_statistics_ignore_never_fitted_pixels(logger, tmp_path):
     assert summary["n_pixels"] == float(n_az * n_rg)
     assert summary["r2_mean"] == pytest.approx(float(r2_map[0, 0]), abs=1e-6)
     assert summary["r2_neg_frac"] == 0.0
+    assert summary["sigma_at_lower_frac"] == 0.0
+    assert summary["mu_at_bound_frac"]    == 0.0
+    assert summary["r2_undefined_count"] == 0.0
+
+
+def test_fit_bound_census_counts_active_slots_on_the_clamp_bounds():
+    """Verifies the census counts only active slots on the sigma and mean bounds, and warns above the share limit."""
+    from tests.conftest import RecordingLogger
+    from pipelines.processing.param_extraction.metrics import FitBoundCensus
+
+    height_axis = np.linspace(HEIGHT_RANGE[0], HEIGHT_RANGE[1], 101, dtype=np.float32)
+    census      = FitBoundCensus(height_axis, ACTIVITY_THRESH)
+
+    params = np.zeros((3 * 2, 1, 4), dtype=np.float32)
+
+    params[0::3, 0, :] = 1.0
+    params[1::3, 0, :] = 30.0
+    params[2::3, 0, :] = 5.0
+
+    params[2, 0, 0] = census.sigma_lower
+    params[5, 0, 1] = census.sigma_upper
+    params[1, 0, 2] = HEIGHT_RANGE[1]
+    params[0, 0, 3] = 0.0
+    params[2, 0, 3] = census.sigma_lower
+
+    counts = census.count_stack(params, 2)
+
+    assert census.sigma_lower == pytest.approx(1.0)
+    assert counts == {"active_slots": 7, "sigma_at_lower": 1, "sigma_at_upper": 1, "mu_at_bound": 1}
+    assert FitBoundCensus.fractions(counts)["sigma_at_lower_frac"] == pytest.approx(1 / 7)
+    assert census.count_rows(params.reshape(6, 4).T) == counts
+
+    logger = RecordingLogger()
+    census.report(counts, logger, "run")
+
+    assert sum(1 for level, message in logger.messages if level == "warning") == 3
+
+
+def test_metrics_streaming_loop_reports_its_range_chunks(tmp_path):
+    """Verifies the contrast and R2 streaming loop logs a progress line per chunk once the interval has passed, and a closing count."""
+    from tests.conftest import RecordingLogger
+
+    n_elev, n_az, n_rg = 32, 2, 4
+
+    tomo_path = tmp_path / "tomo.npy"
+    np.save(tomo_path, np.ones((n_elev, n_az, n_rg), dtype=np.complex64))
+
+    params          = np.zeros((3 * K_MAX, n_az, n_rg), dtype=np.float32)
+    params[0, 0, 0] = 1.0
+    params[2, 0, 0] = 6.0
+
+    logger     = RecordingLogger()
+    calculator = FittingMetricsCalculator(n_gaussians=K_MAX, logger=logger, threshold_factor=THRESHOLD_FACTOR, truncation_index=TRUNCATION_INDEX, amp_threshold=ACTIVITY_THRESH, range_chunk=1)
+
+    calculator.LOG_EVERY_SECONDS = 0.0
+    calculator.run(params, {"height_range": list(HEIGHT_RANGE)}, tomo_path)
+
+    lines = [message for level, message in logger.messages if level == "subsection"]
+
+    assert any(line.startswith("Range chunk 4/4 (bins up to 4 of 4)") for line in lines)
+    assert any(line.startswith("Streamed 4 range chunks in") for line in lines)
+
+
+def test_metrics_report_names_the_effective_truncation(tmp_path):
+    """Verifies the metrics report says whether the recorded truncation index truncated any bin of this tomogram."""
+    from tests.conftest import RecordingLogger
+
+    n_elev, n_az, n_rg = 32, 2, 2
+
+    tomo_path = tmp_path / "tomo.npy"
+    np.save(tomo_path, np.ones((n_elev, n_az, n_rg), dtype=np.complex64))
+
+    params          = np.zeros((3 * K_MAX, n_az, n_rg), dtype=np.float32)
+    params[0, 0, 0] = 1.0
+    params[2, 0, 0] = 6.0
+
+    def report_for(truncation_index):
+        """Returns the subsection lines the metrics calculator logs at the given truncation index."""
+        logger = RecordingLogger()
+        FittingMetricsCalculator(n_gaussians=K_MAX, logger=logger, threshold_factor=THRESHOLD_FACTOR, truncation_index=truncation_index, amp_threshold=ACTIVITY_THRESH).run(params, {"height_range": list(HEIGHT_RANGE)}, tomo_path)
+        return [message for level, message in logger.messages if level == "subsection"]
+
+    assert any("truncation_index=170: no bin truncated" in line for line in report_for(170))
+    assert any("truncation_index=20: bins >= 20 of 32 zeroed" in line for line in report_for(20))
+
+
+def test_r2_statistics_count_fitted_pixels_with_a_constant_reference(logger, tmp_path):
+    """Verifies a fitted pixel whose tomogram profile is all zero has an undefined R2 that is counted beside n_fitted and left out of the moments."""
+    n_elev, n_az, n_rg = 32, 4, 4
+
+    height_axis = np.linspace(HEIGHT_RANGE[0], HEIGHT_RANGE[1], n_elev, dtype=np.float32)
+    profile     = np.exp(-0.5 * ((height_axis - 30.0) / 6.0) ** 2).astype(np.float32)
+
+    tomogram = np.tile(profile[:, None, None], (1, n_az, n_rg)).astype(np.complex64)
+    tomogram[:, 0, 0] = 0.0
+
+    params = np.zeros((3 * K_MAX, n_az, n_rg), dtype=np.float32)
+    for az, rg in ((0, 0), (1, 1)):
+        params[0, az, rg] = 1.0
+        params[1, az, rg] = 30.0
+        params[2, az, rg] = 6.0
+
+    tomo_path = tmp_path / "tomo.npy"
+    np.save(tomo_path, tomogram)
+
+    calc = FittingMetricsCalculator(
+        n_gaussians      = K_MAX,
+        logger           = logger,
+        threshold_factor = THRESHOLD_FACTOR,
+        truncation_index = TRUNCATION_INDEX,
+        amp_threshold    = ACTIVITY_THRESH,
+    )
+    out = calc.run(params, {"height_range": list(HEIGHT_RANGE)}, tomo_path)
+
+    r2_map  = out["r2_map"]
+    summary = out["global_summary"]
+
+    assert np.isnan(r2_map[0, 0])
+    assert np.isfinite(r2_map[1, 1])
+    assert summary["n_fitted"] == 2.0
+    assert summary["r2_undefined_count"] == 1.0
+    assert summary["r2_mean"] == pytest.approx(float(r2_map[1, 1]), abs=1e-6)
 
 
 @pytest.mark.real_data
@@ -673,7 +1386,7 @@ def test_activity_map_counts_active_components(parameters, logger):
         truncation_index = TRUNCATION_INDEX,
         amp_threshold    = ACTIVITY_THRESH,
     )
-    activity = calc._compute_activity_map(parw)
+    activity = calc.maps.activity_map(parw)
 
     expected = (parw[0::3] >= ACTIVITY_THRESH).sum(axis=0)
 
@@ -1004,7 +1717,11 @@ def test_stage_save_persists_the_entry_config(tmp_path, monkeypatch):
             """Ignores the permutation configuration and logger."""
             pass
 
-        def save_run_metadata(self, npy_path, diag_path, tomogram_path, height_range):
+        def settings(self):
+            """Returns no fit settings to compare a replacement against."""
+            return {}
+
+        def save_run_metadata(self, npy_path, diag_path, tomogram_path, height_range, fit_outcome):
             """Returns the parameter path as the metadata location."""
             return npy_path
 
@@ -1017,7 +1734,7 @@ def test_stage_save_persists_the_entry_config(tmp_path, monkeypatch):
 
     built  = pipeline_module.ParamExtractionPipeline(group, entry_config=entry)
     config = group.configs[("sigma", 1e-2)]
-    built._stage_save(config, np.zeros((9, 2, 4), dtype=np.float32), {})
+    built._stage_save(config, np.zeros((9, 2, 4), dtype=np.float32), {}, {})
     built.logger.close()
 
     loaded = ConfigCli.load_resolved(ExtractParamsEntryConfig(), config.output_directory / "docs" / "resolved_entry_config.json")

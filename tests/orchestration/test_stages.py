@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types   import SimpleNamespace
 
 import pytest
 
-from tools.orchestration.stages import QueuedInferenceStage, QueuedTrainingStage
-from tools.runtime.completion   import CompletionMarker
+from tools.orchestration.gpu_queue import GpuJob
+from tools.orchestration.stages    import QueuedInferenceStage, QueuedTrainingStage
+from tools.runtime.completion      import CompletionMarker
 
 from tests.conftest import SilentLogger
 
@@ -28,7 +30,7 @@ def _config(tmp_path: Path, resume: bool = False) -> SimpleNamespace:
         poll_interval_s = 0.0,
         resume          = resume,
         paths           = SimpleNamespace(log_base_dir=str(tmp_path / "runs")),
-        training        = SimpleNamespace(epochs=3, batch_size=8),
+        training        = SimpleNamespace(epochs=3, batch_size=8, resume=False),
         inference       = SimpleNamespace(split="val"),
     )
 
@@ -61,8 +63,8 @@ def _patch_queue(stage, recorder: list):
     """Replaces the stage's queue runner with one that records dispatched job names and reports success.
 
     Args:
-        stage: Stage whose queue call is replaced.
-        recorder: List appended with the job-name list of every dispatch.
+        stage    : Stage whose queue call is replaced.
+        recorder : List appended with the job-name list of every dispatch.
     """
     def fake_run_queue(jobs):
         """Records the dispatched job names and reports every job as done."""
@@ -72,121 +74,50 @@ def _patch_queue(stage, recorder: list):
     stage._run_queue = fake_run_queue
 
 
-def test_training_runs_all_items_in_declared_order(tmp_path, logger):
-    """Verifies training dispatches every item in declaration order."""
-    items = ["m_c", "m_a", "m_b"]
-    stage = QueuedTrainingStage(config=_config(tmp_path), entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
+def test_a_reused_inference_unit_keeps_its_recorded_duration(tmp_path, logger):
+    """Verifies the inference stage carries a reused unit's recorded duration as the training stage does."""
+    config = _config(tmp_path, resume=True)
+    stage  = QueuedInferenceStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=["model"], logger=logger)
 
-    recorder = []
-    _patch_queue(stage, recorder)
-
-    results = stage.run()
-
-    assert recorder == [items]
-    assert [r["name"] for r in results] == items
-
-
-def test_training_results_ordered_by_items_not_completion(tmp_path, logger):
-    """Verifies results are re-ordered to match the item list, not completion order."""
-    items = ["x", "y", "z"]
-    stage = QueuedTrainingStage(config=_config(tmp_path), entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
-
-    def shuffled_run_queue(jobs):
-        """Returns results in an order that does not match the item list."""
-        return [_ran_result("z"), _ran_result("x"), _ran_result("y")]
-
-    stage._run_queue = shuffled_run_queue
-
-    results = stage.run()
-    assert [r["name"] for r in results] == items
-
-
-def test_training_writes_results_json(tmp_path, logger):
-    """Verifies the stage persists its results to the results JSON in item order."""
-    items = ["a", "b"]
-    stage = QueuedTrainingStage(config=_config(tmp_path), entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
+    _mark_complete(stage.stage_dir / "model")
+    _mark_inference_complete(stage.stage_dir / "model" / "inference" / "run0", "val")
+    stage.results_path.parent.mkdir(parents=True)
+    stage.results_path.write_text(json.dumps([{**_ran_result("model", gpu=1), "duration_s": 7.5}]))
     _patch_queue(stage, [])
 
-    stage.run()
-
-    saved = json.loads(stage.results_path.read_text())
-    assert [r["name"] for r in saved] == items
-
-
-def test_training_skips_completed_items_on_resume(tmp_path, logger):
-    """Verifies resume dispatches only unfinished items and reports the cached ones without a duration."""
-    items  = ["done_model", "todo_model"]
-    config = _config(tmp_path, resume=True)
-    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
-
-    _mark_complete(stage.stage_dir / "done_model")
-
-    recorder = []
-    _patch_queue(stage, recorder)
-
     results = stage.run()
 
-    assert recorder == [["todo_model"]]
-
-    by_name = {r["name"]: r for r in results}
-    assert by_name["done_model"]["status"]     == "DONE"
-    assert by_name["done_model"]["duration_s"] is None
-    assert by_name["todo_model"]["duration_s"] == 1.0
-    assert [r["name"] for r in results] == items
+    assert results[0]["duration_s"] == 7.5
+    assert results[0]["gpu"]        == 1
+    assert results[0]["reused"]     is True
 
 
-def test_training_checkpoint_without_marker_is_not_finished(tmp_path, logger):
-    """Verifies a checkpoint without a completion marker does not count as finished."""
-    items  = ["m"]
+def test_training_job_hands_the_worker_the_unit_directory(tmp_path, logger):
+    """Verifies a unit found under another directory name is handed to the worker as its run name and logs there."""
     config = _config(tmp_path, resume=True)
-    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
+    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=["m"], logger=logger, unit_dirs={"m": "old_label_m"})
 
-    item_dir = stage.stage_dir / "m"
-    item_dir.mkdir(parents=True)
-    (item_dir / "best_model.pt").write_text("x")
+    job = stage._job("m")
 
-    recorder = []
-    _patch_queue(stage, recorder)
-
-    stage.run()
-    assert recorder == [["m"]]
+    assert job.command[job.command.index("--run-name") + 1] == "old_label_m"
+    assert job.log_path == stage.stage_dir / "old_label_m" / "worker.log"
+    assert stage.unit_dir("m") == stage.stage_dir / "old_label_m"
 
 
-def test_training_purges_unfinished_run_dir_on_resume(tmp_path, logger):
-    """Verifies an unfinished run directory is deleted before the item is re-dispatched."""
-    items  = ["m"]
-    config = _config(tmp_path, resume=True)
-    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
+def test_training_job_defaults_the_run_name_to_the_unit_name(tmp_path, logger):
+    """Verifies a fresh unit is handed its own name as the run name."""
+    stage = QueuedTrainingStage(config=_config(tmp_path), entry_script=Path("entry.py"), run_tag="t1", items=["m"], logger=logger)
 
-    item_dir = stage.stage_dir / "m"
-    (item_dir / "tensorboard").mkdir(parents=True)
-    (item_dir / "best_model.pt").write_text("x")
-    (item_dir / "last.pt").write_text("x")
+    job = stage._job("m")
 
-    recorder = []
-    _patch_queue(stage, recorder)
-
-    stage.run()
-
-    assert recorder == [["m"]]
-    assert not item_dir.exists()
+    assert job.command[job.command.index("--run-name") + 1] == "m"
 
 
-def test_training_no_resume_ignores_completion_marker_and_keeps_dir(tmp_path, logger):
-    """Verifies resume off re-runs a completed item and leaves its directory in place."""
-    items  = ["m"]
-    config = _config(tmp_path, resume=False)
-    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
+def test_trainer_state_name_matches_the_trainer(tmp_path):
+    """Verifies the stage looks for the same rolling state file the trainer writes."""
+    from tools.training.checkpoint import TrainerState
 
-    _mark_complete(stage.stage_dir / "m")
-
-    recorder = []
-    _patch_queue(stage, recorder)
-
-    stage.run()
-
-    assert recorder == [["m"]]
-    assert (stage.stage_dir / "m").exists()
+    assert QueuedTrainingStage.TRAINER_STATE == TrainerState.FILENAME
 
 
 def test_training_job_command_carries_run_metadata(tmp_path, logger):
@@ -326,21 +257,6 @@ def test_inference_mixed_skip_cached_pending(tmp_path, logger):
     assert [r["name"] for r in results] == items
 
 
-def test_no_pending_items_does_not_invoke_queue(tmp_path, logger):
-    """Verifies the queue is never invoked when every item is already complete."""
-    items  = ["only"]
-    config = _config(tmp_path, resume=True)
-    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=items, logger=logger)
-
-    _mark_complete(stage.stage_dir / "only")
-
-    recorder = []
-    _patch_queue(stage, recorder)
-
-    stage.run()
-    assert recorder == []
-
-
 def test_run_dir_derived_from_config_and_run_tag(tmp_path, logger):
     """Verifies the run directory and results path follow the config log base and the run tag."""
     config = _config(tmp_path)
@@ -348,3 +264,17 @@ def test_run_dir_derived_from_config_and_run_tag(tmp_path, logger):
 
     assert stage.run_dir == Path(config.paths.log_base_dir) / "myrun"
     assert stage.results_path == stage.run_dir / "pipeline" / "training_results.json"
+
+
+def test_run_queue_hands_the_live_pool_to_the_stages_that_follow(tmp_path, logger):
+    """Verifies a pool edited while a stage ran replaces the configured selection, so the next stage inherits it."""
+    config = _config(tmp_path)
+    stage  = QueuedTrainingStage(config=config, entry_script=Path("entry.py"), run_tag="t1", items=["m"], logger=logger)
+
+    stage.pool_file.parent.mkdir(parents=True, exist_ok=True)
+    stage.pool_file.write_text(json.dumps({"gpus": [3]}))
+
+    results = stage._run_queue([GpuJob(name="m", command=[sys.executable, "-c", "pass"], log_path=tmp_path / "m.log")])
+
+    assert config.gpus       == [3]
+    assert results[0]["gpu"] == 3

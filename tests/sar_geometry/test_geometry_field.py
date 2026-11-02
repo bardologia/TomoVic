@@ -78,6 +78,23 @@ def test_kz_shape_is_tracks_azimuth_range():
     assert (gf.n_tracks, gf.n_azimuth, gf.n_range) == (3, 2, 2)
 
 
+@pytest.mark.parametrize("convention", ["height", "slant"])
+def test_mean_kz_equals_the_scene_mean_of_the_field(convention):
+    """Verifies the separable mean matches the mean of the per-pixel kz field under both conventions."""
+    gf = _field(look_angle=np.array([0.6, 0.7, 0.75]), slant_range=np.array([3600.0, 3900.0, 4100.0]))
+
+    expected = gf.kz(convention).mean(axis=(1, 2))
+
+    assert gf.mean_kz(convention) == pytest.approx(expected, rel=1e-12)
+    assert gf.mean_kz(convention).shape == (gf.n_tracks,)
+
+
+def test_mean_kz_unknown_convention_raises():
+    """Verifies mean_kz refuses a convention outside the accepted set."""
+    with pytest.raises(ValueError, match="height_axis_convention"):
+        _field().mean_kz("vertical")
+
+
 def test_unknown_convention_raises():
     """Verifies an unknown kz convention raises ValueError."""
     gf = _field()

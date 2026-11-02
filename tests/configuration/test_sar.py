@@ -20,14 +20,14 @@ from configuration.sar.processing_config import (
 from tests.configuration._helpers import make_crop
 def test_gaussian_config_instantiates():
     """Verifies GaussianConfig exposes three parameters per Gaussian and an ordered height range."""
-    cfg = GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0)
+    cfg = GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0, activity_threshold=1e-4)
     assert cfg.params_per_gaussian == 3
     assert cfg.x_max > cfg.x_min
 
 
 def test_gaussian_config_asdict_round_trips():
     """Verifies GaussianConfig survives a dataclasses.asdict round trip."""
-    cfg     = GaussianConfig(n_default_gaussians=3, x_min=0.0, x_max=1.0)
+    cfg     = GaussianConfig(n_default_gaussians=3, x_min=0.0, x_max=1.0, activity_threshold=1e-3)
     payload = dataclasses.asdict(cfg)
     assert GaussianConfig(**payload) == cfg
 

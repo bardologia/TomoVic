@@ -18,17 +18,15 @@ def main() -> None:
     from tools.monitoring.logger                        import Logger
 
     config = ConfigCli(PreprocessInferenceConfig(), description="Render stack-overview plots and amplitude/phase/DEM value distributions for one or more preprocessing trials").apply()
-    logger = Logger(log_dir="logs", name="analyze_preprocessing")
 
-    logger.section("Preprocessing inference queue")
-    logger.kv_table({
-        "Runs dir" : str(config.runs_dir),
-        "Trials"   : len(config.run_tags) if config.run_tags else "auto",
-    }, title="Configuration")
+    with Logger(log_dir="logs", name="analyze_preprocessing") as logger:
+        logger.section("Preprocessing inference queue")
+        logger.kv_table({
+            "Runs dir" : str(config.runs_dir),
+            "Trials"   : len(config.run_tags) if config.run_tags else "auto",
+        }, title="Configuration")
 
-    PreprocessingInferenceScheduler(config, logger).run()
-
-    logger.close()
+        PreprocessingInferenceScheduler(config, logger).run()
 
 
 if __name__ == "__main__":
