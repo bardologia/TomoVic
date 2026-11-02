@@ -16,7 +16,7 @@ class ScalarFormatter:
     """Renders metric values as compact table cells.
 
     Attributes:
-        EMPTY: Placeholder written in place of a missing value.
+        EMPTY : Placeholder written in place of a missing value.
     """
 
     EMPTY = "—"
@@ -26,10 +26,10 @@ class ScalarFormatter:
         """Renders a scalar, sequence or None as a table cell.
 
         Args:
-            value: Value to render; sequences are joined with commas.
-            precision: Significant digits used for floats.
-            adaptive: Switches floats to scientific notation outside [1e-3, 1e4).
-            empty: String returned when value is None.
+            value     : Value to render; sequences are joined with commas.
+            precision : Significant digits used for floats.
+            adaptive  : Switches floats to scientific notation outside [1e-3, 1e4).
+            empty     : String returned when value is None.
 
         Returns:
             The rendered cell text.
@@ -60,10 +60,10 @@ class MarkdownTable:
     """Accumulates rows and renders them as a width-aligned Markdown pipe table.
 
     Attributes:
-        columns: Header labels.
-        align: Per-column alignment, one of left, center or right.
-        rows: Rendered cell strings, one list per row.
-        EMPTY: Placeholder written for missing cells.
+        columns : Header labels.
+        align   : Per-column alignment, one of left, center or right.
+        rows    : Rendered cell strings, one list per row.
+        EMPTY   : Placeholder written for missing cells.
     """
 
     EMPTY = "—"
@@ -72,30 +72,27 @@ class MarkdownTable:
         """Initializes an empty table.
 
         Args:
-            columns: Header labels, stringified.
-            align: Per-column alignment; defaults to left for every column.
+            columns : Header labels, stringified.
+            align   : Per-column alignment; defaults to left for every column.
         """
         self.columns = [str(c) for c in columns]
         self.align   = list(align) if align is not None else ["left"] * len(self.columns)
         self.rows    = []
 
     def add_row(self, *cells: Any) -> "MarkdownTable":
-        """Appends one row, padding short rows and rendering None as the placeholder.
+        """Appends one row, padding short rows, rendering None as the placeholder and escaping pipes.
+
+        A literal pipe inside a cell would end the cell early and shift every later
+        column, so each one is written as an escaped pipe, which renders as "|".
 
         Args:
-            *cells: Cell values in column order; missing trailing cells are padded.
+            *cells : Cell values in column order; missing trailing cells are padded.
 
         Returns:
             This table, for chaining.
         """
         padded = list(cells) + [None] * (len(self.columns) - len(cells))
-        self.rows.append([self.EMPTY if c is None else str(c) for c in padded])
-        return self
-
-    def add_rows(self, rows: Iterable[Sequence[Any]]) -> "MarkdownTable":
-        """Appends several rows and returns this table, for chaining."""
-        for row in rows:
-            self.add_row(*row)
+        self.rows.append([self.EMPTY if c is None else str(c).replace("|", "\\|") for c in padded])
         return self
 
     def is_empty(self) -> bool:
@@ -144,7 +141,7 @@ class MarkdownDoc:
     """Accumulates Markdown lines into a document that can be rendered or saved.
 
     Attributes:
-        lines: Markdown lines gathered so far.
+        lines : Markdown lines gathered so far.
     """
 
     def __init__(self, title: Optional[str] = None) -> None:
@@ -186,9 +183,9 @@ class MarkdownDoc:
         """Appends a two-column table built from key-value pairs.
 
         Args:
-            items: Mapping or iterable of (key, value) pairs.
-            header: Column labels for the key and value columns.
-            code_keys: Wraps each key in backticks when True.
+            items     : Mapping or iterable of (key, value) pairs.
+            header    : Column labels for the key and value columns.
+            code_keys : Wraps each key in backticks when True.
 
         Returns:
             This document, for chaining.

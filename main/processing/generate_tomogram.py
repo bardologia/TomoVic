@@ -19,7 +19,9 @@ def main() -> None:
     """Generates the Capon tomogram described by the ``--spec`` JSON file.
 
     Pins the thread environment, parses the spec path and runs
-    ``TomogramGenerator``, logging into the spec's own directory.
+    ``TomogramGenerator``, logging into the spec's own directory. The generator is
+    imported once that log is open, so a failed import in the PyRat
+    environment ends the log with its traceback.
     """
     EnvironmentPinner.threads()
 
@@ -27,12 +29,13 @@ def main() -> None:
     parser.add_argument("--spec", required=True, help="Path to the tomogram job spec JSON")
     args = parser.parse_args()
 
-    from pipelines.processing.generation.tomogram import TomogramGenerator
-    from tools.monitoring.logger                  import Logger
+    from tools.monitoring.logger import Logger
 
     spec_path = Path(args.spec)
 
     with Logger(log_dir=str(spec_path.parent), name="tomogram") as logger:
+        from pipelines.processing.generation.tomogram import TomogramGenerator
+
         TomogramGenerator.from_spec_file(spec_path, logger).run()
 
 

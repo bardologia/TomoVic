@@ -24,7 +24,7 @@ def make_split_regions() -> SplitRegions:
 
 def make_gaussian() -> GaussianConfig:
     """Returns a Gaussian config with five slots over a height range of -20 to 80 metres."""
-    return GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0)
+    return GaussianConfig(n_default_gaussians=5, x_min=-20.0, x_max=80.0, activity_threshold=1e-4)
 
 
 def is_dataclass_type(obj) -> bool:

@@ -8,10 +8,9 @@ configured thresholds are crossed, and reports peak usage at shutdown.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
-from datetime import datetime
-from pathlib  import Path
 
 import psutil
 import pynvml
@@ -21,11 +20,11 @@ class ResourceMonitor:
     """Samples system and GPU resource metrics on a background thread.
 
     Attributes:
-        cfg: Resource-monitor configuration block supplying thresholds and interval.
-        logger: Logger used for the startup table, warnings and the peak summary.
-        tracker: Optional tracker that forwards scalars to TensorBoard.
-        step_getter: Callable returning the training step to tag samples with.
-        peak: Running maxima of memory and VRAM metrics observed so far.
+        cfg         : Resource-monitor configuration block supplying thresholds and interval.
+        logger      : Logger used for the startup table, warnings and the peak summary.
+        tracker     : Optional tracker that forwards scalars to TensorBoard.
+        step_getter : Callable returning the training step to tag samples with.
+        peak        : Running maxima of memory and VRAM metrics observed so far.
     """
 
     TB_SCALARS      = ("ram_pct", "proc_rss_gb", "swap_pct", "shm_pct", "cpu_pct", "proc_cpu_pct", "disk_read_mb_s", "disk_write_mb_s")
@@ -35,11 +34,10 @@ class ResourceMonitor:
         """Initializes the monitor and its NVML, disk and threading state.
 
         Args:
-            config: Resource-monitor config with enabled, poll_interval_sec,
-                log_to_tensorboard, the warn_*_pct thresholds and warn_cooldown_sec.
-            logger: Logger for the startup table, threshold warnings and peaks.
-            tracker: Optional tracker whose log_metrics receives the TensorBoard subset.
-            step_getter: Callable returning the current step; defaults to a constant 0.
+            config      : Resource-monitor config with enabled, poll_interval_sec, log_to_tensorboard, the warn_*_pct thresholds and warn_cooldown_sec.
+            logger      : Logger for the startup table, threshold warnings and peaks.
+            tracker     : Optional tracker whose log_metrics receives the TensorBoard subset.
+            step_getter : Callable returning the current step; defaults to a constant 0.
         """
         self.cfg         = config
         self.logger      = logger
@@ -60,7 +58,6 @@ class ResourceMonitor:
         self.log_to_tb       = bool(self.cfg.log_to_tensorboard)
         self.warn_ram_pct    = float(self.cfg.warn_ram_pct)
         self.warn_vram_pct   = float(self.cfg.warn_vram_pct)
-        self.warn_swap_pct   = float(self.cfg.warn_swap_pct)
         self.warn_shm_pct    = float(self.cfg.warn_shm_pct)
         self.warn_cooldown_s = float(self.cfg.warn_cooldown_sec)
 
@@ -71,8 +68,10 @@ class ResourceMonitor:
         psutil.cpu_percent(None, percpu=False)
 
     def _init_nvml(self):
-        """Opens NVML handles for the visible devices, leaving GPU sampling off on failure."""
+        """Opens NVML handles for the visible devices, keeping the failure that leaves GPU sampling off."""
         self._nvml_ok     = False
+        self._nvml_error  = ""
+        self._nvml_failed = set()
         self._gpu_handles = []
         selected          = self._visible_indices()
 
@@ -81,8 +80,15 @@ class ResourceMonitor:
             indices           = range(pynvml.nvmlDeviceGetCount()) if selected is None else selected
             self._gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in indices]
             self._nvml_ok     = True
-        except Exception:
-            pass
+        except Exception as error:
+            self._nvml_error = f"{type(error).__name__}: {error}"
+
+    @staticmethod
+    def _cuda_available() -> bool:
+        """Whether torch is loaded in this process and can see a CUDA device, read without importing torch."""
+        torch = sys.modules.get("torch")
+
+        return torch is not None and torch.cuda.is_available()
 
     @staticmethod
     def _visible_indices():
@@ -92,8 +98,7 @@ class ResourceMonitor:
             List of non-negative device indices, or None when the variable is absent.
 
         Raises:
-            ValueError: If the variable names devices by UUID or MIG identifier
-                instead of plain integer indices.
+            ValueError : If the variable names devices by UUID or MIG identifier instead of plain integer indices.
         """
         raw = os.environ.get("CUDA_VISIBLE_DEVICES")
         if raw is None:
@@ -238,7 +243,7 @@ class ResourceMonitor:
         """Writes per-device VRAM, utilization, temperature and power, and returns the totals.
 
         Args:
-            metrics: Metric dictionary to populate with gpu{i}_* entries.
+            metrics : Metric dictionary to populate with gpu{i}_* entries.
 
         Returns:
             Tuple of (used GB, total GB) summed over the visible devices.
@@ -277,10 +282,26 @@ class ResourceMonitor:
                     
                     gpu_total += total_gb
                     gpu_used += used_gb
-                except Exception:
+                except Exception as error:
+                    self._warn_device(i, error)
                     continue
         
         return gpu_used, gpu_total
+
+    def _warn_device(self, index, error):
+        """Warns once per device whose NVML queries fail, since its figures drop out of every later sample.
+
+        Args:
+            index : Position of the device among this run's visible devices.
+            error : Exception the NVML query raised.
+        """
+        if index in self._nvml_failed:
+            return
+
+        self._nvml_failed.add(index)
+
+        if self.logger is not None:
+            self.logger.warning(f"[ResourceMonitor] NVML query failed for gpu{index} ({type(error).__name__}: {error}): its VRAM and utilisation are missing from this run's totals and system/gpu{index}_* scalars from now on")
 
     def _update_peak_metrics(self, metrics):
         """Raises each tracked peak to the value seen in this sample."""
@@ -289,12 +310,12 @@ class ResourceMonitor:
                 self.peak[k] = float(metrics[k])
 
     def _check_warnings(self, metrics, gpu_used, gpu_total):
-        """Emits cooldown-gated warnings for RAM, aggregated VRAM, swap and /dev/shm.
+        """Emits cooldown-gated warnings for RAM, aggregated VRAM and /dev/shm.
 
         Args:
-            metrics: Metric dictionary produced by the sampling helpers.
-            gpu_used: VRAM in use across the visible devices, in GB.
-            gpu_total: Total VRAM across the visible devices, in GB.
+            metrics   : Metric dictionary produced by the sampling helpers.
+            gpu_used  : VRAM in use across the visible devices, in GB.
+            gpu_total : Total VRAM across the visible devices, in GB.
         """
         if metrics["ram_pct"] >= self.warn_ram_pct:
             self._maybe_warn(
@@ -313,13 +334,6 @@ class ResourceMonitor:
                 f"VRAM usage {vram_pct:.1f}% "
                 f"({gpu_used:.2f}/{gpu_total:.2f} GB, aggregated over the {len(self._gpu_handles)} GPUs this run can see) "
                 f">= threshold {self.warn_vram_pct:.1f}%",
-            )
-        
-        if metrics["swap_pct"] >= self.warn_swap_pct:
-            self._maybe_warn(
-                "swap",
-                f"Swap usage {metrics['swap_pct']:.1f}% "
-                f"({metrics['swap_used_gb']:.2f} GB) >= threshold {self.warn_swap_pct:.1f}%",
             )
         
         if metrics["shm_pct"] >= self.warn_shm_pct:
@@ -392,16 +406,20 @@ class ResourceMonitor:
             return
         
         tb_effective = self.log_to_tb and self.tracker is not None and getattr(self.tracker, "writer", None) is not None
+        nvml         = f"True ({len(self._gpu_handles)} GPUs; VRAM figures aggregate the devices named by CUDA_VISIBLE_DEVICES, gpu0 being this run's cuda:0)" if self._nvml_ok else f"False ({self._nvml_error})"
 
         self.logger.section("[Resource Monitor]")
         self.logger.kv_table({
             "Enabled"         : self.enabled,
             "Poll interval"   : f"{self.interval:.1f} s",
-            "NVML available"  : f"{self._nvml_ok} ({len(self._gpu_handles)} GPUs; VRAM figures aggregate the devices named by CUDA_VISIBLE_DEVICES, gpu0 being this run's cuda:0)",
+            "NVML available"  : nvml,
             "TB logging"      : f"{self.log_to_tb} (effective: {tb_effective})",
-            "Warn thresholds" : f"RAM>={self.warn_ram_pct:g}%  VRAM>={self.warn_vram_pct:g}%  SWAP>={self.warn_swap_pct:g}%  SHM>={self.warn_shm_pct:g}%",
+            "Warn thresholds" : f"RAM>={self.warn_ram_pct:g}%  VRAM>={self.warn_vram_pct:g}%  SHM>={self.warn_shm_pct:g}%",
             "Warn cooldown"   : f"{self.warn_cooldown_s:g} s per warning kind",
         })
+
+        if not self._nvml_ok and self._cuda_available():
+            self.logger.warning(f"[ResourceMonitor] NVML unavailable ({self._nvml_error}) on a CUDA-capable process: GPU utilisation, the VRAM threshold warnings and the system/gpu* scalars are off for this run")
 
     def start(self):
         """Starts the daemon sampling thread, or returns immediately when disabled."""

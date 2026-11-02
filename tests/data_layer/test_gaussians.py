@@ -1,9 +1,45 @@
-"""Tests for Gaussian mixture evaluation, curve reconstruction and parameter clamping."""
+"""Tests for Gaussian mixture evaluation, curve reconstruction, parameter clamping and the slot activity predicate."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from tools.data.gaussians import (
+    GaussianActivity,
+    GaussianMixture,
+    GaussianReconstructor,
+    GaussianSlotSorter,
+)
+
+
+def test_activity_is_strictly_above_the_threshold():
+    """Verifies an amplitude equal to the threshold is inactive and only larger ones are active, for arrays and floats alike."""
+    amps = np.array([0.0, 1e-3, 1e-3 + 1e-9, 5e-3], dtype=np.float64)
+
+    assert GaussianActivity.is_active(amps, 1e-3).tolist() == [False, False, True, True]
+    assert GaussianActivity.is_active(1e-3, 1e-3) is False
+
+
+def test_zero_threshold_keeps_stored_zeros_inactive():
+    """Verifies a zero threshold means any positive amplitude, so padded and unfitted slots at exactly zero stay inactive."""
+    amps = np.array([0.0, 1e-10, 3e-5], dtype=np.float32)
+
+    assert GaussianActivity.is_active(amps, 0.0).tolist() == [False, True, True]
+
+
+def test_slot_sorter_treats_threshold_amplitude_as_inactive():
+    """Verifies the mean sorter pushes a slot sitting exactly on the threshold behind the active slots."""
+    cube = np.zeros((6, 1, 1), dtype=np.float32)
+    cube[0, 0, 0], cube[1, 0, 0] = 1e-3, 5.0
+    cube[3, 0, 0], cube[4, 0, 0] = 2e-3, 20.0
+
+    ordered = GaussianSlotSorter.by_mean(cube, 2, 1e-3)
+
+    assert ordered[1, 0, 0] == 20.0
+    assert ordered[4, 0, 0] == 5.0
+
+
+
 
 from tools.data.gaussians import GaussianMixture, GaussianReconstructor
 def test_safe_sigma_sq_floor():

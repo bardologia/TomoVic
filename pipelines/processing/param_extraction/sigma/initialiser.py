@@ -19,16 +19,22 @@ class PeakInitialiser:
     """Builds Gaussian-mixture initialisations from profile peak detection.
 
     Attributes:
-        n_workers: Number of worker processes; 1 keeps the work in-process.
+        n_workers : Number of worker processes; 1 keeps the work in-process.
     """
 
     def __init__(self, n_workers : int = 1) -> None:
         """Creates the initialiser and warms its process pool when parallel.
 
         Args:
-            n_workers: Worker processes to spawn, floored at 1.
+            n_workers : Worker processes to spawn; 0 and 1 both keep the work in-process, and ``n_workers`` then reads 1.
+
+        Raises:
+            ValueError : If n_workers is negative.
         """
-        self.n_workers = max(1, int(n_workers))
+        if int(n_workers) < 0:
+            raise ValueError(f"PeakInitialiser n_workers must be 0 or more, got {n_workers}; 0 and 1 keep the peak initialisation in-process (config field parameter_workers)")
+
+        self.n_workers = 1 if int(n_workers) == 0 else int(n_workers)
         self._pool     = None
 
         if self.n_workers > 1:
@@ -44,12 +50,12 @@ class PeakInitialiser:
         flat profile falls back to K evenly spaced height bins.
 
         Args:
-            raw_chunk: Raw profiles of shape (chunk_N, H).
-            height_axis: Height axis of shape (H,) in metres.
-            K: Number of Gaussians to initialise.
-            sigma_guess: Initial standard deviation in metres.
-            min_dist: Minimum peak separation in height bins.
-            prominence_frac: Peak prominence as a fraction of the profile max.
+            raw_chunk       : Raw profiles of shape (chunk_N, H).
+            height_axis     : Height axis of shape (H,) in metres.
+            K               : Number of Gaussians to initialise.
+            sigma_guess     : Initial standard deviation in metres.
+            min_dist        : Minimum peak separation in height bins.
+            prominence_frac : Peak prominence as a fraction of the profile max.
 
         Returns:
             Tuple of amplitudes, means in metres and sigmas in metres, each of
@@ -106,8 +112,8 @@ class PeakInitialiser:
         """Returns the heuristic initial sigma in metres before any division.
 
         Args:
-            height_axis: Height axis of shape (H,) in metres.
-            K: Number of Gaussians the height span is shared by.
+            height_axis : Height axis of shape (H,) in metres.
+            K           : Number of Gaussians the height span is shared by.
 
         Returns:
             The larger of two height bins and one eighth of the span per
@@ -120,18 +126,30 @@ class PeakInitialiser:
 
     @classmethod
     def sigma_guess(cls, height_axis : np.ndarray, K : int, sigma_divisor : float) -> float:
-        """Returns the initial sigma in metres after applying the divisor."""
-        return cls.sigma_base(height_axis, K) / max(float(sigma_divisor), 1e-6)
+        """Returns the initial sigma in metres after applying the divisor.
+
+        Args:
+            height_axis   : Height axis of shape (H,) in metres.
+            K             : Number of Gaussians the height span is shared by.
+            sigma_divisor : Positive divisor of the heuristic initial sigma.
+
+        Raises:
+            ValueError : If the divisor is zero or negative.
+        """
+        if sigma_divisor <= 0:
+            raise ValueError(f"sigma_init_divisor must be positive, got {sigma_divisor}; it divides the heuristic initial sigma, so zero or a negative value has no meaningful width")
+
+        return cls.sigma_base(height_axis, K) / float(sigma_divisor)
 
     def run(self, prof_raw : np.ndarray, height_axis : np.ndarray, K : int, prominence_frac : float = 0.05, sigma_divisor : float = 1.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Initialises every profile, splitting the work across the pool.
 
         Args:
-            prof_raw: Raw profiles of shape (N, H).
-            height_axis: Height axis of shape (H,) in metres.
-            K: Number of Gaussians to initialise.
-            prominence_frac: Peak prominence as a fraction of the profile max.
-            sigma_divisor: Divides the heuristic initial sigma.
+            prof_raw        : Raw profiles of shape (N, H).
+            height_axis     : Height axis of shape (H,) in metres.
+            K               : Number of Gaussians to initialise.
+            prominence_frac : Peak prominence as a fraction of the profile max.
+            sigma_divisor   : Divides the heuristic initial sigma.
 
         Returns:
             Tuple of amplitudes, means in metres and sigmas in metres, each of

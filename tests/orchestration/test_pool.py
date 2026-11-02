@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from tools.orchestration.pool import ProcessPoolRunner
@@ -26,6 +28,14 @@ def _raise_on_three(x):
     return x
 
 
+def _fail_fast_or_sleep(x):
+    """Raises at once for the value zero and sleeps two seconds for any other value."""
+    if x == 0:
+        raise ValueError("early failure")
+    time.sleep(2.0)
+    return x
+
+
 def _const(_x):
     """Returns the constant 42 regardless of the job."""
     return 42
@@ -40,13 +50,15 @@ class RecordingLogger(SilentLogger):
     """Logger stub collecting the subsection and error lines the runner emits.
 
     Attributes:
-        subsections: Per-completion lines received.
-        errors: Failure lines received.
+        subsections : Per-completion lines received.
+        errors      : Failure lines received.
+        warnings    : Wait notices received.
     """
     def __init__(self):
         """Creates the empty message buffers."""
         self.subsections = []
         self.errors      = []
+        self.warnings    = []
 
     def subsection(self, message, *args, **kwargs):
         """Stores a subsection line."""
@@ -55,6 +67,10 @@ class RecordingLogger(SilentLogger):
     def error(self, message, *args, **kwargs):
         """Stores an error line."""
         self.errors.append(str(message))
+
+    def warning(self, message, *args, **kwargs):
+        """Stores a warning line."""
+        self.warnings.append(str(message))
 
 
 @pytest.fixture
@@ -170,3 +186,15 @@ def test_iterable_input_is_consumed(logger):
     results = dict(runner.run(iter([1, 2, 3]), _const, _label))
 
     assert results == {1: 42, 2: 42, 3: 42}
+
+
+def test_first_failure_names_the_running_jobs_it_waits_for():
+    """Verifies the runner says which in-flight jobs it waits for after the first failure instead of going silent."""
+    recorder = RecordingLogger()
+    runner   = ProcessPoolRunner(logger=recorder, max_workers=2)
+
+    with pytest.raises(ValueError, match="early failure"):
+        runner.run([0, 1], _fail_fast_or_sleep, _label)
+
+    assert recorder.warnings == ["Waiting for 1 in-flight job(s) to finish before re-raising, since a running worker cannot be cancelled: job 1"]
+

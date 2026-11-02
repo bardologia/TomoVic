@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib     import Path
 
-from configuration.param_extraction import ExtractionConfig, FitConfig, FitMode, FitSettings
+from configuration.param_extraction           import ExtractionConfig, FitConfig, FitMode, FitSettings
+from pipelines.processing.param_extraction.io import ParameterRunMeta
 
 
 @dataclass
@@ -17,11 +18,11 @@ class ExtractionGroup:
     """One dataset and k_max pairing with all its fit permutations.
 
     Attributes:
-        processed_data_path: Preprocessed dataset directory the fit reads from.
-        k_max: Largest model order fitted by this group.
-        modes: Fit mode names selecting which parameters are free.
-        lambda_values: Model-order penalty weights fitted in this group.
-        configs: Mapping from (mode, lambda) to that permutation's extraction configuration.
+        processed_data_path : Preprocessed dataset directory the fit reads from.
+        k_max               : Largest model order fitted by this group.
+        modes               : Fit mode names selecting which parameters are free.
+        lambda_values       : Model-order penalty weights fitted in this group.
+        configs             : Mapping from (mode, lambda) to that permutation's extraction configuration.
     """
 
     processed_data_path : Path
@@ -40,32 +41,39 @@ class ExtractionPlanResolver:
     """Expands the entry configuration into one extraction group per dataset and k_max.
 
     Attributes:
-        entry_config: Entry configuration carrying the k, lambda and mode sweep lists.
-        dataset_dirs: Preprocessed dataset directories to fit.
+        entry_config : Entry configuration carrying the k, lambda and mode sweep lists.
+        dataset_dirs : Preprocessed dataset directories to fit.
     """
 
     def __init__(self, entry_config, dataset_dirs: list[Path]) -> None:
         """Binds the resolver to an entry configuration and its datasets.
 
         Args:
-            entry_config: Entry configuration carrying the sweep lists and fit settings.
-            dataset_dirs: Preprocessed dataset directories to fit.
+            entry_config : Entry configuration carrying the sweep lists and fit settings.
+            dataset_dirs : Preprocessed dataset directories to fit.
         """
         self.entry_config = entry_config
         self.dataset_dirs = dataset_dirs
 
     def _validate(self) -> None:
-        """Checks the sweep lists and the output-name collision rule.
+        """Checks the sweep lists, the dataset queue and the output-name collision rule.
 
         Raises:
-            ValueError: If a sweep list is empty or not a sequence, or if a fixed
-                ``output_suffix`` is combined with a sweep expanding to several
-                permutations that would collide on it.
+            ValueError : If a sweep list is empty, not a sequence or repeats a value, if a dataset is queued twice, if ``fit_sigma_init_divisor`` is not positive, or if a fixed ``output_suffix`` is combined with a sweep expanding to several permutations that would collide on it.
         """
         for name in ("fit_k_values", "fit_lambda_values", "fit_modes"):
             value = getattr(self.entry_config, name)
             if not isinstance(value, (list, tuple)) or not value:
                 raise ValueError(f"{name} must be a non-empty list, got {value!r}")
+            if len(set(value)) != len(value):
+                raise ValueError(f"{name} repeats a value: {list(value)!r}; a repeated entry refits the same permutation and overwrites its run")
+
+        if len(set(self.dataset_dirs)) != len(self.dataset_dirs):
+            repeated = sorted({str(path) for path in self.dataset_dirs if self.dataset_dirs.count(path) > 1})
+            raise ValueError(f"dataset_filter queues a dataset twice: {', '.join(repeated)}; the second pass would refit and overwrite the first")
+
+        if self.entry_config.fit_sigma_init_divisor <= 0:
+            raise ValueError(f"fit_sigma_init_divisor must be positive, got {self.entry_config.fit_sigma_init_divisor}; it divides the heuristic initial sigma")
 
         permutations = len(self.entry_config.fit_k_values) * len(self.entry_config.fit_lambda_values) * len(self.entry_config.fit_modes)
         if self.entry_config.output_suffix and permutations > 1:
@@ -75,10 +83,10 @@ class ExtractionPlanResolver:
         """Builds the extraction configuration of one fit permutation.
 
         Args:
-            processed_data_path: Preprocessed dataset directory the fit reads from.
-            k_max: Largest model order for this permutation.
-            lambda_k: Model-order penalty weight for this permutation.
-            mode: Fit mode name selecting which parameters are free.
+            processed_data_path : Preprocessed dataset directory the fit reads from.
+            k_max               : Largest model order for this permutation.
+            lambda_k            : Model-order penalty weight for this permutation.
+            mode                : Fit mode name selecting which parameters are free.
 
         Returns:
             Extraction configuration for this permutation.
@@ -120,8 +128,8 @@ class ExtractionPlanResolver:
         """Builds the group covering every mode and lambda at one dataset and k_max.
 
         Args:
-            processed_data_path: Preprocessed dataset directory the fits read from.
-            k_max: Largest model order for this group.
+            processed_data_path : Preprocessed dataset directory the fits read from.
+            k_max               : Largest model order for this group.
 
         Returns:
             Extraction group holding one configuration per (mode, lambda) permutation.
@@ -139,6 +147,46 @@ class ExtractionPlanResolver:
             configs             = configs,
         )
 
+    @staticmethod
+    def _refuse_colliding_outputs(group: ExtractionGroup) -> None:
+        """Raises when two permutations of a group would write into one run directory.
+
+        The run name encodes the canonical free-parameter set and the printed
+        lambda tag, so modes naming the same components in another order, or
+        lambdas sharing a tag, resolve to one directory.
+
+        Args:
+            group : Extraction group whose permutations are checked.
+
+        Raises:
+            ValueError : Naming every colliding directory and the (mode, lambda) pairs behind it.
+        """
+        by_directory: dict[Path, list] = {}
+        for key, config in group.configs.items():
+            by_directory.setdefault(config.output_directory, []).append(key)
+
+        collisions = {directory: keys for directory, keys in by_directory.items() if len(keys) > 1}
+        if collisions:
+            described = "; ".join(f"{directory.name} <- {keys}" for directory, keys in collisions.items())
+            raise ValueError(f"Fit permutations of k_max {group.k_max} on {group.processed_data_path.name} collide on one run directory: {described}; modes naming the same free parameters in another order and lambdas sharing a printed tag resolve to one run name")
+
+    def _refuse_existing_runs(self, groups: list[ExtractionGroup]) -> None:
+        """Raises before any fitting when a permutation would land on an existing run and overwriting is off.
+
+        Args:
+            groups : Extraction groups whose output directories are checked.
+
+        Raises:
+            FileExistsError : Naming every occupied directory with the source and timestamp of the run it holds.
+        """
+        if self.entry_config.overwrite:
+            return
+
+        existing = [config.output_directory for group in groups for config in group.configs.values() if ParameterRunMeta.holds_run(config.output_directory)]
+        if existing:
+            described = "; ".join(f"{directory} ({ParameterRunMeta.describe(directory)})" for directory in existing)
+            raise FileExistsError(f"{len(existing)} fit permutation(s) would overwrite an existing parameter run: {described}. Set overwrite=True to delete and refit them, or change the sweep so the run names differ; the name encodes only k_max, lambda, the sigma divisor and the free parameters")
+
     def resolve(self) -> list[ExtractionGroup]:
         """Validates the sweep and returns one group per dataset and k_max.
 
@@ -146,13 +194,18 @@ class ExtractionPlanResolver:
             Extraction groups, ordered by dataset and then by k_max.
 
         Raises:
-            ValueError: If the sweep lists or the output-suffix setting are invalid.
+            ValueError      : If the sweep lists or the output-suffix setting are invalid, or permutations collide on a run directory.
+            FileExistsError : If a permutation would overwrite an existing run while ``overwrite`` is off.
         """
         self._validate()
 
         groups = []
         for processed_data_path in self.dataset_dirs:
             for k_max in self.entry_config.fit_k_values:
-                groups.append(self._build_group(processed_data_path, k_max))
+                group = self._build_group(processed_data_path, k_max)
+                self._refuse_colliding_outputs(group)
+                groups.append(group)
+
+        self._refuse_existing_runs(groups)
 
         return groups

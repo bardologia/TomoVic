@@ -22,20 +22,20 @@ class SpatialMapPlotter(PlotBase):
     """Renders the azimuth-range colour maps of a fitted parameter stack.
 
     Attributes:
-        n_gaussians: Number of Gaussian slots, setting the discrete map levels.
-        logger: Logger for skip warnings.
-        fig_dpi: Figure resolution used while rendering.
-        save_dpi: Resolution the PNGs are written at.
+        n_gaussians : Number of Gaussian slots, setting the discrete map levels.
+        logger      : Logger for skip warnings.
+        fig_dpi     : Figure resolution used while rendering.
+        save_dpi    : Resolution the PNGs are written at.
     """
 
     def __init__(self, n_gaussians : int, logger : Logger, fig_dpi : int = 150, save_dpi : int = 300) -> None:
         """Configures the spatial map plotter.
 
         Args:
-            n_gaussians: Number of Gaussian slots, setting the discrete map levels.
-            logger: Logger for skip warnings.
-            fig_dpi: Figure resolution used while rendering.
-            save_dpi: Resolution the PNGs are written at.
+            n_gaussians : Number of Gaussian slots, setting the discrete map levels.
+            logger      : Logger for skip warnings.
+            fig_dpi     : Figure resolution used while rendering.
+            save_dpi    : Resolution the PNGs are written at.
         """
         self.n_gaussians = n_gaussians
         self.logger      = logger
@@ -46,10 +46,10 @@ class SpatialMapPlotter(PlotBase):
         """Saves a discretely coloured map of an integer model-order field.
 
         Args:
-            k_map: Integer counts of shape (azimuth, range), from 0 to ``n_gaussians``.
-            title: Figure title.
-            cbar_label: Colourbar label.
-            out_path: Destination PNG path.
+            k_map      : Integer counts of shape (azimuth, range), from 0 to ``n_gaussians``.
+            title      : Figure title.
+            cbar_label : Colourbar label.
+            out_path   : Destination PNG path.
 
         Returns:
             The saved figure path.
@@ -89,13 +89,13 @@ class SpatialMapPlotter(PlotBase):
         """Saves one continuous colour map per requested key, sharing a colourbar label.
 
         Args:
-            maps_dict: Mapping from key to a field of shape (azimuth, range).
-            keys: Keys to plot, in order.
-            map_titles: Figure titles aligned with ``keys``.
-            group_name: Group name used in the skip warnings.
-            col_label: Colourbar label shared by the group.
-            out_dir: Directory the figures are written to.
-            cmap: Colormap name applied to every map in the group.
+            maps_dict  : Mapping from key to a field of shape (azimuth, range).
+            keys       : Keys to plot, in order.
+            map_titles : Figure titles aligned with ``keys``.
+            group_name : Group name used in the skip warnings.
+            col_label  : Colourbar label shared by the group.
+            out_dir    : Directory the figures are written to.
+            cmap       : Colormap name applied to every map in the group.
 
         Returns:
             Mapping from key to the saved PNG path, skipping absent or fully masked fields.
@@ -134,12 +134,91 @@ class SpatialMapPlotter(PlotBase):
 
         return saved
 
+    def plot_activity_map(self, activity_map : np.ndarray, amp_threshold : float, out_dir : Path) -> Path:
+        """Saves the discrete map of active Gaussian slots per pixel.
+
+        Args:
+            activity_map  : Active-slot count of shape (azimuth, range).
+            amp_threshold : Amplitude threshold the count was taken at, quoted in the title.
+            out_dir       : Directory the figure is written to.
+
+        Returns:
+            Path of the saved PNG.
+        """
+        self.logger.subsection("Plotting active-Gaussian count colormap")
+
+        return self.plot_discrete_k_map(
+            activity_map,
+            rf"Number of active Gaussians per pixel  ($A_k \geq {amp_threshold:g}$)",
+            r"active Gaussians $K$",
+            out_dir / "n_gaussians_map.png",
+        )
+
+    def plot_parameter_maps(self, maps_dict : Dict[str, np.ndarray], out_dir : Path) -> Dict[str, Path]:
+        """Saves the masked per-slot amplitude, centroid, spread and separation maps.
+
+        Args:
+            maps_dict : Mapping holding the ``amp_k``, ``mu_k``, ``sigma_k`` and ``mu_sep_k_k+1`` fields of shape (azimuth, range).
+            out_dir   : Directory receiving one subdirectory per parameter family.
+
+        Returns:
+            Mapping from map key to the saved PNG path.
+        """
+        saved : Dict[str, Path] = {}
+
+        self.logger.subsection("Plotting amplitude spatial maps")
+        amp_keys   = [f"amp_{k}"   for k in range(self.n_gaussians)]
+        amp_titles = [f"$A_{{{k + 1}}}$  amplitude  (inactive pixels masked)" for k in range(self.n_gaussians)]
+        saved.update(self.plot_spatial_maps(
+            maps_dict, amp_keys, amp_titles,
+            "Gaussian amplitude maps",
+            r"$A_k$",
+            out_dir / "amplitude_maps",
+            cmap="plasma",
+        ))
+
+        self.logger.subsection("Plotting height-centroid (μ) spatial maps")
+        mu_keys   = [f"mu_{k}"    for k in range(self.n_gaussians)]
+        mu_titles = [rf"$\mu_{{{k + 1}}}$  centroid [m]  (inactive pixels masked)" for k in range(self.n_gaussians)]
+        saved.update(self.plot_spatial_maps(
+            maps_dict, mu_keys, mu_titles,
+            r"Gaussian centroid height maps",
+            r"$\mu_k$ [m]",
+            out_dir / "mu_maps",
+            cmap="RdYlGn",
+        ))
+
+        self.logger.subsection("Plotting sigma spatial maps")
+        sig_keys   = [f"sigma_{k}" for k in range(self.n_gaussians)]
+        sig_titles = [rf"$\sigma_{{{k + 1}}}$  spread [m]  (inactive pixels masked)" for k in range(self.n_gaussians)]
+        saved.update(self.plot_spatial_maps(
+            maps_dict, sig_keys, sig_titles,
+            r"Gaussian spread maps",
+            r"$\sigma_k$ [m]",
+            out_dir / "sigma_maps",
+            cmap="viridis",
+        ))
+
+        if self.n_gaussians >= 2:
+            self.logger.subsection("Plotting μ-separation maps")
+            sep_keys   = [f"mu_sep_{k}_{k + 1}" for k in range(self.n_gaussians - 1)]
+            sep_titles = [rf"$|\mu_{{{k + 2}}} - \mu_{{{k + 1}}}|$  [m]  (both active)" for k in range(self.n_gaussians - 1)]
+            saved.update(self.plot_spatial_maps(
+                maps_dict, sep_keys, sep_titles,
+                r"Adjacent centroid separation maps",
+                "separation [m]",
+                out_dir / "mu_separation_maps",
+                cmap="magma",
+            ))
+
+        return saved
+
     def plot_r2_spatial_map(self, r2_map : np.ndarray, out_path : Path) -> Path:
         """Saves the per-pixel fit-quality map, with the colour floor at its 1st percentile.
 
         Args:
-            r2_map: Per-pixel R-squared of shape (azimuth, range), NaN where unfitted.
-            out_path: Destination PNG path.
+            r2_map   : Per-pixel R-squared of shape (azimuth, range), NaN where unfitted.
+            out_path : Destination PNG path.
 
         Returns:
             The saved figure path.
@@ -167,8 +246,8 @@ class SpatialMapPlotter(PlotBase):
         """Saves the per-pixel peak-to-floor contrast map, clipped to its 1st-99th percentiles.
 
         Args:
-            snr_db_map: Peak-to-floor contrast of shape (azimuth, range), in dB.
-            out_path: Destination PNG path.
+            snr_db_map : Peak-to-floor contrast of shape (azimuth, range), in dB.
+            out_path   : Destination PNG path.
 
         Returns:
             The saved figure path.
@@ -182,7 +261,7 @@ class SpatialMapPlotter(PlotBase):
             snr_db_map,
             x_label        = "range [px]",
             y_label        = "azimuth [px]",
-            title          = "Per-pixel peak-to-floor profile contrast  (uncalibrated proxy, not calibrated SNR)",
+            title          = "Per-pixel peak-to-floor profile contrast\n(uncalibrated proxy, not calibrated SNR)",
             cmap           = cmap_obj,
             vmin           = vmin,
             vmax           = vmax,

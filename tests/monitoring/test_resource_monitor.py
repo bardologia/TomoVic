@@ -15,27 +15,25 @@ class FakeConfig:
     """Stand-in monitoring config exposing every field ResourceMonitor reads.
 
     Attributes:
-        enabled: Whether monitoring is active.
-        poll_interval_sec: Sampling period in seconds.
-        log_to_tensorboard: Whether samples are forwarded to the tracker.
-        warn_ram_pct: RAM usage percentage above which a warning fires.
-        warn_vram_pct: VRAM usage percentage above which a warning fires.
-        warn_swap_pct: Swap usage percentage above which a warning fires.
-        warn_shm_pct: Shared-memory usage percentage above which a warning fires.
-        warn_cooldown_sec: Minimum seconds between two warnings sharing a key.
+        enabled            : Whether monitoring is active.
+        poll_interval_sec  : Sampling period in seconds.
+        log_to_tensorboard : Whether samples are forwarded to the tracker.
+        warn_ram_pct       : RAM usage percentage above which a warning fires.
+        warn_vram_pct      : VRAM usage percentage above which a warning fires.
+        warn_shm_pct       : Shared-memory usage percentage above which a warning fires.
+        warn_cooldown_sec  : Minimum seconds between two warnings sharing a key.
     """
     def __init__(self, **kwargs):
         """Builds a config whose unspecified fields take monitor-friendly defaults.
 
         Args:
-            **kwargs: Field overrides keyed by attribute name.
+            **kwargs : Field overrides keyed by attribute name.
         """
         self.enabled            = kwargs.get("enabled", True)
         self.poll_interval_sec  = kwargs.get("poll_interval_sec", 0.05)
         self.log_to_tensorboard = kwargs.get("log_to_tensorboard", True)
         self.warn_ram_pct       = kwargs.get("warn_ram_pct", 90.0)
         self.warn_vram_pct      = kwargs.get("warn_vram_pct", 90.0)
-        self.warn_swap_pct      = kwargs.get("warn_swap_pct", 50.0)
         self.warn_shm_pct       = kwargs.get("warn_shm_pct", 80.0)
         self.warn_cooldown_sec  = kwargs.get("warn_cooldown_sec", 30.0)
 
@@ -44,10 +42,10 @@ class CollectingLogger:
     """Logger stub that stores every message it is handed.
 
     Attributes:
-        warnings: Warning messages received.
-        sections: Section titles received.
-        subsections: Subsection titles received.
-        kv_tables: Key-value tables received, each copied into a dict.
+        warnings    : Warning messages received.
+        sections    : Section titles received.
+        subsections : Subsection titles received.
+        kv_tables   : Key-value tables received, each copied into a dict.
     """
     def __init__(self):
         """Creates the empty message buffers."""
@@ -77,7 +75,7 @@ class RecordingTracker:
     """Tracker stub recording every metrics batch it receives.
 
     Attributes:
-        calls: Tuples of (prefix, metrics, step) in call order.
+        calls : Tuples of (prefix, metrics, step) in call order.
     """
     def __init__(self):
         """Creates the empty call buffer."""
@@ -106,8 +104,8 @@ def test_load_config_reads_fields(cfg):
 
     assert m.enabled       is True
     assert m.interval      == 0.05
-    assert m.warn_ram_pct  == 90.0
-    assert m.warn_swap_pct == 50.0
+    assert m.warn_ram_pct == 90.0
+    assert m.warn_shm_pct == 80.0
 
 
 def test_missing_config_field_raises():
@@ -231,7 +229,7 @@ def test_maybe_warn_after_cooldown_fires_again():
 
 def test_check_warnings_triggers_on_low_thresholds():
     """Verifies sampling emits a RAM warning once the threshold is set to zero."""
-    cfg    = FakeConfig(warn_ram_pct=0.0, warn_swap_pct=0.0, warn_shm_pct=0.0, warn_cooldown_sec=1000.0)
+    cfg    = FakeConfig(warn_ram_pct=0.0, warn_shm_pct=0.0, warn_cooldown_sec=1000.0)
     logger = CollectingLogger()
     m      = ResourceMonitor(cfg, logger=logger)
 
@@ -242,7 +240,7 @@ def test_check_warnings_triggers_on_low_thresholds():
 
 def test_check_warnings_silent_with_high_thresholds():
     """Verifies sampling stays silent while every threshold is unreachable."""
-    cfg    = FakeConfig(warn_ram_pct=999.0, warn_swap_pct=999.0, warn_shm_pct=999.0, warn_vram_pct=999.0)
+    cfg    = FakeConfig(warn_ram_pct=999.0, warn_shm_pct=999.0, warn_vram_pct=999.0)
     logger = CollectingLogger()
     m      = ResourceMonitor(cfg, logger=logger)
 
@@ -395,7 +393,7 @@ def test_run_survives_sample_exception(monkeypatch):
 
 
 def test_nvml_unavailable_path_has_no_gpu_handles(monkeypatch):
-    """Verifies a failed NVML init leaves no GPU handles and zeroed VRAM metrics."""
+    """Verifies a failed NVML init leaves no GPU handles and zeroed VRAM metrics, and keeps the failure."""
     def fail_init():
         raise RuntimeError("no nvml")
 
@@ -405,11 +403,57 @@ def test_nvml_unavailable_path_has_no_gpu_handles(monkeypatch):
 
     assert m._nvml_ok     is False
     assert m._gpu_handles == []
+    assert m._nvml_error  == "RuntimeError: no nvml"
 
     metrics = m.sample()
 
     assert metrics["vram_used_gb"] == 0.0
     assert metrics["vram_pct"]     == 0.0
+
+
+def test_nvml_failure_is_named_in_the_startup_table_and_warned_on_a_cuda_process(monkeypatch):
+    """Verifies the startup row carries the NVML error and the warning fires only when torch can see a CUDA device."""
+    def fail_init():
+        raise RuntimeError("driver/library version mismatch")
+
+    monkeypatch.setattr(rm.pynvml, "nvmlInit", fail_init)
+    monkeypatch.setattr(ResourceMonitor, "_cuda_available", staticmethod(lambda: False))
+
+    logger = CollectingLogger()
+    m      = ResourceMonitor(FakeConfig(), logger=logger)
+    m._log_startup_info()
+
+    assert logger.kv_tables[0]["NVML available"] == "False (RuntimeError: driver/library version mismatch)"
+    assert logger.warnings == []
+
+    monkeypatch.setattr(ResourceMonitor, "_cuda_available", staticmethod(lambda: True))
+    m._log_startup_info()
+
+    assert len(logger.warnings) == 1
+    assert "driver/library version mismatch" in logger.warnings[0]
+    assert "system/gpu*" in logger.warnings[0]
+
+
+def test_a_device_whose_queries_fail_is_warned_about_once(monkeypatch):
+    """Verifies a device dropping out of the NVML totals is named once, with the error, and not on every sample."""
+    def broken_memory(handle):
+        raise RuntimeError("GPU is lost")
+
+    monkeypatch.setattr(rm.pynvml, "nvmlInit", lambda: None)
+    monkeypatch.setattr(rm.pynvml, "nvmlDeviceGetCount", lambda: 1)
+    monkeypatch.setattr(rm.pynvml, "nvmlDeviceGetHandleByIndex", lambda index: f"handle{index}")
+    monkeypatch.setattr(rm.pynvml, "nvmlDeviceGetMemoryInfo", broken_memory)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    logger = CollectingLogger()
+    m      = ResourceMonitor(FakeConfig(), logger=logger)
+
+    m.sample()
+    m.sample()
+
+    assert len(logger.warnings) == 1
+    assert "gpu0" in logger.warnings[0] and "GPU is lost" in logger.warnings[0]
+    assert m._nvml_failed == {0}
 
 
 def test_handles_cover_only_the_visible_devices(monkeypatch):

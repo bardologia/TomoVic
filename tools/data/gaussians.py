@@ -166,16 +166,39 @@ class GaussianReconstructor:
         return [GaussianMixture.kernel(float(params[3 * k]), float(params[3 * k + 1]), float(params[3 * k + 2]), x_axis) for k in range(n_gaussians)]
 
 
+class GaussianActivity:
+    """The one definition of when a Gaussian slot counts as active."""
+    @staticmethod
+    def is_active(amplitude, threshold: float):
+        """Returns whether an amplitude lies strictly above the activity threshold.
+
+        Every loss mask, slot sorter, matcher, metric and analysis asks this
+        question here, so a threshold of zero means any positive amplitude and a
+        slot stored at exactly zero is never active.
+
+        Args:
+            amplitude : Physical amplitude as a float, NumPy array or torch tensor of any shape.
+            threshold : Physical amplitude above which a slot counts as active, as recorded by the label run.
+
+        Returns:
+            Boolean of the same kind and shape as amplitude.
+        """
+        return amplitude > threshold
+
+
 class GaussianSlotSorter:
     """Orders the Gaussian slots of a parameter cube."""
     @staticmethod
     def by_mean(parameters_array: np.ndarray, n_gaussians: int, activity_threshold: float) -> np.ndarray:
         """Sorts the slots of every pixel by mean height, pushing inactive slots last.
 
+        The sort is stable, so slots sharing a key, which inactive slots all do,
+        keep their stored relative order.
+
         Args:
-            parameters_array: Parameter cube of shape (3*n_gaussians, azimuth, range).
-            n_gaussians: Number of slots held in the cube.
-            activity_threshold: Amplitude below which a slot is treated as inactive.
+            parameters_array   : Parameter cube of shape (3*n_gaussians, azimuth, range).
+            n_gaussians        : Number of slots held in the cube.
+            activity_threshold : Amplitude above which a slot counts as active.
 
         Returns:
             The cube with slots reordered, of the same shape as the input.
@@ -186,8 +209,8 @@ class GaussianSlotSorter:
         amps = reshaped[:, 0, :, :]
         mus  = reshaped[:, 1, :, :]
 
-        sort_keys = np.where(amps > activity_threshold, mus, np.inf)
-        order     = np.argsort(sort_keys, axis=0)
+        sort_keys = np.where(GaussianActivity.is_active(amps, activity_threshold), mus, np.inf)
+        order     = np.argsort(sort_keys, axis=0, kind="stable")
         ordered   = np.take_along_axis(reshaped, order[:, np.newaxis, :, :], axis=0)
 
         return ordered.reshape(n_params, azimuth, range_)

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from tools.data.gaussians     import GaussianActivity
 from tools.monitoring.logger  import Logger
 from tools.sar.geometry_field import GeometryField
 
@@ -22,27 +23,27 @@ class ActiveGaussianTable:
     """Flattens a parameter stack into the pixels that carry at least one active Gaussian.
 
     Attributes:
-        k_max: Number of Gaussian slots per pixel.
-        n_pixels: Number of retained pixels.
-        amplitudes: Slot amplitudes of shape (k_max, n_pixels).
-        means: Slot centroid heights of shape (k_max, n_pixels), in metres.
-        sigmas: Slot widths of shape (k_max, n_pixels), in metres.
-        active: Boolean activity mask of shape (k_max, n_pixels).
+        k_max      : Number of Gaussian slots per pixel.
+        n_pixels   : Number of retained pixels.
+        amplitudes : Slot amplitudes of shape (k_max, n_pixels).
+        means      : Slot centroid heights of shape (k_max, n_pixels), in metres.
+        sigmas     : Slot widths of shape (k_max, n_pixels), in metres.
+        active     : Boolean activity mask of shape (k_max, n_pixels).
     """
 
     def __init__(self, parameters_array: np.ndarray, k_max: int, amp_threshold: float) -> None:
         """Selects the pixels with an active Gaussian and splits the parameter families.
 
         Args:
-            parameters_array: Parameter stack of shape (3 * k_max, azimuth, range).
-            k_max: Number of Gaussian slots per pixel.
-            amp_threshold: Amplitude above which a slot counts as active.
+            parameters_array : Parameter stack of shape (3 * k_max, azimuth, range).
+            k_max            : Number of Gaussian slots per pixel.
+            amp_threshold    : Amplitude above which a slot counts as active.
 
         Raises:
-            ValueError: If no pixel carries an active Gaussian at that threshold.
+            ValueError : If no pixel carries an active Gaussian at that threshold.
         """
         flat   = parameters_array.reshape(3 * k_max, -1)
-        active = flat[0::3] >= amp_threshold
+        active = GaussianActivity.is_active(flat[0::3], amp_threshold)
         keep   = active.any(axis=0)
 
         if not keep.any():
@@ -88,7 +89,7 @@ class KzCoherenceModel:
     centroid height.
 
     Attributes:
-        table: Active-Gaussian table supplying the mixtures.
+        table : Active-Gaussian table supplying the mixtures.
     """
 
     CHUNK = 16384
@@ -97,12 +98,32 @@ class KzCoherenceModel:
         """Binds the model to an active-Gaussian table."""
         self.table = table
 
+    @staticmethod
+    def row_magnitudes(weights: np.ndarray, means: np.ndarray, sigmas: np.ndarray, kz_rows: np.ndarray) -> np.ndarray:
+        """Evaluates the mixture coherence magnitude at one kz per row.
+
+        Args:
+            weights : Slot area weights of shape (k_max, n_rows), zero on inactive slots.
+            means   : Slot centroid heights of shape (k_max, n_rows), in metres.
+            sigmas  : Slot widths of shape (k_max, n_rows), in metres.
+            kz_rows : Vertical wavenumber of each row, of shape (n_rows,), in rad/m.
+
+        Returns:
+            Coherence magnitude of shape (n_rows,), clipped to [0, 1].
+        """
+        numerator = np.zeros(kz_rows.shape[0], dtype=np.complex128)
+        for k in range(weights.shape[0]):
+            numerator += weights[k] * np.exp(-0.5 * (kz_rows * np.abs(sigmas[k])) ** 2) * np.exp(1j * kz_rows * means[k])
+
+        magnitude = np.abs(numerator) / np.maximum(weights.sum(axis=0), 1e-12)
+        return np.clip(magnitude, 0.0, 1.0)
+
     def magnitudes(self, kz_grid: np.ndarray, pixel_indices: np.ndarray) -> np.ndarray:
         """Computes the coherence magnitude of each selected pixel over the kz grid.
 
         Args:
-            kz_grid: Vertical wavenumbers of shape (n_kz,), in rad/m.
-            pixel_indices: Indices of shape (n_selected,) into the table's pixel axis.
+            kz_grid       : Vertical wavenumbers of shape (n_kz,), in rad/m.
+            pixel_indices : Indices of shape (n_selected,) into the table's pixel axis.
 
         Returns:
             Coherence magnitude of shape (n_kz, n_selected), clipped to [0, 1].
@@ -134,8 +155,8 @@ class SecondaryKzTable:
     """Places the stack's candidate secondary passes on the kz axis.
 
     Attributes:
-        path: Geometry field path inside the dataset's ``meta`` directory.
-        logger: Logger for the load report.
+        path   : Geometry field path inside the dataset's ``meta`` directory.
+        logger : Logger for the load report.
     """
 
     FILENAME = GeometryField.FILENAME
@@ -144,8 +165,8 @@ class SecondaryKzTable:
         """Binds the table to a preprocessed dataset directory.
 
         Args:
-            dataset_dir: Dataset root holding ``meta/`` with the geometry field.
-            logger: Logger for the load report.
+            dataset_dir : Dataset root holding ``meta/`` with the geometry field.
+            logger      : Logger for the load report.
         """
         self.path   = Path(dataset_dir) / "meta" / self.FILENAME
         self.logger = logger
@@ -158,13 +179,13 @@ class SecondaryKzTable:
             reference pass.
 
         Raises:
-            FileNotFoundError: If the preprocessing geometry field is missing.
+            FileNotFoundError : If the preprocessing geometry field is missing.
         """
         if not self.path.is_file():
             raise FileNotFoundError(f"{self.path} does not exist; the kz-resolution analysis needs the preprocessing geometry field to place the candidate secondaries on the kz axis. Re-run preprocessing to generate it.")
 
         field   = GeometryField.load(self.path)
-        kz_mean = field.kz("height").mean(axis=(1, 2))
+        kz_mean = field.mean_kz("height")
 
         table = {label: abs(float(kz_mean[index])) for index, label in enumerate(field.labels) if label != field.reference}
 
@@ -176,11 +197,11 @@ class ResolutionAnalyzer:
     """Turns a fitted parameter stack into kz-resolution curves and a pass ranking.
 
     Attributes:
-        logger: Logger for the analysis report.
-        noise_coherence: Speckle/SNR coherence ceiling applied on top of the profile coherence.
-        table: Active-Gaussian table derived from the parameter stack.
-        passes: Loader placing the candidate secondaries on the kz axis.
-        kz_grid: Evaluated vertical wavenumbers of shape (kz_grid_points,), in rad/m.
+        logger          : Logger for the analysis report.
+        noise_coherence : Speckle/SNR coherence ceiling applied on top of the profile coherence.
+        table           : Active-Gaussian table derived from the parameter stack.
+        passes          : Loader placing the candidate secondaries on the kz axis.
+        kz_grid         : Evaluated vertical wavenumbers of shape (kz_grid_points,), in rad/m.
     """
 
     MAX_QUANTILE_PIXELS = 200000
@@ -190,16 +211,16 @@ class ResolutionAnalyzer:
         """Builds the active-Gaussian table and the kz grid the analysis runs on.
 
         Args:
-            parameters_array: Parameter stack of shape (3 * k_max, azimuth, range).
-            meta: Run metadata carrying ``k_max`` and ``activity_threshold``.
-            dataset_dir: Dataset root holding the preprocessing geometry field.
-            logger: Logger for the analysis report.
-            kz_grid_max: Upper end of the evaluated kz axis, in rad/m.
-            kz_grid_points: Number of samples on the kz axis.
-            noise_coherence: Speckle/SNR coherence ceiling in (0, 1].
+            parameters_array : Parameter stack of shape (3 * k_max, azimuth, range).
+            meta             : Run metadata carrying ``k_max`` and ``activity_threshold``.
+            dataset_dir      : Dataset root holding the preprocessing geometry field.
+            logger           : Logger for the analysis report.
+            kz_grid_max      : Upper end of the evaluated kz axis, in rad/m.
+            kz_grid_points   : Number of samples on the kz axis.
+            noise_coherence  : Speckle/SNR coherence ceiling in (0, 1].
 
         Raises:
-            ValueError: If ``noise_coherence`` lies outside (0, 1].
+            ValueError : If ``noise_coherence`` lies outside (0, 1].
         """
         if not 0.0 < noise_coherence <= 1.0:
             raise ValueError(f"noise_coherence must lie in (0, 1], got {noise_coherence}; it models the speckle/SNR decorrelation a real pair carries on top of the profile coherence.")
@@ -219,7 +240,7 @@ class ResolutionAnalyzer:
         """Computes the coherence and phase-CRLB height-error quantiles over the kz grid.
 
         Args:
-            pixel_indices: Indices of shape (n_selected,) into the table's pixel axis.
+            pixel_indices : Indices of shape (n_selected,) into the table's pixel axis.
 
         Returns:
             Mapping with the median and quartile curves of the coherence magnitude and of
@@ -255,7 +276,7 @@ class ResolutionAnalyzer:
         """Summarises the vertical scales present and the kz each of them demands.
 
         Args:
-            extents: Per-pixel two-sigma vertical extents of shape (n_pixels,), in metres.
+            extents : Per-pixel two-sigma vertical extents of shape (n_pixels,), in metres.
 
         Returns:
             Mapping with the counts and quantiles of the widths, separations and extents
@@ -285,16 +306,15 @@ class ResolutionAnalyzer:
         receives its true, very large error and ranks last instead of aborting the run.
 
         Args:
-            pixel_indices: Indices of shape (n_selected,) into the table's pixel axis.
-            pass_table: Mapping from pass label to its mean absolute kz, in rad/m.
+            pixel_indices : Indices of shape (n_selected,) into the table's pixel axis.
+            pass_table    : Mapping from pass label to its mean absolute kz, in rad/m.
 
         Returns:
             List of rows with the pass label, its kz in rad/m and its predicted height
             error in metres, sorted by increasing error.
 
         Raises:
-            ValueError: If a candidate pass has non-positive kz, where the phase-CRLB
-                height error is undefined.
+            ValueError : If a candidate pass has non-positive kz, where the phase-CRLB height error is undefined.
         """
         degenerate = {label: kz for label, kz in pass_table.items() if kz <= 0.0}
         if degenerate:
@@ -313,8 +333,8 @@ class ResolutionAnalyzer:
         """Evaluates the coherence model and the phase-CRLB height error at the given kz.
 
         Args:
-            kz_values: Vertical wavenumbers of shape (n_kz,), in rad/m, all positive.
-            pixel_indices: Indices of shape (n_selected,) into the table's pixel axis.
+            kz_values     : Vertical wavenumbers of shape (n_kz,), in rad/m, all positive.
+            pixel_indices : Indices of shape (n_selected,) into the table's pixel axis.
 
         Returns:
             Tuple of the coherence magnitudes and the height errors in metres, each of
@@ -377,8 +397,8 @@ class ResolutionArtifactWriter:
     """Persists the kz-resolution curves of a parameter run.
 
     Attributes:
-        run_dir: Parameter run directory the archive is written into.
-        logger: Logger for the write confirmation.
+        run_dir : Parameter run directory the archive is written into.
+        logger  : Logger for the write confirmation.
     """
 
     CURVES_FILENAME = "resolution_curves.npz"
@@ -387,17 +407,21 @@ class ResolutionArtifactWriter:
         """Binds the writer to a parameter run directory.
 
         Args:
-            run_dir: Parameter run directory the archive is written into.
-            logger: Logger for the write confirmation.
+            run_dir : Parameter run directory the archive is written into.
+            logger  : Logger for the write confirmation.
         """
         self.run_dir = Path(run_dir)
         self.logger  = logger
+
+    def clear(self) -> None:
+        """Removes the archive of an earlier analysis, so the run stops counting as analysed until this one finishes."""
+        (self.run_dir / self.CURVES_FILENAME).unlink(missing_ok=True)
 
     def save(self, arrays: dict) -> Path:
         """Writes the resolution curve arrays into a compressed .npz archive.
 
         Args:
-            arrays: Mapping from curve name to array over the kz grid, in rad/m.
+            arrays : Mapping from curve name to array over the kz grid, in rad/m.
 
         Returns:
             Path of the written archive.

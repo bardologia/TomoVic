@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy             as np
 from scipy.stats         import gaussian_kde
 
+from tools.data.gaussians     import GaussianActivity
 from tools.reporting.plotting import PlotBase
 from tools.monitoring.logger  import Logger
 
@@ -25,22 +26,22 @@ class DistributionPlotter(PlotBase):
     """Renders the distribution figures of a fitted parameter stack.
 
     Attributes:
-        n_gaussians: Number of Gaussian slots in the parameter stack.
-        logger: Logger for skip warnings.
-        amp_threshold: Amplitude above which a Gaussian slot counts as active.
-        fig_dpi: Figure resolution used while rendering.
-        save_dpi: Resolution the PNGs are written at.
+        n_gaussians   : Number of Gaussian slots in the parameter stack.
+        logger        : Logger for skip warnings.
+        amp_threshold : Amplitude above which a Gaussian slot counts as active.
+        fig_dpi       : Figure resolution used while rendering.
+        save_dpi      : Resolution the PNGs are written at.
     """
 
     def __init__(self, n_gaussians : int, logger : Logger, amp_threshold : float, fig_dpi : int = 150, save_dpi : int = 300) -> None:
         """Configures the distribution plotter.
 
         Args:
-            n_gaussians: Number of Gaussian slots in the parameter stack.
-            logger: Logger for skip warnings.
-            amp_threshold: Amplitude above which a Gaussian slot counts as active.
-            fig_dpi: Figure resolution used while rendering.
-            save_dpi: Resolution the PNGs are written at.
+            n_gaussians   : Number of Gaussian slots in the parameter stack.
+            logger        : Logger for skip warnings.
+            amp_threshold : Amplitude above which a Gaussian slot counts as active.
+            fig_dpi       : Figure resolution used while rendering.
+            save_dpi      : Resolution the PNGs are written at.
         """
         self.n_gaussians   = n_gaussians
         self.logger        = logger
@@ -52,9 +53,9 @@ class DistributionPlotter(PlotBase):
         """Saves the R-squared histogram with KDE and its empirical CDF.
 
         Args:
-            r2_map: Per-pixel R-squared of shape (azimuth, range), NaN where unfitted.
-            summary: Global summary carrying the R-squared mean, median and negative fraction.
-            out_dir: Directory the figures are written to.
+            r2_map  : Per-pixel R-squared of shape (azimuth, range), NaN where unfitted.
+            summary : Global summary carrying the R-squared mean, median and negative fraction.
+            out_dir : Directory the figures are written to.
 
         Returns:
             Mapping with the ``r2_pdf`` and ``r2_cdf`` figure paths; empty when no finite
@@ -70,7 +71,7 @@ class DistributionPlotter(PlotBase):
         qs    = [10, 25, 50, 75, 90]
         pvals = np.percentile(valid, qs)
         pcolors  = ["#9467bd", "#1f77b4", "#2ca02c", "#ff7f0e", "#d62728"]
-        stats_tx = rf"mean={summary['r2_mean']:.4f},  median={summary['r2_median']:.4f},  neg\_frac={summary['r2_neg_frac']:.3f}"
+        stats_tx = f"mean={summary['r2_mean']:.4f},  median={summary['r2_median']:.4f},  negative fraction={summary['r2_neg_frac']:.3f}"
         saved    : Dict[str, Path] = {}
 
         fig, ax = plt.subplots(figsize=(6.4, 4.5))
@@ -120,8 +121,8 @@ class DistributionPlotter(PlotBase):
         """Saves one violin figure per parameter family across the Gaussian slots.
 
         Args:
-            parameters_array: Parameter stack of shape (3 * n_gaussians, azimuth, range).
-            out_dir: Directory the figures are written to.
+            parameters_array : Parameter stack of shape (3 * n_gaussians, azimuth, range).
+            out_dir          : Directory the figures are written to.
 
         Returns:
             Mapping with the ``amp_dist``, ``mu_dist`` and ``sigma_dist`` figure paths,
@@ -142,7 +143,7 @@ class DistributionPlotter(PlotBase):
 
             for k in range(self.n_gaussians):
                 amp_flat = parameters_array[3 * k].reshape(-1)
-                active   = amp_flat >= self.amp_threshold
+                active   = GaussianActivity.is_active(amp_flat, self.amp_threshold)
                 if tag == "amp":
                     ch_idx = 3 * k
                 elif tag == "mu":
@@ -181,8 +182,8 @@ class DistributionPlotter(PlotBase):
         """Saves hexbin densities of the parameter pairs, pooling every slot.
 
         Args:
-            parameters_array: Parameter stack of shape (3 * n_gaussians, azimuth, range).
-            out_dir: Directory the figures are written to.
+            parameters_array : Parameter stack of shape (3 * n_gaussians, azimuth, range).
+            out_dir          : Directory the figures are written to.
 
         Returns:
             Mapping with the ``joint_mu_sigma``, ``joint_mu_amp`` and ``joint_sigma_amp``
@@ -194,7 +195,7 @@ class DistributionPlotter(PlotBase):
 
         for k in range(self.n_gaussians):
             amp_flat = parameters_array[3 * k].reshape(-1)
-            active   = amp_flat >= self.amp_threshold
+            active   = GaussianActivity.is_active(amp_flat, self.amp_threshold)
             amp_pool.append(amp_flat[active])
             mu_pool .append(parameters_array[3 * k + 1].reshape(-1)[active])
             sig_pool.append(parameters_array[3 * k + 2].reshape(-1)[active])
@@ -235,9 +236,9 @@ class DistributionPlotter(PlotBase):
         """Saves the relative selection-margin histogram and its split by selected order.
 
         Args:
-            metrics_dict: Metrics carrying ``k_relative_margin_map`` and ``best_k_map``.
-            per_k_summary: Per-order summary carrying the ambiguity threshold and fraction.
-            out_dir: Directory the figures are written to.
+            metrics_dict  : Metrics carrying ``k_relative_margin_map`` and ``best_k_map``.
+            per_k_summary : Per-order summary carrying the ambiguity threshold and fraction.
+            out_dir       : Directory the figures are written to.
 
         Returns:
             Mapping with the ``k_ambiguity_distribution`` and ``k_ambiguity_by_k`` figure

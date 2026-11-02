@@ -19,7 +19,9 @@ def main() -> None:
     """Builds the interferometric stack described by the ``--spec`` JSON file.
 
     Pins the thread environment, parses the spec path and runs
-    ``InterferogramGenerator``, logging into the spec's own directory.
+    ``InterferogramGenerator``, logging into the spec's own directory. The generator is
+    imported once that log is open, so a failed import in the PyRat
+    environment ends the log with its traceback.
     """
     EnvironmentPinner.threads()
 
@@ -27,12 +29,13 @@ def main() -> None:
     parser.add_argument("--spec", required=True, help="Path to the interferogram job spec JSON")
     args = parser.parse_args()
 
-    from pipelines.processing.generation.interferogram import InterferogramGenerator
-    from tools.monitoring.logger                       import Logger
+    from tools.monitoring.logger import Logger
 
     spec_path = Path(args.spec)
 
     with Logger(log_dir=str(spec_path.parent), name="interferograms") as logger:
+        from pipelines.processing.generation.interferogram import InterferogramGenerator
+
         InterferogramGenerator.from_spec_file(spec_path, logger).run()
 
 

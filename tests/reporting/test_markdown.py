@@ -111,13 +111,6 @@ def test_table_add_row_none_cell_becomes_empty():
     assert table.rows[0] == ["x", MarkdownTable.EMPTY]
 
 
-def test_table_add_rows_bulk():
-    """Verifies add_rows appends every supplied row."""
-    table = MarkdownTable(["a", "b"])
-    table.add_rows([("1", "2"), ("3", "4")])
-    assert len(table.rows) == 2
-
-
 def test_table_render_structure():
     """Verifies rendering emits a header, a separator of dashes and one body line."""
     table = MarkdownTable(["Key", "Value"])
@@ -355,3 +348,14 @@ def test_kv_table_with_real_extraction_meta(param_extraction_meta):
 
     for key in list(scalars)[:5]:
         assert f"`{key}`" in text
+
+
+def test_table_add_row_escapes_pipes_so_the_row_keeps_its_columns():
+    """Verifies a pipe inside a cell is escaped, leaving the rendered row with one separator per column boundary."""
+    table = MarkdownTable(["metric", "description"])
+    table.add_row("peak", "mean |Δ peak| in metres")
+
+    row = table.render()[2]
+
+    assert "\\|Δ peak\\|" in row
+    assert row.replace("\\|", "").count("|") == 3

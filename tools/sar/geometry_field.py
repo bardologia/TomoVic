@@ -23,19 +23,17 @@ class GeometryField:
     """Acquisition geometry of a cropped track stack, stored per range line and azimuth sample.
 
     Attributes:
-        labels: Track labels, the reference first.
-        reference: Label of the reference track.
-        wavelength: Radar wavelength in metres.
-        azimuth_start: Azimuth index of the first column within the full scene.
-        range_start: Range index of the first row within the full scene.
-        look_angle: Look angle in radians per range sample, shape (n_range,).
-        slant_range: Slant range in metres per range sample, shape (n_range,).
-        baseline_h: Horizontal baseline in metres relative to the reference,
-            shape (n_tracks, n_azimuth).
-        baseline_v: Vertical baseline in metres relative to the reference,
-            shape (n_tracks, n_azimuth).
-        FILENAME: Canonical file name of a saved geometry field.
-        CONVENTIONS: Accepted height-axis conventions for kz.
+        labels        : Track labels, the reference first.
+        reference     : Label of the reference track.
+        wavelength    : Radar wavelength in metres.
+        azimuth_start : Azimuth index of the first column within the full scene.
+        range_start   : Range index of the first row within the full scene.
+        look_angle    : Look angle in radians per range sample, shape (n_range,).
+        slant_range   : Slant range in metres per range sample, shape (n_range,).
+        baseline_h    : Horizontal baseline in metres relative to the reference, shape (n_tracks, n_azimuth).
+        baseline_v    : Vertical baseline in metres relative to the reference, shape (n_tracks, n_azimuth).
+        FILENAME      : Canonical file name of a saved geometry field.
+        CONVENTIONS   : Accepted height-axis conventions for kz.
     """
 
     labels        : list
@@ -84,14 +82,13 @@ class GeometryField:
         """Returns the per-pixel vertical wavenumber for a height-axis convention.
 
         Args:
-            convention: "height" divides by sin(look angle) so kz refers to a
-                vertical height axis; "slant" leaves the axis along slant range.
+            convention : "height" divides by sin(look angle) so kz refers to a vertical height axis; "slant" leaves the axis along slant range.
 
         Returns:
             kz in rad/m of shape (n_tracks, n_azimuth, n_range).
 
         Raises:
-            ValueError: If the convention is not one of CONVENTIONS.
+            ValueError : If the convention is not one of CONVENTIONS.
         """
         if convention not in self.CONVENTIONS:
             raise ValueError(f"Unknown height_axis_convention '{convention}', expected one of {self.CONVENTIONS}")
@@ -105,15 +102,46 @@ class GeometryField:
 
         return scale * self.perpendicular_baseline() / denominator
 
+    def mean_kz(self, convention: str) -> np.ndarray:
+        """Returns the scene-mean vertical wavenumber of every track without forming the per-pixel field.
+
+        The per-pixel kz is a baseline term varying along azimuth times a range
+        term, so its mean over the scene is the product of the two means; this
+        evaluates that product exactly, at the cost of two short vectors.
+
+        Args:
+            convention : "height" divides by sin(look angle) so kz refers to a vertical height axis; "slant" leaves the axis along slant range.
+
+        Returns:
+            Mean kz in rad/m of shape (n_tracks,), equal to ``kz(convention).mean(axis=(1, 2))``.
+
+        Raises:
+            ValueError : If the convention is not one of CONVENTIONS.
+        """
+        if convention not in self.CONVENTIONS:
+            raise ValueError(f"Unknown height_axis_convention '{convention}', expected one of {self.CONVENTIONS}")
+
+        scale     = 4.0 * math.pi / self.wavelength
+        sin_theta = np.sin(self.look_angle)
+        cos_theta = np.cos(self.look_angle)
+
+        denominator = self.slant_range
+        if convention == "height":
+            denominator = denominator * sin_theta
+
+        horizontal_term = float(np.mean(cos_theta / denominator))
+        vertical_term   = float(np.mean(sin_theta / denominator))
+
+        return scale * (self.baseline_h.mean(axis=1) * horizontal_term + self.baseline_v.mean(axis=1) * vertical_term)
+
     def validate_extent(self, crop) -> None:
         """Checks that the field covers exactly the preprocessing global crop.
 
         Args:
-            crop: Crop object exposing as_tuple() as
-                (azimuth_start, azimuth_end, range_start, range_end).
+            crop : Crop object exposing as_tuple() as (azimuth_start, azimuth_end, range_start, range_end).
 
         Raises:
-            ValueError: If the stored extent differs from the crop.
+            ValueError : If the stored extent differs from the crop.
         """
         actual   = (self.azimuth_start, self.azimuth_start + self.n_azimuth, self.range_start, self.range_start + self.n_range)
         expected = crop.as_tuple()
@@ -125,8 +153,7 @@ class GeometryField:
         """Returns a field restricted to the reference plus the selected secondary tracks.
 
         Args:
-            secondary_labels: Labels of the secondaries to keep, or None to keep
-                the field unchanged.
+            secondary_labels : Labels of the secondaries to keep, or None to keep the field unchanged.
 
         Returns:
             Geometry field holding the reference track followed by the selected
@@ -153,8 +180,8 @@ class GeometryField:
         """Returns the sub-field over an azimuth and range window, with offsets updated.
 
         Args:
-            azimuth_slice: Slice into the azimuth axis of this field.
-            range_slice: Slice into the range axis of this field.
+            azimuth_slice : Slice into the azimuth axis of this field.
+            range_slice   : Slice into the range axis of this field.
 
         Returns:
             Geometry field whose azimuth_start and range_start are shifted by the
@@ -231,19 +258,18 @@ class GeometryFieldBuilder:
     """Builds a GeometryField from track parameters and interpolated flight profiles.
 
     Attributes:
-        parameters: Parsed per-track acquisition parameters.
-        profiles: Horizontal and vertical track positions sampled along azimuth.
-        crop: Global preprocessing crop the field is built over.
+        parameters : Parsed per-track acquisition parameters.
+        profiles   : Horizontal and vertical track positions sampled along azimuth.
+        crop       : Global preprocessing crop the field is built over.
     """
 
     def __init__(self, parameters: TrackParameters, profiles: TrackProfiles, crop) -> None:
         """Stores the parameter, profile and crop inputs of the build.
 
         Args:
-            parameters: Per-track acquisition parameters, reference first.
-            profiles: Track profiles carrying horizontal and vertical positions
-                in metres per azimuth sample.
-            crop: Crop object with azimuth_start/azimuth_end/range_start/range_end.
+            parameters : Per-track acquisition parameters, reference first.
+            profiles   : Track profiles carrying horizontal and vertical positions in metres per azimuth sample.
+            crop       : Crop object with azimuth_start/azimuth_end/range_start/range_end.
         """
         self.parameters = parameters
         self.profiles   = profiles
@@ -256,8 +282,7 @@ class GeometryFieldBuilder:
             Track labels in parameter order.
 
         Raises:
-            ValueError: If profile labels differ from parameter labels, which
-                would misalign baselines against the geometry.
+            ValueError : If profile labels differ from parameter labels, which would misalign baselines against the geometry.
         """
         if list(self.profiles.labels) != list(self.parameters.labels):
             raise ValueError(f"Track-profile labels {list(self.profiles.labels)} do not match track-parameter labels {list(self.parameters.labels)}; cannot align baselines to geometry.")
@@ -272,8 +297,7 @@ class GeometryFieldBuilder:
             shape (n_range,).
 
         Raises:
-            ValueError: If the crop extends past the stored slant-range vector,
-                or the sensor height above terrain is inconsistent with it.
+            ValueError : If the crop extends past the stored slant-range vector, or the sensor height above terrain is inconsistent with it.
         """
         reference = self.parameters.parameters[0]
 
@@ -299,7 +323,7 @@ class GeometryFieldBuilder:
             (n_tracks, n_azimuth) over the crop.
 
         Raises:
-            ValueError: If the crop azimuth span is not covered by the profiles.
+            ValueError : If the crop azimuth span is not covered by the profiles.
         """
         start = self.crop.azimuth_start - int(self.profiles.azimuth_start)
         stop  = self.crop.azimuth_end   - int(self.profiles.azimuth_start)
@@ -323,8 +347,7 @@ class GeometryFieldBuilder:
             per-azimuth baselines of every track.
 
         Raises:
-            ValueError: If the stack is left-looking, labels disagree, or the
-                crop is not covered by the parameters and profiles.
+            ValueError : If the stack is left-looking, labels disagree, or the crop is not covered by the parameters and profiles.
         """
         self.parameters.validate_right_looking()
 

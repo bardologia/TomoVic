@@ -16,6 +16,7 @@ from configuration.sar.processing_config import (
     PathConfig,
     ProcessingConfig,
 )
+from configuration.sar.gaussian_config   import GaussianConfig
 from tests.configuration._helpers        import make_crop
 from tools.data.regions                  import CropRegion
 
@@ -94,6 +95,23 @@ def test_config_state_processing_top_level_fields(config_state_json):
 
 
 @pytest.mark.real_data
+def test_config_state_height_range_drives_gaussian(config_state_json):
+    """Verifies the stored height range in metres becomes the Gaussian mean bounds."""
+    height_range = config_state_json["tomogram_config"]["height_range"]
+
+    gaussian = GaussianConfig(
+        n_default_gaussians = 5,
+        x_min               = float(height_range[0]),
+        x_max               = float(height_range[1]),
+        activity_threshold  = 1e-3,
+    )
+
+    assert gaussian.x_min == height_range[0]
+    assert gaussian.x_max == height_range[1]
+    assert gaussian.x_max > gaussian.x_min
+
+
+@pytest.mark.real_data
 def test_config_state_crop_round_trips_through_processing(config_state_json):
     """Verifies the stored crop rebuilds a CropRegion carried unchanged by ProcessingConfig."""
     crop_state = config_state_json["crop"]
@@ -102,3 +120,15 @@ def test_config_state_crop_round_trips_through_processing(config_state_json):
 
     assert cfg.crop.azimuth_start == crop_state["azimuth_start"]
     assert cfg.crop.range_end     == crop_state["range_end"]
+
+
+@pytest.mark.real_data
+def test_gaussian_from_dataset_matches_state(meta_dir, params_dir, config_state_json, param_extraction_meta):
+    """Verifies the Gaussian config read off the dataset matches the stored height range, the five extracted slots and the extraction's activity threshold."""
+    gaussian     = GaussianConfig.from_dataset(meta_dir.parent, params_dir / "parameters.npy")
+    height_range = config_state_json["tomogram_config"]["height_range"]
+
+    assert gaussian.x_min               == float(height_range[0])
+    assert gaussian.x_max               == float(height_range[1])
+    assert gaussian.n_default_gaussians == 5
+    assert gaussian.activity_threshold  == float(param_extraction_meta["activity_threshold"])

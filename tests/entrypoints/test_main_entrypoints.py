@@ -36,8 +36,11 @@ def _script_path(name):
 DEFER_HEAVY_IMPORTS = (
     "generate_interferograms",
     "generate_tomogram",
+    "measure_scene_extent",
+    "generate_polarimetric_primary",
     "pre_process",
     "extract_params",
+    "extract_polarimetry",
     "analyze_preprocessing",
     "analyze_param_extraction",
 )
@@ -45,6 +48,7 @@ DEFER_HEAVY_IMPORTS = (
 CLI_MODULES = (
     "pre_process",
     "extract_params",
+    "extract_polarimetry",
     "analyze_preprocessing",
     "analyze_param_extraction",
     "compare_preprocessing_trials",
@@ -53,6 +57,7 @@ CLI_MODULES = (
 ENTRY_CONFIGS = {
     "pre_process"                  : ("configuration.sar.processing_config", "PreProcessEntryConfig"),
     "extract_params"               : ("configuration.param_extraction",      "ExtractParamsEntryConfig"),
+    "extract_polarimetry"          : ("configuration.sar.polarimetry_config", "PolarimetryEntryConfig"),
     "analyze_preprocessing"        : ("configuration.sar.processing_config", "PreprocessInferenceConfig"),
     "analyze_param_extraction"     : ("configuration.param_extraction",      "ParamExtractionInferenceConfig"),
     "compare_preprocessing_trials" : ("configuration.comparison",            "PreprocessingComparisonConfig"),
