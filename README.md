@@ -59,6 +59,8 @@ into azimuth subsections and concatenated), interferogram generation with the DE
 removed, and the per-pixel acquisition geometry. The output is a run directory whose
 `data/dataset.json` lists the artifacts: `tomogram_full.npy`, `dem_full.npy`,
 `primary.npy`, the secondaries and interferograms, and the track metadata under `meta/`.
+Leave all four crop fields at zero to process the whole scene; the pipeline measures the
+extent of the primary SLC and crops to it.
 
 `main/analysis/analyze_preprocessing.py` re-renders the overview figures and value
 distributions of an existing run, and `main/analysis/compare_preprocessing_trials.py`
@@ -69,6 +71,11 @@ profiles, producing a parametrized tomogram: `params/<tag>/parameters.npy` under
 run, holding amplitude, mean and width per component. The fit kernels run on jax
 (`pip install "tomovic[fitting]"`, CPU is fine), and
 `main/analysis/analyze_param_extraction.py` renders its figures and fit report.
+
+`main/processing/extract_polarimetry.py` reads the primary pass of each selected run
+again in every polarisation through PyRAT, over the crop the run was built from, and
+stores it as the `primary_polarimetric` artifact. That artifact is what the Cube tab's
+Pauli view decomposes. It needs the PyRAT environment, like the tomogram stage.
 
 ## 3. The console
 
@@ -81,12 +88,22 @@ directory (anything holding `data/dataset.json`) and browse elevation, azimuth a
 slices, plane cuts, transects, the DEM grid, the point cloud, and the scene on a Cesium
 globe with the flight tracks drawn from the acquisition geometry. When the run holds a
 parameter extraction, the parametrized tomogram appears as a second source next to the
-raw Capon cube, with the fitted components readable per pixel. The Slices tab
-collects slices across runs for side-by-side reading. Results browses the figures,
-reports and logs a run wrote. Scripts, Launch and Console launch and monitor the three
-entry points from the browser, with the same config form the CLI exposes. The Model,
-Pipelines, Repo Map and Configuration tabs are curated documentation of the signal
-model, the processing flow and every config field.
+raw Capon cube, with the fitted components readable per pixel. When the run holds the
+polarimetric artifact, the Pauli view shows the decomposition map with per-pixel
+readouts and the scene balance, and the globe can drape the Pauli map on the terrain and
+colour the scatterers by scattering mechanism. The Slices tab picks points on the primary
+SLC map, collects slices across runs into a basket, and exports the basket to a folder
+or by mail. Results browses the figures, reports and logs a run wrote. Scripts, Launch
+and Console launch and monitor the entry points from the browser, with the same config
+form the CLI exposes; a finished or failed job can be relaunched with its request from
+the Retry button on its console tile. Home shows the machine: CPU, memory, storage and
+GPU readings with their history, the console's own log, the resource watchdog, and the
+neighbour-impact panel that measures how much your processes stall other users. Jobs
+launched from the console run at the chosen politeness level ("polite" by default).
+Automatic throttling of your processes when you cause stall is off by default, because
+it renices every process you own on the machine; switch it on from Home if you want it.
+The Repo Map and Configuration tabs are curated documentation of the processing flow
+and every config field.
 
 ## 4. Tests
 
