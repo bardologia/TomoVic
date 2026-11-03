@@ -21,7 +21,7 @@ from notifier               import ExperimentProgressWatcher, JobNotifier
 from politeness             import JobPoliteness, JobThrottle
 from process_manager        import ProcessManager, ProcessNuke, ServerDetacher
 from project_paths          import ProjectPaths
-from request_router         import RequestRouter
+from request_router         import AccessGate, RequestRouter
 from resource_watchdog      import ResourceWatchdog
 from results_browser        import ResultsBrowser
 from run_config_reader      import RunConfigReader
@@ -77,23 +77,26 @@ class WebUIServer:
     Attributes:
         host: Interface the HTTP server binds to.
         port: TCP port the HTTP server binds to.
+        gate: Access gate admitting only browsers that hold the access key, None when the console has no key.
         logger: Console logger shared by every component.
         paths: Project path resolver rooted at the repository.
         router: Request router holding the ordered route handlers.
     """
 
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None, access_key: str = "") -> None:
         """Constructs every console component and assembles the request router.
 
         Args:
             host: Interface to bind the HTTP server to.
             port: TCP port to bind the HTTP server to.
             root: Repository root override; discovered from this file when None.
+            access_key: Secret a browser must present before the console answers it, empty to answer every request.
         """
 
         self.host   = host
         self.port   = port
+        self.gate   = AccessGate(access_key, port) if access_key else None
         self.logger = WebLogger()
         self.paths  = ProjectPaths(root)
 
@@ -136,7 +139,7 @@ class WebUIServer:
             SavedRunRouter(self.paths, self.saved_runs, self.launcher),
             RunConfigRouter(self.run_configs),
             SystemRouter(self.system, self.watchdog, self.contention, self.detacher, self.notifier, self.nuke, self.processes, self.logger),
-        ])
+        ], self.gate)
 
     def _report_ready(self) -> None:
         """Prints the startup banner with the URL, script count and interpreters."""
@@ -147,6 +150,7 @@ class WebUIServer:
 
         self.logger.banner("TomoVic Console", [
             f"URL          http://{self.host}:{self.port}",
+            f"access       {'key required' if self.gate else 'no key'}",
             f"repo root    {self.paths.repo_root}",
             f"scripts      {len(scripts)} entry points",
             f"interpreter  {preferred}",

@@ -1,17 +1,92 @@
 """Top-level HTTP request router for the web UI server.
 
 Indexes the sub-routers by the URL section each one claims, refuses
-cross-origin requests, gives raw-path proxies first refusal, and converts
-unhandled exceptions into a 500 reply.
+cross-origin requests, admits only keyed browsers when the console runs behind
+an access key, gives raw-path proxies first refusal, and converts unhandled
+exceptions into a 500 reply.
 """
 
 from __future__ import annotations
 
+import hmac
+import re
 import traceback
-from urllib.parse import urlparse
+from http.cookies import SimpleCookie
+from urllib.parse import urlencode, urlparse
 
 from routers.dispatch import HttpExchange, RouteConflict, SubRouter
 from web_logger       import WebLogger
+
+
+class AccessGate:
+    """Admits only the browsers that opened the console through its keyed link.
+
+    A launcher that exposes the console beyond the loopback interface starts it
+    with a secret access key and hands the user a link carrying that key in the
+    `key` query parameter. A request with the right key is answered with a
+    redirect to the same address without the key that sets a cookie holding it,
+    so the key leaves the address bar and every later request of that browser
+    carries it. Every other request is refused with 403.
+
+    Attributes:
+        key    : Secret the link carries, at least 16 URL-safe characters.
+        cookie : Name of the cookie holding the key, carrying the port because a browser shares cookies across all ports of one host.
+    """
+
+    QUERY_NAME = "key"
+    KEY_FORMAT = re.compile(r"[A-Za-z0-9_-]{16,}")
+    REFUSAL    = "This TomoVic console opens only through the link TomoVis gives. Click Open TomoVic in TomoVis to get a fresh link."
+
+    def __init__(self, key: str, port: int) -> None:
+        """Stores the key and derives the cookie name from the port.
+
+        Args:
+            key  : Secret the console link carries.
+            port : TCP port the console listens on.
+
+        Raises:
+            ValueError : If the key is shorter than 16 characters or holds characters outside A-Z, a-z, 0-9, '_' and '-'.
+        """
+        if not self.KEY_FORMAT.fullmatch(key):
+            raise ValueError("the console access key must be at least 16 characters from A-Z, a-z, 0-9, '_' and '-'")
+
+        self.key    = key
+        self.cookie = f"tomovic_key_{port}"
+
+    def _matches(self, candidate: str) -> bool:
+        """Returns whether `candidate` equals the key, compared in constant time."""
+        return hmac.compare_digest(candidate.encode("utf-8"), self.key.encode("utf-8"))
+
+    def _set_cookie(self, exchange: HttpExchange) -> None:
+        """Redirects to the requested address without the key parameter, setting the key cookie."""
+        rest     = {name: values for name, values in exchange.query.items() if name != self.QUERY_NAME}
+        location = exchange.raw_path + ("?" + urlencode(rest, doseq=True) if rest else "")
+
+        exchange.redirect(location, {"Set-Cookie": f"{self.cookie}={self.key}; Path=/; HttpOnly; SameSite=Lax"})
+
+    def _cookie_value(self, exchange: HttpExchange) -> str:
+        """Returns the value of the key cookie the request carries, empty when it carries none."""
+        jar = SimpleCookie()
+        jar.load(exchange.header("Cookie"))
+
+        morsel = jar.get(self.cookie)
+        return "" if morsel is None else morsel.value
+
+    def admit(self, exchange: HttpExchange) -> bool:
+        """Returns whether the request may proceed, having answered it with the redirect or the refusal when it may not.
+
+        Args:
+            exchange : The request being routed.
+        """
+        if self._matches(exchange.text(self.QUERY_NAME)):
+            self._set_cookie(exchange)
+            return False
+
+        if self._matches(self._cookie_value(exchange)):
+            return True
+
+        exchange.send_text(self.REFUSAL, 403)
+        return False
 
 
 class RequestRouter:
@@ -20,21 +95,24 @@ class RequestRouter:
     Attributes:
         logger: Console logger used for warnings and error reports.
         routers: Sub-routers this router dispatches to.
+        gate: Access gate every same-origin request passes first, None when the console admits every request.
         sections: Mapping from URL section prefix to its owning sub-router.
     """
 
-    def __init__(self, logger: WebLogger, routers: list[SubRouter]) -> None:
-        """Stores the sub-routers and builds the section index.
+    def __init__(self, logger: WebLogger, routers: list[SubRouter], gate: AccessGate | None = None) -> None:
+        """Stores the sub-routers and the access gate and builds the section index.
 
         Args:
             logger: Console logger for request warnings and router errors.
             routers: Sub-routers whose declared sections must not overlap.
+            gate: Access gate for a console started with an access key, None for a console that admits every request.
 
         Raises:
             RouteConflict: If two sub-routers claim the same section.
         """
         self.logger   = logger
         self.routers  = list(routers)
+        self.gate     = gate
         self.sections = self._index()
 
     def _index(self) -> dict:
@@ -96,6 +174,10 @@ class RequestRouter:
 
         return urlparse(origin).netloc == exchange.header("Host")
 
+    def _admitted(self, exchange: HttpExchange) -> bool:
+        """Returns whether the access gate lets the request through; without a gate every request passes."""
+        return self.gate is None or self.gate.admit(exchange)
+
     def _report(self, exchange: HttpExchange) -> None:
         """Logs a warning for any exchange that finished with a status of 400 or above."""
         if exchange.status < 400:
@@ -107,9 +189,10 @@ class RequestRouter:
     def route(self, handler) -> None:
         """Routes one request end to end, from origin check to error reporting.
 
-        Cross-origin requests get a 403, raw-path proxies take precedence over
-        section dispatch, a dropped client connection is ignored, and any other
-        exception is logged and answered with a 500.
+        Cross-origin requests get a 403, the access gate answers requests
+        without the key, raw-path proxies take precedence over section dispatch,
+        a dropped client connection is ignored, and any other exception is
+        logged and answered with a 500.
 
         Args:
             handler: The BaseHTTPRequestHandler serving this request.
@@ -119,7 +202,7 @@ class RequestRouter:
         try:
             if not self._same_origin(exchange):
                 exchange.send_json({"error": "cross-origin request refused"}, 403)
-            elif not self._proxied(exchange):
+            elif self._admitted(exchange) and not self._proxied(exchange):
                 self._dispatch(exchange)
 
             self._report(exchange)

@@ -1,7 +1,7 @@
 """HTTP request/response plumbing and route dispatch shared by every sub-router.
 
 Holds the per-request exchange object (query parsing, JSON body reading, typed
-response senders), the route table with exact and wildcard entries, and the
+response senders and redirects), the route table with exact and wildcard entries, and the
 SubRouter base class each console API section derives from.
 """
 
@@ -111,6 +111,30 @@ class HttpExchange:
         self.handler.send_header("Content-Length", str(len(data)))
         self.handler.end_headers()
         self.handler.wfile.write(data)
+
+    def send_text(self, text: str, status: int) -> None:
+        """Sends `text` as a plain-text response under `status`, recording it as the error when the status is 400 or above."""
+        data = text.encode("utf-8")
+
+        self.status = status
+        self.error  = text if status >= 400 else ""
+
+        self.handler.send_response(status)
+        self.handler.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.handler.send_header("Content-Length", str(len(data)))
+        self.handler.end_headers()
+        self.handler.wfile.write(data)
+
+    def redirect(self, location: str, headers: dict) -> None:
+        """Sends a 303 redirect to `location` with an empty body and the given extra headers."""
+        self.status = 303
+
+        self.handler.send_response(303)
+        self.handler.send_header("Location", location)
+        self.handler.send_header("Content-Length", "0")
+        for name, value in headers.items():
+            self.handler.send_header(name, value)
+        self.handler.end_headers()
 
     def send_result(self, result: dict, error: int = 400) -> None:
         """Sends a result payload as 200 when its `ok` flag is set, `error` otherwise."""
