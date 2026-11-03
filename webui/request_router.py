@@ -12,7 +12,7 @@ import hmac
 import re
 import traceback
 from http.cookies import SimpleCookie
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, urlsplit
 
 from routers.dispatch import HttpExchange, RouteConflict, SubRouter
 from web_logger       import WebLogger
@@ -21,28 +21,31 @@ from web_logger       import WebLogger
 class AccessGate:
     """Admits only the browsers that opened the console through its keyed link.
 
-    A launcher that exposes the console beyond the loopback interface starts it
-    with a secret access key and hands the user a link carrying that key in the
-    `key` query parameter. A request with the right key is answered with a
-    redirect to the same address without the key that sets a cookie holding it,
-    so the key leaves the address bar and every later request of that browser
-    carries it. Every other request is refused with 403.
+    A launcher starts the console with a secret access key and hands the user a
+    link carrying that key in the `key` query parameter. A request with the
+    right key is answered with a redirect to the same address without the key
+    that sets a cookie holding it, so the key leaves the address bar and every
+    later request of that browser carries it. Every other request is refused
+    with 403.
+
+    The cookie is named after the port in the request's Host header, the port
+    the browser itself connected to, because a browser shares cookies across
+    all ports of one host. That port is also the right one when the console is
+    reached through an SSH tunnel or listens on a Unix socket.
 
     Attributes:
-        key    : Secret the link carries, at least 16 URL-safe characters.
-        cookie : Name of the cookie holding the key, carrying the port because a browser shares cookies across all ports of one host.
+        key : Secret the link carries, at least 16 URL-safe characters.
     """
 
     QUERY_NAME = "key"
     KEY_FORMAT = re.compile(r"[A-Za-z0-9_-]{16,}")
     REFUSAL    = "This TomoVic console opens only through the link TomoVis gives. Click Open TomoVic in TomoVis to get a fresh link."
 
-    def __init__(self, key: str, port: int) -> None:
-        """Stores the key and derives the cookie name from the port.
+    def __init__(self, key: str) -> None:
+        """Stores the key.
 
         Args:
-            key  : Secret the console link carries.
-            port : TCP port the console listens on.
+            key : Secret the console link carries.
 
         Raises:
             ValueError : If the key is shorter than 16 characters or holds characters outside A-Z, a-z, 0-9, '_' and '-'.
@@ -50,26 +53,30 @@ class AccessGate:
         if not self.KEY_FORMAT.fullmatch(key):
             raise ValueError("the console access key must be at least 16 characters from A-Z, a-z, 0-9, '_' and '-'")
 
-        self.key    = key
-        self.cookie = f"tomovic_key_{port}"
+        self.key = key
 
     def _matches(self, candidate: str) -> bool:
         """Returns whether `candidate` equals the key, compared in constant time."""
         return hmac.compare_digest(candidate.encode("utf-8"), self.key.encode("utf-8"))
+
+    def _cookie_name(self, exchange: HttpExchange) -> str:
+        """Returns the name of the key cookie for the port the browser connected to, 80 when the Host header names none."""
+        port = urlsplit("//" + exchange.header("Host")).port
+        return f"tomovic_key_{port or 80}"
 
     def _set_cookie(self, exchange: HttpExchange) -> None:
         """Redirects to the requested address without the key parameter, setting the key cookie."""
         rest     = {name: values for name, values in exchange.query.items() if name != self.QUERY_NAME}
         location = exchange.raw_path + ("?" + urlencode(rest, doseq=True) if rest else "")
 
-        exchange.redirect(location, {"Set-Cookie": f"{self.cookie}={self.key}; Path=/; HttpOnly; SameSite=Lax"})
+        exchange.redirect(location, {"Set-Cookie": f"{self._cookie_name(exchange)}={self.key}; Path=/; HttpOnly; SameSite=Lax"})
 
     def _cookie_value(self, exchange: HttpExchange) -> str:
         """Returns the value of the key cookie the request carries, empty when it carries none."""
         jar = SimpleCookie()
         jar.load(exchange.header("Cookie"))
 
-        morsel = jar.get(self.cookie)
+        morsel = jar.get(self._cookie_name(exchange))
         return "" if morsel is None else morsel.value
 
     def admit(self, exchange: HttpExchange) -> bool:

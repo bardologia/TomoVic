@@ -24,17 +24,24 @@ class ServeEntry:
     command line of any process. The variable is removed from the environment
     once read, so the jobs the console launches do not inherit it.
 
+    With --unix-socket the console listens on a socket file only its owner can
+    open, instead of a TCP port, which an SSH tunnel such as
+    ``ssh -L 18765:/tmp/tomovic.sock server`` then brings to another computer.
+
     Attributes:
-        parser : Argument parser holding the host, port and project-root options.
+        parser : Argument parser holding the host, port, socket and project-root options.
     """
 
     KEY_VARIABLE = "TOMOVIC_ACCESS_KEY"
+    LOCAL_HOST   = "127.0.0.1"
+    DEFAULT_PORT = 8765
 
     def __init__(self) -> None:
-        """Builds the argument parser with the host, port and root options."""
+        """Builds the argument parser with the host, port, socket and root options."""
         self.parser = argparse.ArgumentParser(description="TomoVic control console", epilog=f"Set {self.KEY_VARIABLE} to make the console answer only browsers that opened its link http://<address>:<port>/?key=<key>. A --host other than a loopback address requires it.")
-        self.parser.add_argument("--host", default="127.0.0.1", help="IPv4 address or host name to listen on; 0.0.0.0 listens on every interface")
-        self.parser.add_argument("--port", type=int, default=8765)
+        self.parser.add_argument("--host", default=None, help=f"IPv4 address or host name to listen on, default {self.LOCAL_HOST}; 0.0.0.0 listens on every interface")
+        self.parser.add_argument("--port", type=int, default=None, help=f"TCP port to listen on, default {self.DEFAULT_PORT}")
+        self.parser.add_argument("--unix-socket", type=Path, default=None, help="listen on this Unix socket, created with mode 0600, instead of a TCP port; excludes --host and --port")
         self.parser.add_argument("--root", type=Path, default=None, help="project root the console operates on (jobs, logs, runs); defaults to the repository holding this file")
 
     def _loopback(self, host: str) -> bool:
@@ -53,10 +60,16 @@ class ServeEntry:
         args       = self.parser.parse_args()
         access_key = os.environ.pop(self.KEY_VARIABLE, "")
 
-        if not access_key and not self._loopback(args.host):
-            self.parser.error(f"--host {args.host} lets other machines reach the console; set {self.KEY_VARIABLE} so only its link opens it")
+        if args.unix_socket and (args.host is not None or args.port is not None):
+            self.parser.error("--unix-socket replaces --host and --port; give one or the other")
 
-        server = WebUIServer(host=args.host, port=args.port, root=args.root, access_key=access_key)
+        host = self.LOCAL_HOST if args.host is None else args.host
+        port = self.DEFAULT_PORT if args.port is None else args.port
+
+        if not access_key and not args.unix_socket and not self._loopback(host):
+            self.parser.error(f"--host {host} lets other machines reach the console; set {self.KEY_VARIABLE} so only its link opens it")
+
+        server = WebUIServer(host=host, port=port, root=args.root, access_key=access_key, unix_socket=args.unix_socket)
         server.serve()
 
 
