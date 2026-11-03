@@ -18,6 +18,24 @@ console operates on (job adoption, logs, runs), default the repository that hold
 `serve.py`. Tests point `--root` at a temporary directory so a console booted by the
 suite can never see or stop the jobs of the live repository.
 
+Setting `TOMOVIC_ACCESS_KEY` (at least 16 characters from `A-Z a-z 0-9 _ -`) puts the
+console behind a key. It then answers only a browser that has opened
+`http://<address>:<port>/?key=<key>` once: that request is redirected to the same page
+without the key and leaves the key in an HttpOnly cookie named `tomovic_key_<port>`.
+Every other request gets a plain-text 403. The key travels in the environment because
+every user of a shared server can read a process's command line, and `serve.py`
+removes the variable after reading it so launched jobs do not inherit it. Without the
+variable, `--host` must be a loopback address and the console answers anyone who can
+reach it, which on a shared server means every other user of `127.0.0.1`. The TomoVis
+"Open TomoVic" button always starts the console with a fresh key, on `0.0.0.0` when
+TomoVis runs over SSH. By hand:
+
+```bash
+export TOMOVIC_ACCESS_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(24))")
+echo "http://$(hostname -f):8765/?key=$TOMOVIC_ACCESS_KEY"
+python webui/serve.py --host 0.0.0.0 --port 8765
+```
+
 The HTTP transport is standard library only (`http.server` plus server-sent events), but
 the console itself needs the project environment. `web_ui_server.py` imports the cube
 explorer and system monitor at boot, and those pull numpy, matplotlib, scipy and psutil.
@@ -149,8 +167,9 @@ One class per file, no comments, per the vault coding rules.
 
 **Server.** `serve.py` builds and runs the threaded HTTP server in `web_ui_server.py`,
 which owns one instance of every collaborator and composes the routing table. Requests
-enter `request_router.py`, which resolves the path's leading section to exactly one
-sub-router under `routers/` and delegates: `routers/dispatch.py` carries the shared
+enter `request_router.py`, which refuses cross-origin requests, passes the rest through
+the `AccessGate` when the console has an access key, resolves the path's leading
+section to exactly one sub-router under `routers/` and delegates: `routers/dispatch.py` carries the shared
 `HttpExchange` (query accessors, JSON, PNG, byte and file responses) and the per-router
 `RouteTable`; `static_router.py`, `results_routers.py`, `cube_routers.py`,
 `library_routers.py`, `launch_routers.py` and `system_router.py` declare the routes of
