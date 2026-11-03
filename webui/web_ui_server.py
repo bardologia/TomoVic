@@ -6,6 +6,9 @@ runs the threaded HTTP server together with the background monitors.
 
 from __future__ import annotations
 
+import os
+import socket
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib     import Path
@@ -49,6 +52,18 @@ class _Server(ThreadingHTTPServer):
     daemon_threads     = True
 
 
+class _UnixServer(socketserver.ThreadingUnixStreamServer):
+    """Threading HTTP server on a Unix socket, carrying the request router on the server object."""
+
+
+    request_queue_size = 64
+    daemon_threads     = True
+
+
+class StaleSocketError(RuntimeError):
+    """Raised when another console already answers on the Unix socket path."""
+
+
 class _Handler(BaseHTTPRequestHandler):
     """HTTP/1.1 request handler that delegates every method to the router."""
 
@@ -75,8 +90,9 @@ class WebUIServer:
     """Builds and runs the console: components, routes and background loops.
 
     Attributes:
-        host: Interface the HTTP server binds to.
-        port: TCP port the HTTP server binds to.
+        host: Interface the HTTP server binds to, unused when it listens on a Unix socket.
+        port: TCP port the HTTP server binds to, unused when it listens on a Unix socket.
+        unix_socket: Path of the Unix socket the HTTP server listens on instead of a TCP port, None for TCP.
         gate: Access gate admitting only browsers that hold the access key, None when the console has no key.
         logger: Console logger shared by every component.
         paths: Project path resolver rooted at the repository.
@@ -84,7 +100,7 @@ class WebUIServer:
     """
 
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None, access_key: str = "") -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None, access_key: str = "", unix_socket: Path | None = None) -> None:
         """Constructs every console component and assembles the request router.
 
         Args:
@@ -92,12 +108,14 @@ class WebUIServer:
             port: TCP port to bind the HTTP server to.
             root: Repository root override; discovered from this file when None.
             access_key: Secret a browser must present before the console answers it, empty to answer every request.
+            unix_socket: Path of a Unix socket to listen on instead of host and port, None to listen on TCP.
         """
 
-        self.host   = host
-        self.port   = port
-        self.gate   = AccessGate(access_key, port) if access_key else None
-        self.logger = WebLogger()
+        self.host        = host
+        self.port        = port
+        self.unix_socket = unix_socket
+        self.gate        = AccessGate(access_key) if access_key else None
+        self.logger      = WebLogger()
         self.paths  = ProjectPaths(root)
 
         self.resolver       = ScriptConfigResolver(self.paths)
@@ -149,7 +167,7 @@ class WebUIServer:
         preferred    = self.paths.preferred_interpreter(interpreters)
 
         self.logger.banner("TomoVic Console", [
-            f"URL          http://{self.host}:{self.port}",
+            f"URL          unix socket {self.unix_socket}" if self.unix_socket else f"URL          http://{self.host}:{self.port}",
             f"access       {'key required' if self.gate else 'no key'}",
             f"repo root    {self.paths.repo_root}",
             f"scripts      {len(scripts)} entry points",
@@ -157,15 +175,47 @@ class WebUIServer:
             f"envs found   {len(interpreters)}",
         ])
 
+    def _bind_unix_socket(self) -> _UnixServer:
+        """Binds the HTTP server to the Unix socket, readable and writable by this user only.
+
+        A socket file left behind by a console that died is removed first. The
+        umask is narrowed around the bind so the socket is created with mode
+        0600 and no other user of the machine can ever connect to it.
+
+        Raises:
+            StaleSocketError : If another console already answers on the socket path.
+        """
+        if self.unix_socket.exists():
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                probe.connect(str(self.unix_socket))
+                answered = True
+            except (ConnectionRefusedError, FileNotFoundError):
+                answered = False
+            probe.close()
+
+            if answered:
+                raise StaleSocketError(f"another console already answers on {self.unix_socket}")
+            self.unix_socket.unlink()
+
+        previous = os.umask(0o177)
+        try:
+            server = _UnixServer(str(self.unix_socket), _Handler)
+        finally:
+            os.umask(previous)
+
+        return server
+
     def serve(self) -> None:
         """Serves the console until interrupted, then stops the background workers.
 
         Starts the contention monitor and the progress watcher, runs the HTTP
         server on a worker thread, and blocks in the detacher wait loop until a
-        keyboard interrupt or detach request arrives.
+        keyboard interrupt or detach request arrives. A Unix socket is removed
+        again when the server stops.
         """
 
-        server        = _Server((self.host, self.port), _Handler)
+        server        = self._bind_unix_socket() if self.unix_socket else _Server((self.host, self.port), _Handler)
         server.router = self.router
 
         self._report_ready()
@@ -183,3 +233,5 @@ class WebUIServer:
         finally:
             server.shutdown()
             server.server_close()
+            if self.unix_socket:
+                self.unix_socket.unlink(missing_ok=True)

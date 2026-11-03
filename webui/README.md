@@ -21,20 +21,21 @@ suite can never see or stop the jobs of the live repository.
 Setting `TOMOVIC_ACCESS_KEY` (at least 16 characters from `A-Z a-z 0-9 _ -`) puts the
 console behind a key. It then answers only a browser that has opened
 `http://<address>:<port>/?key=<key>` once: that request is redirected to the same page
-without the key and leaves the key in an HttpOnly cookie named `tomovic_key_<port>`.
-Every other request gets a plain-text 403. The key travels in the environment because
-every user of a shared server can read a process's command line, and `serve.py`
-removes the variable after reading it so launched jobs do not inherit it. Without the
-variable, `--host` must be a loopback address and the console answers anyone who can
-reach it, which on a shared server means every other user of `127.0.0.1`. The TomoVis
-"Open TomoVic" button always starts the console with a fresh key, on `0.0.0.0` when
-TomoVis runs over SSH. By hand:
+without the key and leaves the key in an HttpOnly cookie named `tomovic_key_<port>`,
+where the port is the one in the browser's address bar. Every other request gets a
+plain-text 403. The key travels in the environment because every user of a shared
+server can read a process's command line, and `serve.py` removes the variable after
+reading it so launched jobs do not inherit it. Without the variable, `--host` must be a
+loopback address, and the console answers anyone who can reach it, which on a shared
+server means every other user of `127.0.0.1`.
 
-```bash
-export TOMOVIC_ACCESS_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(24))")
-echo "http://$(hostname -f):8765/?key=$TOMOVIC_ACCESS_KEY"
-python webui/serve.py --host 0.0.0.0 --port 8765
-```
+`--unix-socket <path>` replaces `--host` and `--port`: the console listens on a socket
+file created with mode 0600, so no other user of the machine can connect, and a socket
+left behind by a console that died is replaced at the next start. An SSH tunnel brings
+it to another computer, for example `ssh -L 18765:/tmp/tomovic.sock server` and
+then `http://127.0.0.1:18765/?key=<key>` there. The TomoVis "Open TomoVic" button starts
+the console this way, with a fresh key, when TomoVis was started through its launcher
+for a remote server, and on `127.0.0.1` when TomoVis runs locally.
 
 The HTTP transport is standard library only (`http.server` plus server-sent events), but
 the console itself needs the project environment. `web_ui_server.py` imports the cube
