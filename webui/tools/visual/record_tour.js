@@ -329,7 +329,7 @@ class TourRecorder {
     const focus   = this.centerAt(cuts, cutsTop, 0.5, Math.min(0.5, 360 / Math.max(cuts.height, 1)));
     const scroll  = new Track([[6.8, mapTop], [7.2, mapTop], [8.6, cutsTop], [10.0, cutsTop]]);
     const parked  = hover.at(6.8);
-    const mouse   = new Track([[6.8, parked], [8.6, this.pt(parked.x, parked.y + 40)], [10.0, this.pt(parked.x + 30, parked.y + 50)]]);
+    const mouse   = new Track([[6.8, parked], [7.2, parked], [8.2, this.pt(1424, 300)], [10.0, this.pt(1424, 420)]]);
     const cam     = this.pushOn(focus, 8.6, 10.0, 10.0, 0.04);
     await this.shoot(3.2, { scroll, mouse, cam }, 6.8);
   }
@@ -356,7 +356,8 @@ class TourRecorder {
     const map    = await this.rectOf("#cube-transect-map");
     const mapTop = Math.round(map.top - 110);
     const at     = (fx, fy) => this.centerAt(map, mapTop, fx, fy);
-    const p1 = at(0.22, 0.12), p2 = at(0.66, 0.40), p3 = at(0.38, 0.66);
+    const fmax   = Math.min(0.9, (this.viewport.height - 170) / map.height);
+    const p1 = at(0.22, fmax * 0.15), p2 = at(0.66, fmax * 0.55), p3 = at(0.38, fmax * 0.92);
     const scroll = new Track([[0, mapTop]]);
     const mouse  = new Track([[0, this.pt(900, 520)], [1.0, p1], [1.3, p1], [2.6, p2], [2.9, p2], [4.2, p3], [4.5, p3], [7.0, this.pt(p3.x + 60, p3.y + 20)]]);
     await this.shoot(3.2, { scroll, mouse, clicks: [1.15, 2.75], cam: new Track([[0, Camera.still(720, 400)]]) }, 0);
