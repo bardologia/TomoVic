@@ -1,0 +1,9 @@
+{
+  "name": "tomosar-anim-visual-harness",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Headless rendering harness for the pipeline process animations",
+  "dependencies": {
+    "playwright-core": "1.60.0"
+  }
+}

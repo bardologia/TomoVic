@@ -29,6 +29,7 @@ class App {
   }
 
   async init() {
+    window.app = this;
     this._initScenes();
     this._initNav();
     await this._loadProject();

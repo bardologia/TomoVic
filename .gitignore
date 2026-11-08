@@ -11,3 +11,5 @@ node_modules/
 package-lock.json
 .pytest_cache/
 .claude/
+webui/tools/visual/.ffmpeg/
+!webui/tools/visual/package-lock.json
