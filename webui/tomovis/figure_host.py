@@ -31,6 +31,7 @@ import matplotlib as mpl
 import matplotlib.style
 from matplotlib.backends.backend_webagg_core import FigureCanvasWebAggCore, FigureManagerWebAgg, NavigationToolbar2WebAgg
 from matplotlib.figure                       import Figure
+from PIL                                     import features
 
 from tomovis.events         import TomoVisEventError
 from tomovis.figure_options import FigureOptionsEditor, SubplotTool
@@ -99,6 +100,53 @@ class FigureMessages:
         return messages, frames
 
 
+class TomoVisCanvas(FigureCanvasWebAggCore):
+    """WebAgg core canvas that also writes GIF and AVIF, as TomoVis's matplotlib 3.11.2 Agg canvas did.
+
+    TomoVic runs matplotlib 3.10.8, whose Agg canvas has no GIF or AVIF
+    writer, so the Qt Save dialog lost those two filters. ``print_gif`` and
+    ``print_avif`` are copied from 3.11.2's FigureCanvasAgg and the two file
+    types are added to this class only, leaving every other canvas of the
+    console unchanged.
+
+    Attributes:
+        filetypes            : matplotlib 3.10.8's file types plus 'gif' and 'avif' with 3.11.2's descriptions.
+        PRINT_FIGURE_OPTIONS : Keywords print_figure passes that matplotlib's own print methods drop when they do not take them.
+    """
+
+    filetypes            = {**FigureCanvasWebAggCore.filetypes, "gif": "Graphics Interchange Format", "avif": "AV1 Image File Format"}
+    PRINT_FIGURE_OPTIONS = {"dpi", "facecolor", "edgecolor", "orientation", "bbox_inches_restore"}
+
+    def checkPrintOptions(self, options: dict) -> None:
+        """Drops print_figure's renderer keywords as matplotlib does for its own print methods.
+
+        Raises:
+            TypeError : For any other keyword, as a Python call with an unexpected keyword would.
+        """
+
+        unknown = set(options) - self.PRINT_FIGURE_OPTIONS
+        if unknown:
+            raise TypeError(f"unexpected keyword arguments {sorted(unknown)}")
+
+    def print_gif(self, filename_or_obj, *, metadata=None, pil_kwargs=None, **options):
+        """Writes the figure to a GIF file (matplotlib 3.11.2 FigureCanvasAgg.print_gif)."""
+
+        self.checkPrintOptions(options)
+        self._print_pil(filename_or_obj, "gif", pil_kwargs, metadata)
+
+    def print_avif(self, filename_or_obj, *, metadata=None, pil_kwargs=None, **options):
+        """Writes the figure to an AVIF file (matplotlib 3.11.2 FigureCanvasAgg.print_avif).
+
+        Raises:
+            RuntimeError : If the installed Pillow cannot write AVIF.
+        """
+
+        self.checkPrintOptions(options)
+        if not features.check("avif"):
+            raise RuntimeError("The installed pillow version does not support avif. Full avif support has been added in pillow 11.3.")
+        self._print_pil(filename_or_obj, "avif", pil_kwargs, metadata)
+
+
 class TomoVisToolbar(NavigationToolbar2WebAgg):
     """matplotlib's navigation toolbar driven over WebAgg events.
 
@@ -122,7 +170,7 @@ class TomoVisFigure:
         name              : Figure id used by the API ("plot", "profile", "export", "script_slicer").
         logger            : Console logger.
         figure            : The matplotlib Figure TomoVis draws into.
-        canvas            : WebAgg core canvas.
+        canvas            : WebAgg core canvas with the GIF and AVIF writers (TomoVisCanvas).
         manager           : WebAgg figure manager owning the toolbar.
         toolbar           : Navigation toolbar.
         socket            : Message collector registered as the manager's only web socket.
@@ -162,7 +210,7 @@ class TomoVisFigure:
         self.name              = name
         self.logger            = logger
         self.figure            = Figure()
-        self.canvas            = FigureCanvasWebAggCore(self.figure)
+        self.canvas            = TomoVisCanvas(self.figure)
         self.manager           = TomoVisFigureManager(self.canvas, next(self.NUMBERS))
         self.toolbar           = self.manager.toolbar
         self.socket            = FigureMessages()

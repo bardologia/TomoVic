@@ -179,6 +179,32 @@ def test_save_dialog_and_savefig(plotted, tmp_path):
     assert [(dialog["level"], dialog["title"]) for dialog in plot.drainDialogs()] == [("critical", "Error saving file")]
 
 
+def test_save_dialog_has_the_twelve_filters_of_matplotlib_3_11_2(plotted, tmp_path):
+    """F-135: the filters equal NavigationToolbar2QT's under matplotlib 3.11.2 (measured in the tomovis env), and GIF and AVIF are written."""
+
+    plot  = plotted.window.tab2Plot
+    start = plot.handle("save_start", {})
+
+    assert start["filters"] == [
+        "AV1 Image File Format (*.avif)",
+        "Encapsulated Postscript (*.eps)",
+        "Graphics Interchange Format (*.gif)",
+        "Joint Photographic Experts Group (*.jpeg *.jpg)",
+        "PGF code for LaTeX (*.pgf)",
+        "Portable Document Format (*.pdf)",
+        "Portable Network Graphics (*.png)",
+        "Postscript (*.ps)",
+        "Raw RGBA bitmap (*.raw *.rgba)",
+        "Scalable Vector Graphics (*.svg *.svgz)",
+        "Tagged Image File Format (*.tif *.tiff)",
+        "WebP Image Format (*.webp)",
+    ]
+    for suffix, pil_format in (("gif", "GIF"), ("avif", "AVIF")):
+        assert plot.handle("save", {"path": str(tmp_path / f"plot.{suffix}")}) == {"ok": True}
+        with Image.open(tmp_path / f"plot.{suffix}") as image:
+            assert (image.format, image.size) == (pil_format, (PLOT_W, PLOT_H))
+
+
 def test_subplot_tool_applies_live_resets_and_exports(plotted):
     """Configure subplots: defaults from the figure, live left change, 0.001 gap rule, Reset, Tight layout and Export values."""
 
