@@ -322,12 +322,14 @@ class TomoVisPage extends TomoVisPageBase {
       this.savedTitle = document.title;
       document.title  = TomoVisPage.TITLE;
     }
+    document.body.classList.add("is-tomovis-page");
     super.enter();
   }
 
   leave() {
     if (!this.active) return;
     document.title = this.savedTitle;
+    document.body.classList.remove("is-tomovis-page");
     super.leave();
   }
 
