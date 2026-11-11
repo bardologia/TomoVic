@@ -191,7 +191,9 @@
   user-select: none;
 }
 
-.is-disabled,
+.page--tomovis .is-disabled,
+.page--tomovis-scripts .is-disabled,
+.tv-layer .is-disabled,
 .tv-button:disabled,
 .tv-line:disabled { opacity: 0.4; }
 
