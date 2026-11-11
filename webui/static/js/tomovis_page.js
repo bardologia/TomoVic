@@ -144,7 +144,7 @@ class TomoVisTabStrip {
 
     this.tabs.forEach((tab, index) => {
       tab.addEventListener("click", () => this.choose(index));
-      tab.addEventListener("keydown", (event) => this.key(event, index));
+      tab.addEventListener("keydown", (event) => this.key(event));
     });
     ctx.bus.on("snapshot", ({ snapshot }) => this.follow(snapshot));
     this.render();
@@ -156,13 +156,18 @@ class TomoVisTabStrip {
     this.ctx.session.send({ type: "tab", index }).catch((error) => this.ctx.session.raiseUnreported(error));
   }
 
-  key(event, index) {
+  step(offset) {
+    const next = this.current + offset;
+    if (next < 0 || next >= this.tabs.length) return;
+    this.choose(next);
+  }
+
+  key(event) {
     const moves = { ArrowRight: 1, ArrowLeft: -1 };
     if (!(event.key in moves)) return;
     event.preventDefault();
-    const next = (index + moves[event.key] + this.tabs.length) % this.tabs.length;
-    this.tabs[next].focus();
-    this.choose(next);
+    this.step(moves[event.key]);
+    this.tabs[this.current].focus();
   }
 
   follow(snapshot) {
