@@ -110,6 +110,18 @@ Array names in the NPZ: `img`, `d2`, `aux`, `d2Norm`, `rgbArray`, `z_axis`; per 
 renders in display order, rows top to bottom); per figure `plot_ax<i>_line<k>_x/_y` and
 `profile_ax<i>_line<k>_x/_y`.
 
+## Image export formats
+
+`qt_image_formats.py` (also in the `tomovis` environment) saves seven seeded test images with
+Qt's own `QImage.save` in the 16 formats pyqtgraph's image export offered, at 96 dpi, and writes
+`tests/webui/fixtures/tomovis/qt_image_formats/`: the input PNGs, `manifest.json` with the SHA-256
+and size of every file (ICO and CUR also with the uninitialised mask alignment bytes zeroed), and
+`decoded.npz` with the pixels of the smooth-scaled ICO and of the ICNS files.
+
+```
+/home/bard/miniconda3/envs/tomovis/bin/python webui/tools/tomovis_parity/qt_image_formats.py
+```
+
 ## Screenshots
 
 `shots.py` crops the DLR-TomoSAR test tomogram (150 x 1000 x 500 complex64, heights -20 m

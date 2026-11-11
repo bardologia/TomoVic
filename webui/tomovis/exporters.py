@@ -10,25 +10,27 @@ MatplotlibExporter into a server figure that the browser shows as the
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import h5py
 import numpy
-from PIL import Image
 
-from tomovis.events      import TomoVisEventError
-from tomovis.figure_host import TomoVisFigure, TomoVisRc
+from tomovis.events          import TomoVisEventError
+from tomovis.figure_host     import TomoVisFigure, TomoVisRc
+from tomovis.qt_image_writer import QtImageWriter
 
 
 class ExportWriter:
     """Writes exported images and text files.
 
     Attributes:
-        PILLOW_FORMATS : Lower-case extensions written by re-encoding the PNG with Pillow, to Pillow's format names.
+        images : QImage.save port that writes every format QImageWriter offered.
     """
 
-    PILLOW_FORMATS = {".jpg": "JPEG", ".jpeg": "JPEG", ".tif": "TIFF", ".tiff": "TIFF", ".bmp": "BMP", ".ppm": "PPM", ".webp": "WEBP"}
+    def __init__(self) -> None:
+        """Creates the writer."""
+
+        self.images = QtImageWriter()
 
     def target(self, path: str) -> Path:
         """Checks a target path.
@@ -47,8 +49,8 @@ class ExportWriter:
     def writeImage(self, path: str, png: bytes) -> Path:
         """Writes an image in the format its extension implies, as QImage.save does.
 
-        PNG is written as received; other formats Pillow knows are re-encoded
-        from the PNG, with alpha dropped for JPEG.
+        PNG is written as received; the other 15 formats QImageWriter offered
+        are encoded by ``QtImageWriter`` as Qt 5.15 encodes them.
 
         Args:
             path : Absolute target path.
@@ -58,21 +60,12 @@ class ExportWriter:
             The written path.
 
         Raises:
-            TomoVisEventError : For an unknown extension (QImage.save returns False there) or an unwritable path.
+            TomoVisEventError : For an extension QImageWriter has no writer for (QImage.save returns False there) or an unwritable path.
         """
 
         target = self.target(path)
-        suffix = target.suffix.lower()
-        if suffix == ".png":
-            target.write_bytes(png)
-            return target
-        if suffix not in self.PILLOW_FORMATS:
+        if not self.images.write(target, png):
             raise TomoVisEventError(f"cannot write an image with the extension '{target.suffix}'")
-
-        image = Image.open(io.BytesIO(png))
-        if self.PILLOW_FORMATS[suffix] in ("JPEG", "BMP", "PPM"):
-            image = image.convert("RGB")
-        image.save(target, format=self.PILLOW_FORMATS[suffix])
         return target
 
     def writeBytes(self, path: str, data: bytes) -> Path:

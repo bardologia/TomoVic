@@ -20,6 +20,7 @@ The server runs the copied slots in the original order with the original numpy c
 | `figure_host.py` | `TomoVisFigure`: Figure + `FigureCanvasWebAggCore` + navigation toolbar + message collector, figure ops, Save |
 | `figure_options.py` | `SubplotTool` (SubplotToolQt on stand-in spin boxes), `FigureOptionsEditor` (figure_edit) |
 | `exporters.py` | writers for pyqtgraph Export dialog files, the HDF5 exporter and the Matplotlib Window exporter |
+| `qt_image_writer.py` | `QImage.save` for the 16 image formats QImageWriter offered (Qt 5.15.15): its PBM/PGM/XBM/XPM/WBMP/ICO/ICNS writers, mono dithering and smooth scaling, and Pillow with Qt's settings for BMP, JPEG, PPM, TIFF and WebP |
 | `directory_lister.py` | listing for the file dialog |
 | `scripts.py` | server halves of `Scripts/SlicerMatplotlib.py` and `Scripts/VolumeRendering.py` |
 | `events.py` | event validation and dispatch, snapshot controls |
