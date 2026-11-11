@@ -382,6 +382,9 @@ class App {
 
     this.figureDock = new window.FigureDock();
     window.figureDock = this.figureDock;
+
+    this.tomovisPage        = new window.TomoVisPage(document.querySelector('.page[data-page="tomovis"]'));
+    this.tomovisScriptsPage = new window.TomoVisScriptsPage(document.querySelector('.page[data-page="tomovis_scripts"]'));
   }
 
   _figureTabs() {
@@ -427,6 +430,10 @@ class App {
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
     if (route === "console") this.runConsole.onShow();
+    if (route === "tomovis") this.tomovisPage.enter();
+    else this.tomovisPage.leave();
+    if (route === "tomovis_scripts") this.tomovisScriptsPage.enter();
+    else this.tomovisScriptsPage.leave();
     this._mountFigures(route);
     setTimeout(() => this.reveal.scan(), 60);
   }

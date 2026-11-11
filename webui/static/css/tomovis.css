@@ -1,0 +1,154 @@
+.page--tomovis,
+.page--tomovis-scripts,
+.tv-layer {
+  --tv-pane:      #000;
+  --tv-pg-ink:    rgb(150, 150, 150);
+  --tv-figure:    #fff;
+  --tv-label:     13px;
+  --tv-field-h:   28px;
+  --tv-field-w:   90px;
+  --tv-button-w:  100px;
+  --tv-spin-w:    180px;
+  --tv-gap:       8px;
+  --tv-menubar-h: 27px;
+  --tv-status-h:  25px;
+}
+
+.page--tomovis {
+  position: relative;
+  z-index: 2;
+  padding: 18px;
+  min-height: 100dvh;
+  overflow-x: auto;
+}
+.page--tomovis.is-active { display: flex; flex-direction: column; }
+
+.tv-window {
+  flex: 1 0 auto;
+  display: grid;
+  grid-template-rows: auto var(--tv-menubar-h) auto minmax(0, 1fr) var(--tv-status-h);
+  min-width: 1100px;
+  min-height: 880px;
+  height: calc(100dvh - 36px);
+  background: var(--frost-panel);
+  -webkit-backdrop-filter: var(--frost);
+  backdrop-filter: var(--frost);
+  border: 2px solid var(--line);
+  border-radius: var(--r-card);
+  font-family: var(--sans);
+  font-size: var(--tv-label);
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.tv-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 2px solid var(--line);
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-dim);
+}
+.tv-titlebar__orb { margin-left: auto; --orb-theme: dark; }
+
+.tv-menubar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 6px;
+  border-bottom: 2px solid var(--line);
+}
+.tv-menubar__item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-input);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--tv-label);
+  cursor: default;
+}
+.tv-menubar__item:hover,
+.tv-menubar__item.is-open { background: var(--surface-2); }
+.tv-menubar__item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.tv-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 9px 9px 0;
+}
+.tv-tab {
+  position: relative;
+  bottom: -2px;
+  padding: 5px 14px 6px;
+  border: 2px solid var(--line);
+  border-bottom-color: transparent;
+  border-radius: var(--r-input) var(--r-input) 0 0;
+  background: var(--bg-1);
+  color: var(--ink-faint);
+  font-family: var(--sans);
+  font-size: var(--tv-label);
+  cursor: default;
+}
+.tv-tab:hover { color: var(--ink); }
+.tv-tab.is-current { background: var(--surface); color: var(--ink); border-bottom-color: var(--surface); z-index: 1; }
+.tv-tab[hidden] { display: none; }
+.tv-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+
+.tv-stack {
+  display: grid;
+  margin: 0 9px;
+  border: 2px solid var(--line);
+  border-radius: 0 var(--r-card) var(--r-card) var(--r-card);
+  background: var(--surface);
+  min-height: 0;
+}
+.tv-panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 9px;
+  visibility: hidden;
+}
+.tv-panel.is-current { visibility: visible; }
+
+.tv-statusbar {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.tv-layer > * { pointer-events: auto; }
+
+.page--tomovis-scripts .tv-scripts {
+  display: grid;
+  gap: 28px;
+}
+.page--tomovis-scripts .tv-script {
+  min-width: 0;
+  background: var(--frost-panel);
+  border: 2px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 16px;
+  font-size: var(--tv-label);
+}
+.page--tomovis-scripts { overflow-x: auto; }

@@ -12,6 +12,10 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
 <link rel="stylesheet" href="/static/css/styles.css" />
+<link rel="stylesheet" href="/static/css/tomovis.css" />
+<link rel="stylesheet" href="/static/css/tomovis_slicer.css" />
+<link rel="stylesheet" href="/static/css/tomovis_plot.css" />
+<link rel="stylesheet" href="/static/css/tomovis_volume.css" />
 </head>
 <body>
 
@@ -53,6 +57,8 @@
         <a href="#/results" data-route="results">Results</a>
         <a href="#/cube" data-route="cube">Cube</a>
         <a href="#/slices" data-route="slices">Slices</a>
+        <a href="#/tomovis" data-route="tomovis">TomoVis</a>
+        <a href="#/tomovis_scripts" data-route="tomovis_scripts">TomoVis scripts</a>
       </div>
     </div>
   </nav>
@@ -904,6 +910,53 @@
     </div>
   </section>
 
+  <!-- TOMOVIS -->
+  <section class="page page--tomovis" data-page="tomovis">
+    <div class="tv-window" id="tv-window">
+      <header class="tv-titlebar" id="tv-titlebar">
+        <span class="tv-titlebar__title">TomoVis</span>
+        <thinking-orb class="tv-titlebar__orb" id="tv-busy" state="working" size="18" hidden aria-hidden="true"></thinking-orb>
+      </header>
+      <nav class="tv-menubar" id="tv-menubar" role="menubar" aria-label="TomoVis menu">
+        <button type="button" class="tv-menubar__item" role="menuitem" aria-haspopup="menu" data-menu="file">File</button>
+        <button type="button" class="tv-menubar__item" role="menuitem" aria-haspopup="menu" data-menu="data">Data</button>
+      </nav>
+      <div class="tv-tabs" id="tv-tabs" role="tablist" aria-label="TomoVis tabs">
+        <button type="button" class="tv-tab is-current" role="tab" aria-selected="true" data-tab="0" aria-controls="tv-panel-slicer">Slicer</button>
+        <button type="button" class="tv-tab" role="tab" aria-selected="false" data-tab="1" aria-controls="tv-panel-plot">Plot</button>
+        <button type="button" class="tv-tab" role="tab" aria-selected="false" data-tab="2" aria-controls="tv-panel-profile">Profile</button>
+        <button type="button" class="tv-tab" role="tab" aria-selected="false" data-tab="3" aria-controls="tv-panel-3d">3D</button>
+      </div>
+      <div class="tv-stack" id="tv-stack">
+        <div class="tv-panel is-current" id="tv-panel-slicer" data-tab="0" role="tabpanel"></div>
+        <div class="tv-panel" id="tv-panel-plot" data-tab="1" role="tabpanel"></div>
+        <div class="tv-panel" id="tv-panel-profile" data-tab="2" role="tabpanel"></div>
+        <div class="tv-panel" id="tv-panel-3d" data-tab="3" role="tabpanel"></div>
+      </div>
+      <footer class="tv-statusbar" id="tv-status" role="status" aria-live="polite"></footer>
+    </div>
+    <div class="tv-layer" id="tv-layer"></div>
+  </section>
+
+  <!-- TOMOVIS SCRIPTS -->
+  <section class="page page--pad page--tomovis-scripts" data-page="tomovis_scripts">
+    <div class="page__head page__head--figure">
+      <h2 class="page__title">TomoVis scripts</h2>
+      <p class="page__lead">
+        The two standalone TomoVis scripts, SlicerMatplotlib.py and VolumeRendering.py, with
+        their hard-coded input path replaced by a file chooser. The slicer steps through the
+        range slices of an hd5 tomogram with the j and k keys; the volume renderer draws the
+        same file as a 3D volume driven by the keys 1, 2, 3, 4, 0, [ and ].
+      </p>
+      <hairline-figure name="voxels" class="page__figure" aria-hidden="true"></hairline-figure>
+    </div>
+    <div class="tv-scripts" id="tv-scripts">
+      <section class="tv-script" id="tv-script-slicer" aria-label="SlicerMatplotlib"></section>
+      <section class="tv-script" id="tv-script-volume" aria-label="VolumeRendering"></section>
+    </div>
+    <div class="tv-layer" id="tv-scripts-layer"></div>
+  </section>
+
   <!-- REPO MAP -->
   <section class="page page--pad page--repomap" data-page="repomap">
     <div class="page__head page__head--figure">
@@ -1012,6 +1065,23 @@
 <script src="/static/js/globe_tour.js"></script>
 <script src="/static/js/globe.js"></script>
 <script src="/static/js/slice_collector.js"></script>
+<script src="/static/js/tomovis_session.js"></script>
+<script src="/static/js/tomovis_widgets.js"></script>
+<script src="/static/js/tomovis_dialogs.js"></script>
+<script src="/static/js/tomovis_pg_view.js"></script>
+<script src="/static/js/tomovis_pg_histogram.js"></script>
+<script src="/static/js/tomovis_pg_roi.js"></script>
+<script src="/static/js/tomovis_pg_imageview.js"></script>
+<script src="/static/js/tomovis_mpl.js"></script>
+<script src="/static/js/tomovis_pg_export.js"></script>
+<script src="/static/js/tomovis_slicer.js"></script>
+<script src="/static/js/tomovis_plot.js"></script>
+<script src="/static/js/tomovis_profile.js"></script>
+<script src="/static/js/tomovis_vispy.js"></script>
+<script src="/static/js/tomovis_volume.js"></script>
+<script src="/static/js/tomovis_script_slicer.js"></script>
+<script src="/static/js/tomovis_script_volume.js"></script>
+<script src="/static/js/tomovis_page.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>
