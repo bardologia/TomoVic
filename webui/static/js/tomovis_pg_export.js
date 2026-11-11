@@ -354,12 +354,21 @@ class PgSvgExporter extends PgExporter {
 
   async export(copy = false) {
     if (copy) {
-      await navigator.clipboard.writeText(this.xml());
+      await this.copy(this.xml());
       return;
     }
     const fileName = await this.saveDialog(["Scalable Vector Graphics (*.svg)"]);
     if (!fileName) return;
     await this.write(fileName, new Blob([this.xml()], { type: "application/octet-stream" }), "bytes");
+  }
+
+  async copy(xml) {
+    if (typeof ClipboardItem.supports === "function" && ClipboardItem.supports("image/svg+xml")) {
+      await navigator.clipboard.write([new ClipboardItem({ "image/svg+xml": new Blob([xml], { type: "image/svg+xml" }) })]);
+      return;
+    }
+    this.log("SVG copy: this browser's clipboard does not take image/svg+xml; the SVG was copied as text");
+    await navigator.clipboard.writeText(xml);
   }
 }
 
