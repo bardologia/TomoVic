@@ -521,7 +521,8 @@ class TomoVisFileDialog {
 }
 
 class TomoVisColorDialog {
-  static TITLE = "Select Color";
+  static TITLE       = "Select Color";
+  static STORAGE_KEY = "tomovis.customColors";
 
   static getColor(options = {}) {
     return new TomoVisColorDialog(options).run();
@@ -537,7 +538,27 @@ class TomoVisColorDialog {
     return colors;
   }
 
-  static custom = Array.from({ length: 16 }, () => [255, 255, 255]);
+  static storedCustom() {
+    const white = Array.from({ length: 16 }, () => [255, 255, 255]);
+    let stored;
+    try {
+      stored = JSON.parse(window.localStorage.getItem(TomoVisColorDialog.STORAGE_KEY));
+    } catch (error) {
+      return white;
+    }
+    const valid = Array.isArray(stored) && stored.length === 16 && stored.every((color) => Array.isArray(color) && color.length === 3 && color.every((v) => Number.isInteger(v) && v >= 0 && v <= 255));
+    return valid ? stored : white;
+  }
+
+  static rememberCustom() {
+    try {
+      window.localStorage.setItem(TomoVisColorDialog.STORAGE_KEY, JSON.stringify(TomoVisColorDialog.custom));
+    } catch (error) {
+      return;
+    }
+  }
+
+  static custom = this.storedCustom();
 
   static rgbToHsv(r, g, b) {
     const max = Math.max(r, g, b);
@@ -686,6 +707,7 @@ class TomoVisColorDialog {
   addCustom() {
     const index = this.customIndex === undefined ? (this.nextCustom || 0) : this.customIndex;
     TomoVisColorDialog.custom[index] = [...this.rgb];
+    TomoVisColorDialog.rememberCustom();
     this.nextCustom  = (index + 1) % 16;
     this.customIndex = undefined;
     this.customWell.querySelectorAll(".tv-colordialog__cell").forEach((cell) => cell.paint());
