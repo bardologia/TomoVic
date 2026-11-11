@@ -66,7 +66,7 @@
 }
 .tv-mpl-tool:not(:disabled):hover { background: var(--surface-2); border-color: var(--line); }
 .tv-mpl-tool:not(:disabled):active { background: var(--bg-2); }
-.tv-mpl-tool.is-checked { background: rgba(163, 192, 255, 0.18); border-color: var(--accent); }
+.tv-mpl-tool.is-checked { background: var(--tv-checked); border-color: var(--accent); }
 .tv-mpl-tool:disabled { opacity: 0.4; }
 .tv-mpl-tool:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .tv-mpl-toolbar__sep {
@@ -174,7 +174,7 @@
   gap: 2px;
   border-bottom: 2px solid var(--line);
 }
-.tv-mpl-tabs .tv-tab.is-current { background: #161d24; border-bottom-color: #161d24; }
+.tv-mpl-tabs .tv-tab.is-current { background: var(--tv-dialog); border-bottom-color: var(--tv-dialog); }
 .tv-mpl-pages { padding-top: 4px; }
 .tv-mpl-combowidget { display: grid; gap: 8px; padding: 10px 4px 4px; }
 .tv-mpl-combowidget > .tv-combo { justify-self: stretch; }

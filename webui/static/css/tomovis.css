@@ -12,6 +12,9 @@
   --tv-gap:       8px;
   --tv-menubar-h: 27px;
   --tv-status-h:  25px;
+  --tv-surface:   #141b22;
+  --tv-dialog:    #161d24;
+  --tv-checked:   color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .page--tomovis {
@@ -111,7 +114,7 @@
   cursor: default;
 }
 .tv-tab:hover { color: var(--ink); }
-.tv-tab.is-current { background: #141b22; color: var(--ink); border-bottom-color: #141b22; z-index: 1; padding-top: 7px; }
+.tv-tab.is-current { background: var(--tv-surface); color: var(--ink); border-bottom-color: var(--tv-surface); z-index: 1; padding-top: 7px; }
 .tv-tab[hidden] { display: none; }
 .tv-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 
@@ -120,7 +123,7 @@
   margin: 0 9px;
   border: 2px solid var(--line);
   border-radius: 0 var(--r-card) var(--r-card) var(--r-card);
-  background: #141b22;
+  background: var(--tv-surface);
   min-height: 0;
 }
 .tv-panel {
@@ -261,7 +264,7 @@
   margin-top: -9px;
   border: 2px solid var(--line-strong);
   border-radius: var(--r-input);
-  background: #c9d3da;
+  background: var(--ink-dim);
   transition: background 0.12s var(--ease);
 }
 .tv-slider:not(.is-disabled):hover .tv-slider__handle,
@@ -420,7 +423,7 @@
 .tv-button:not(:disabled):hover { border-color: var(--ink); background: var(--bg-2); }
 .tv-button:not(:disabled):active { transform: translateY(1px); }
 .tv-button:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
-.tv-button.is-checked { border-color: var(--accent); background: rgba(163, 192, 255, 0.18); }
+.tv-button.is-checked { border-color: var(--accent); background: var(--tv-checked); }
 .tv-button--icon { min-width: 0; padding: 0 7px; }
 .tv-button__icon { width: 16px; height: 16px; filter: invert(0.92); }
 .tv-button--icon .tv-button__text:empty { display: none; }
@@ -612,7 +615,7 @@
   z-index: 1;
   padding: 4px 10px;
   border-bottom: 2px solid var(--line);
-  background: #161d24;
+  background: var(--tv-dialog);
   color: var(--ink-dim);
   font-weight: 600;
   text-align: left;
