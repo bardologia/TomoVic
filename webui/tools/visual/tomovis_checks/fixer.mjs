@@ -1,6 +1,11 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { TomoVisHarness as H, TomoVisCheckRun as R, REPO } from "./harness.mjs";
+
+const require      = createRequire(import.meta.url);
+const { chromium } = require("playwright-core");
 
 class FixerChecks {
   constructor(options) {
@@ -449,6 +454,43 @@ class FixerChecks {
     });
   }
 
+  static fullBrowser() {
+    const root = path.join(os.homedir(), ".cache", "ms-playwright");
+    const dirs = fs.readdirSync(root).filter((d) => /^chromium-\d+$/.test(d)).sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]));
+    for (const d of dirs) {
+      const exe = path.join(root, d, "chrome-linux64", "chrome");
+      if (fs.existsSync(exe)) return exe;
+    }
+    throw new Error(`no full Chromium build under ${root}; the headless shell has no Fullscreen API`);
+  }
+
+  async scriptFullscreen() {
+    await this.run.check("G-10 F-151", "F11 on the VolumeRendering canvas toggles real full screen (full Chromium, new headless mode) and the canvas follows", async () => {
+      const browser = await chromium.launch({ executablePath: FixerChecks.fullBrowser(), headless: true, args: H.GL_ARGS.swiftshader });
+      const page    = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
+      page.on("pageerror", (error) => this.errors.push(`pageerror: ${error.message}`));
+      await page.goto(`${this.options.base}/#/tomovis_scripts`);
+      await page.waitForFunction(() => window.app.tomovisScriptsPage && window.app.tomovisScriptsPage.views.length === 2, null, { timeout: 30000 });
+      await page.fill("#tv-script-volume .tv-script-volume__path", path.join(this.inputs, "fusar_two_key_elev.hd5"));
+      await page.locator("#tv-script-volume .tv-button", { hasText: /^Load$/ }).click();
+      await page.waitForFunction(() => window.app.tomovisScriptsPage.views[1].scene !== null, null, { timeout: 60000 });
+      await page.waitForTimeout(500);
+      const state = () => page.evaluate(() => { const v = window.app.tomovisScriptsPage.views[1]; return [document.fullscreenElement ? document.fullscreenElement.className : null, v.scene.canvas.fullscreen, v.scene.canvas.size]; });
+      const seen  = [await state()];
+      await page.locator("#tv-script-volume .tv-script-volume__canvas").focus();
+      await page.keyboard.press("F11");
+      await page.waitForTimeout(1200);
+      seen.push(await state());
+      await page.screenshot({ path: path.join(this.out, "g10_script_fullscreen.png") });
+      await page.keyboard.press("F11");
+      await page.waitForTimeout(1200);
+      seen.push(await state());
+      await browser.close();
+      R.equal(seen, [[null, false, [1000, 800]], ["tv-script-volume__stage", true, [1440, 1000]], [null, false, [1000, 800]]], "full screen, then back");
+      return "1000x800 -> full screen 1440x1000 -> 1000x800";
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1440, height: 1000 } });
     this.options.base = opened.base;
@@ -467,6 +509,7 @@ class FixerChecks {
     if (this.wanted("mplwindow")) await this.matplotlibWindows();
     if (this.wanted("copy")) await this.svgCopy();
     if (this.wanted("autorange")) await this.firstAutoRange();
+    if (this.wanted("fullscreen")) await this.scriptFullscreen();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors].filter((e) => !(this.wanted("mplwindow") && e === "console: Failed to load resource: the server responded with a status of 404 (Not Found)"));
