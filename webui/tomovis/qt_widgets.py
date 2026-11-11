@@ -817,10 +817,10 @@ class QtComboBox(QtWidget):
     """A non-editable QComboBox.
 
     Attributes:
-        items              : Item texts in order.
-        index              : Current index, -1 when empty.
+        items               : Item texts in order.
+        index               : Current index, -1 when empty.
         currentIndexChanged : Signal(int) emitted when the index changes.
-        currentTextChanged : Signal(str) emitted after currentIndexChanged.
+        currentTextChanged  : Signal(str) emitted after currentIndexChanged.
     """
 
     def __init__(self, boundary: SlotBoundary, name: str) -> None:
@@ -943,9 +943,9 @@ class QtLineEdit(QtWidget):
     """A QLineEdit with an optional validator.
 
     Attributes:
-        text_value       : Current text.
-        placeholder      : Placeholder text.
-        validator        : Validator applied to typed text, None for none.
+        text_value  : Current text.
+        placeholder : Placeholder text.
+        validator   : Validator applied to typed text, None for none.
     """
 
     def __init__(self, boundary: SlotBoundary, name: str, text: str = "") -> None:
@@ -992,8 +992,8 @@ class QtTabWidget(QtWidget):
     """A QTabWidget.
 
     Attributes:
-        titles        : Tab titles in order.
-        index         : Current tab index.
+        titles         : Tab titles in order.
+        index          : Current tab index.
         currentChanged : Signal(int) emitted when the current tab changes.
     """
 

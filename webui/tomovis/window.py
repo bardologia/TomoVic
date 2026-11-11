@@ -193,20 +193,20 @@ class TomoVisWindow:
     """The copied TomoVis window.
 
     Attributes:
-        logger           : Console logger.
-        has3d            : Whether the browser offers WebGL2, the analogue of vispy plus a usable OpenGL context (F-090).
-        boundary         : Slot boundary of every signal.
-        console          : print replacement.
-        dialogs          : Dialog queue.
-        tools            : TomoVis helpers and tables.
-        readers          : Import readers.
-        session_file     : Session file reader and writer.
-        events           : Event dispatcher of the API.
-        slot_errors      : Slot exceptions since the last drain.
-        sent_serials     : View name to the image serial last sent to the browser.
-        volume_present   : Analogue of ``self.volume is not None``: the browser holds a 3D view for this cube.
-        volume_data      : Equalised, subsampled float32 volume handed to the 3D view.
-        volume_serial    : Bumped whenever a new volume is prepared.
+        logger         : Console logger.
+        has3d          : Whether the browser offers WebGL2, the analogue of vispy plus a usable OpenGL context (F-090).
+        boundary       : Slot boundary of every signal.
+        console        : print replacement.
+        dialogs        : Dialog queue.
+        tools          : TomoVis helpers and tables.
+        readers        : Import readers.
+        session_file   : Session file reader and writer.
+        events         : Event dispatcher of the API.
+        slot_errors    : Slot exceptions since the last drain.
+        sent_serials   : View name to the image serial last sent to the browser.
+        volume_present : Analogue of ``self.volume is not None``: the browser holds a 3D view for this cube.
+        volume_data    : Equalised, subsampled float32 volume handed to the 3D view.
+        volume_serial  : Bumped whenever a new volume is prepared.
     """
 
     def __init__(self, logger: WebLogger, has3d: bool = True, **kwargs) -> None:

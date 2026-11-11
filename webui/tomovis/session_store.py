@@ -61,8 +61,10 @@ class TomoVisSessions:
     """LRU store of page sessions.
 
     Attributes:
-        CAPACITY : Maximum number of live sessions.
+        CAPACITY : Default maximum number of live sessions.
+        KINDS    : Session kinds the store opens.
         logger   : Console logger.
+        capacity : Maximum number of live sessions of this store.
         entries  : Session id to entry, least recently used first.
         lock     : Guards ``entries``.
     """

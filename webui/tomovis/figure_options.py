@@ -32,12 +32,12 @@ class SubplotTool:
     """SubplotToolQt on headless spin boxes.
 
     Attributes:
-        GROUPS     : (group title, spin box names, button texts) in dialog order.
-        figure     : Target figure.
-        logger     : Console logger for exceptions in the live update.
-        boundary   : Slot boundary of the spin boxes.
-        spinboxes  : Name to QtDoubleSpinBox, in the order top, bottom, left, right, hspace, wspace.
-        defaults   : Name to the subplot parameter value when the dialog was opened (Reset target).
+        GROUPS    : (group title, spin box names, button texts) in dialog order.
+        figure    : Target figure.
+        logger    : Console logger for exceptions in the live update.
+        boundary  : Slot boundary of the spin boxes.
+        spinboxes : Name to QtDoubleSpinBox, in the order top, bottom, left, right, hspace, wspace.
+        defaults  : Name to the subplot parameter value when the dialog was opened (Reset target).
     """
 
     GROUPS = [("Borders", ["top", "bottom", "left", "right"], ["Export values"]), ("Spacings", ["hspace", "wspace"], ["Tight layout", "Reset", "Close"])]

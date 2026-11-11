@@ -39,16 +39,16 @@ class TomoVisEvents:
     """Maps API events onto widget operations of one TomoVisWindow.
 
     Attributes:
-        ACTIONS     : Menu action names.
-        SHORTCUTS   : Shortcut text to action name.
-        BUTTONS     : Push buttons the server owns.
-        CHECKBOXES  : Check boxes the server owns.
-        VALUES      : Sliders and spin boxes the server owns, with the number type their value takes.
-        COMBOS      : Combo boxes the server owns.
-        LINE_EDITS  : The six ROI fields.
-        RADIOS      : 3D radio buttons (browser-owned, reported read-only).
+        ACTIONS      : Menu action names.
+        SHORTCUTS    : Shortcut text to action name.
+        BUTTONS      : Push buttons the server owns.
+        CHECKBOXES   : Check boxes the server owns.
+        VALUES       : Sliders and spin boxes the server owns, with the number type their value takes.
+        COMBOS       : Combo boxes the server owns.
+        LINE_EDITS   : The six ROI fields.
+        RADIOS       : 3D radio buttons (browser-owned, reported read-only).
         TAB4_BUTTONS : 3D push buttons (browser-owned, reported read-only).
-        window      : The window the events act on.
+        window       : The window the events act on.
     """
 
     ACTIONS      = ("openFile", "saveFile", "openFUSAR", "openRAT", "openUAVSAR", "openNpy", "allChMenu", "ch1Menu", "ch2Menu", "ch3Menu")
