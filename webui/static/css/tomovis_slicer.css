@@ -222,5 +222,22 @@
 .tv-pg-export__buttons { display: flex; gap: 6px; }
 .tv-pg-export__buttons .tv-button { flex: 1 1 0; min-width: 0; }
 
+.tv-pg-mplwindow { box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45); }
+.tv-pg-mplwindow .tv-modal__title { display: flex; align-items: center; gap: 10px; padding-right: 6px; }
+.tv-pg-mplwindow__close {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-input);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 16px;
+  line-height: 22px;
+  cursor: default;
+}
+.tv-pg-mplwindow__close:hover { background: var(--surface-2); color: var(--ink); }
+.tv-pg-mplwindow__close:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tv-pg-mplwindow .tv-modal__body { padding: 8px; }
 .tv-pg-mplwindow__figure { position: relative; }

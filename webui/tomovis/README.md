@@ -154,8 +154,8 @@ initial values.
 
 ### Figure operations (`POST figure`)
 
-The figures are `plot` and `profile` (window sessions), `export` (Matplotlib Window) and `script_slicer`
-(scripts sessions).
+The figures are `plot` and `profile` (window sessions), `export:<n>` (one per Matplotlib Window, numbered by
+the browser) and `script_slicer` (scripts sessions).
 
 | `op` | Fields | `result` |
 |---|---|---|
@@ -174,7 +174,8 @@ The figures are `plot` and `profile` (window sessions), `export` (Matplotlib Win
 | `options_apply` | `axes`, `values` | `{form}`: the Form re-read from the figure (OK and Apply both send this) |
 | `save_start` | | `{title: "Choose a filename to save to", directory, file: "image.png", filters, selected_filter}` |
 | `save` | `path` | `{ok}`; a failure adds the critical dialog `Error saving file` |
-| `export_matplotlib` | `plot` (figure `export` only) | null; builds a new `export` figure |
+| `export_matplotlib` | `plot` (figures `export:<n>` only) | null; builds a new figure under that id |
+| `export_close` | (figures `export:<n>` only) | answers `{ok: true}` as JSON and drops the figure when its window closes |
 
 `SubplotState = {values: {top, bottom, left, right, hspace, wspace}, ranges: {name: [min, max]}, groups:
 [{title: "Borders", names: [top, bottom, left, right], buttons: ["Export values"]}, {title: "Spacings",

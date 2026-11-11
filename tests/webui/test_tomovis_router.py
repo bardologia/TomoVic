@@ -187,11 +187,27 @@ def test_matplotlib_window_export(server):
     sid          = client.session()
     plot         = {"curves": [{"x": [0, 1, 2], "y": [1, 3, 2], "pen": {"color": [1, 1, 1, 1], "width": 1, "style": "solid"}, "symbol": None, "symbolSize": 10, "symbolPen": [0.8, 0.8, 0.8, 1], "symbolBrush": [0.4, 0.4, 0.4, 1]}], "xlabel": "x", "ylabel": "y", "title": "", "xrange": [0, 2], "yrange": [1, 3]}
 
-    status, raw = client.post("figure", {"sid": sid, "figure": "export", "op": "export_matplotlib", "plot": plot})
+    status, raw = client.post("figure", {"sid": sid, "figure": "export:1", "op": "export_matplotlib", "plot": plot})
     header, blobs = client.unpack(raw)
 
-    assert status == 200 and header["figure"] == "export"
+    assert status == 200 and header["figure"] == "export:1"
     assert any(message["type"] == "frame" for message in header["messages"])
+
+
+def test_matplotlib_windows_are_independent_and_close(server):
+    """Each export opens its own figure, as pyqtgraph opened a new MatplotlibWindow; closing one drops only that figure."""
+
+    client, _, _ = server
+    sid          = client.session()
+    plot         = {"curves": [{"x": [0, 1], "y": [0, 1], "pen": {"color": [1, 1, 1, 1], "width": 1, "style": "solid"}}], "xrange": [0, 1], "yrange": [0, 1]}
+
+    assert client.post("figure", {"sid": sid, "figure": "export:1", "op": "export_matplotlib", "plot": plot})[0] == 200
+    assert client.post("figure", {"sid": sid, "figure": "export:2", "op": "export_matplotlib", "plot": plot})[0] == 200
+    assert client.post("figure", {"sid": sid, "figure": "export:1", "op": "export_close"})[0] == 200
+    assert client.post("figure", {"sid": sid, "figure": "export:1", "op": "refresh"})[0] == 404
+    assert client.post("figure", {"sid": sid, "figure": "export:2", "op": "refresh"})[0] == 200
+    assert client.post("figure", {"sid": sid, "figure": "export", "op": "export_matplotlib", "plot": plot})[0] == 404
+    assert client.post("figure", {"sid": sid, "figure": "plot", "op": "export_close"})[0] == 400
 
 
 def test_tables_metadata_and_volume(server):

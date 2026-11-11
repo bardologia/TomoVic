@@ -9,6 +9,8 @@ scripts' server halves. The API is documented in webui/tomovis/README.md.
 
 from __future__ import annotations
 
+import re
+
 from routers.dispatch         import HttpExchange, RouteTable, SubRouter
 from tomovis.directory_lister import DirectoryLister
 from tomovis.envelope         import TomoVisEnvelope
@@ -34,7 +36,10 @@ class TomoVisRouter(SubRouter):
         hdf5              : HDF5 plot exporter.
         matplotlib_export : Matplotlib Window exporter.
         tools             : TomoVis tables.
+        EXPORT_FIGURE     : Pattern of Matplotlib Window figure ids, one per export.
     """
+
+    EXPORT_FIGURE = re.compile(r"export:[1-9][0-9]{0,8}")
 
     def __init__(self, sessions: TomoVisSessions, logger: WebLogger) -> None:
         """Stores the session store and declares the routes.
@@ -157,14 +162,17 @@ class TomoVisRouter(SubRouter):
             exchange.send_bytes(self.envelope.pack(header, blobs))
 
     def figureOf(self, entry: TomoVisSessionEntry, name, op: str) -> TomoVisFigure:
-        """Returns the figure an op addresses, creating the export window for export_matplotlib.
+        """Returns the figure an op addresses, creating a Matplotlib Window figure for export_matplotlib.
+
+        Every Matplotlib Window export opens its own window, as pyqtgraph's
+        MatplotlibExporter does, so the browser names each one ``export:<n>``.
 
         Raises:
             KeyError : If the session has no such figure.
         """
 
-        if op == "export_matplotlib" and name == "export":
-            entry.figures["export"] = TomoVisFigure("export", self.logger)
+        if op == "export_matplotlib" and isinstance(name, str) and self.EXPORT_FIGURE.fullmatch(name):
+            entry.figures[name] = TomoVisFigure(name, self.logger)
         return entry.figure(name)
 
     def figure(self, exchange: HttpExchange) -> None:
@@ -189,6 +197,12 @@ class TomoVisRouter(SubRouter):
                         raise TomoVisEventError("export_matplotlib needs a plot")
                     self.matplotlib_export.export(figure, body["plot"])
                     result = None
+                elif op == "export_close":
+                    if not self.EXPORT_FIGURE.fullmatch(name):
+                        raise TomoVisEventError("export_close closes Matplotlib Window figures only")
+                    del entry.figures[name]
+                    exchange.send_json({"ok": True})
+                    return
                 else:
                     result = figure.handle(op, body)
             except TomoVisEventError as error:
