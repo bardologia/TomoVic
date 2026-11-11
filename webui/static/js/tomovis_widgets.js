@@ -1024,14 +1024,15 @@ class TomoVisMenu {
   static SUBMENU_DELAY = 225;
   static root          = null;
 
-  constructor(ctx, items, { onClose = null, parent = null } = {}) {
-    this.ctx      = ctx;
-    this.items    = items;
-    this.onClose  = onClose;
-    this.parent   = parent;
-    this.el       = null;
-    this.rows     = [];
-    this.active   = -1;
+  constructor(ctx, items, { onClose = null, parent = null, ignore = null } = {}) {
+    this.ctx        = ctx;
+    this.items      = items;
+    this.onClose    = onClose;
+    this.parent     = parent;
+    this.ignore     = ignore;
+    this.el         = null;
+    this.rows       = [];
+    this.active     = -1;
     this.child      = null;
     this.childIndex = -1;
     this.timer      = null;
@@ -1072,7 +1073,7 @@ class TomoVisMenu {
     this.el.addEventListener("keydown", (event) => this.key(event));
     if (!this.parent) {
       this.outside = (event) => {
-        if (!this.contains(event.target)) this.close();
+        if (!this.contains(event.target) && !(this.ignore && this.ignore.contains(event.target))) this.close();
       };
       document.addEventListener("pointerdown", this.outside, true);
     }

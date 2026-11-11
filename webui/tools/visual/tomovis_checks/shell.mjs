@@ -25,6 +25,13 @@ class ShellChecks {
     await this.page.waitForSelector(selector, { timeout: 15000 });
   }
 
+  async waitDir(dir) {
+    const ok = await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog") && document.querySelector(".tv-filedialog").dataset.dir === d, dir, { timeout: 10000 }).then(() => true).catch(() => false);
+    if (ok) return;
+    const state = await this.page.evaluate(() => [...document.querySelectorAll(".tv-filedialog")].map((d) => ({ dir: d.dataset.dir, listing: d.dataset.listing, lookin: d.querySelector(".tv-filedialog__lookin").value, title: d.querySelector(".tv-modal__title").textContent, modals: window.TomoVisModal.stack.length })));
+    throw new Error(`file dialog did not list ${dir}: ${JSON.stringify(state)}`);
+  }
+
   async modalTitle() {
     return this.page.textContent(".tv-modal:last-of-type .tv-modal__title");
   }
@@ -210,7 +217,7 @@ class ShellChecks {
       await this.waitDialog(".tv-filedialog");
       await this.page.fill(".tv-filedialog__lookin", this.inputs);
       await this.page.press(".tv-filedialog__lookin", "Enter");
-      await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir === dir, this.inputs);
+      await this.waitDir(this.inputs);
       await this.page.waitForTimeout(400);
       const look   = await this.page.inputValue(".tv-filedialog__lookin");
       const names  = await this.page.$$eval(".tv-filedialog tbody tr", (rows) => rows.map((r) => [r.classList.contains("is-dir"), r.querySelector(".tv-filedialog__cell--name").textContent]));
@@ -235,18 +242,18 @@ class ShellChecks {
       await this.waitDialog(".tv-filedialog");
       await this.page.fill(".tv-filedialog__lookin", this.inputs);
       await this.page.press(".tv-filedialog__lookin", "Enter");
-      await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir === dir, this.inputs);
+      await this.waitDir(this.inputs);
       const look = () => this.page.inputValue(".tv-filedialog__lookin");
       await this.page.click(".tv-filedialog__parent");
       await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir && document.querySelector(".tv-filedialog").dataset.dir !== dir, this.inputs);
       const parent = await look();
       await this.page.click(".tv-filedialog__back");
-      await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir === dir, this.inputs);
+      await this.waitDir(this.inputs);
       await this.page.click(".tv-filedialog__forward");
-      await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir === dir, parent);
+      await this.waitDir(parent);
       await this.page.fill(".tv-filedialog__name", "inputs");
       await this.page.press(".tv-filedialog__name", "Enter");
-      await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir === dir, this.inputs);
+      await this.waitDir(this.inputs);
       const listed = await this.page.$$eval(".tv-filedialog tbody tr .tv-filedialog__cell--name", (cells) => cells.map((c) => c.textContent));
       await this.page.fill(".tv-filedialog__name", "missing_file.hd5");
       await this.page.press(".tv-filedialog__name", "Enter");
@@ -481,6 +488,84 @@ class ShellChecks {
     });
   }
 
+  async queueAndPage() {
+    await this.run.check("1.3 follow", "an open menu follows the pointer across the menu bar", async () => {
+      await this.page.click('.tv-menubar__item[data-menu="file"]');
+      await this.page.hover('.tv-menubar__item[data-menu="data"]');
+      const open = await this.page.$eval(".tv-menubar__item.is-open", (t) => t.textContent);
+      const first = await this.page.locator(".tv-menu").first().locator(".tv-menu__text").first().textContent();
+      await this.page.click('.tv-menubar__item[data-menu="data"]');
+      const after = await this.page.locator(".tv-menu").count();
+      R.equal([open, first, after], ["Data", "Channel", 0], "menu follow");
+      return "File open, hover Data -> Data menu, click Data -> closed";
+    });
+
+    await this.run.check("4.2 coalesce", "a fast slider drag is coalesced into fewer requests and ends on the dragged value", async () => {
+      await this.importFile("npy", path.join(this.inputs, "npy_real.npy"));
+      await this.send({ type: "check", widget: "tab1ChkBox", checked: true });
+      await this.testbed([["slider", "slider", "tab1Slider", { minWidth: 400 }]]);
+      let posts = 0;
+      const count = (request) => { if (request.url().includes("/api/tomovis/event") && request.method() === "POST") posts += 1; };
+      this.page.on("request", count);
+      const box    = await this.page.locator("#shell-testbed .tv-slider").boundingBox();
+      const handle = await this.page.locator("#shell-testbed .tv-slider__handle").boundingBox();
+      await this.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+      await this.page.mouse.down();
+      await this.page.mouse.move(box.x + 2, box.y + box.height / 2, { steps: 30 });
+      await this.page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 40 });
+      await this.page.mouse.up();
+      const shown = await this.page.evaluate(() => window.shellViews.slider.value);
+      await H.waitIdle(this.page);
+      this.page.off("request", count);
+      const server = (await this.control("tab1Slider")).value;
+      const local  = await this.page.evaluate(() => window.shellViews.slider.value);
+      R.equal([shown, server, local], [23, 23, 23], "drag end");
+      R.assert(posts < 35, `${posts} requests for 35 positions`);
+      await this.page.evaluate(() => document.getElementById("shell-testbed").remove());
+      return `drag 12 -> 0 -> 23 (35 positions) sent as ${posts} requests; server and slider end on 23`;
+    });
+
+    await this.run.check("4.2 busy", "the title bar orb shows only after a request has been in flight 250 ms", async () => {
+      await this.page.route("**/api/tomovis/event", async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        await route.continue();
+      });
+      const pending = this.page.evaluate(() => window.app.tomovisPage.ctx.session.send({ type: "sync" }));
+      await this.page.waitForTimeout(120);
+      const early = await this.page.$eval("#tv-busy", (orb) => orb.hidden);
+      await this.page.waitForTimeout(400);
+      const late = await this.page.$eval("#tv-busy", (orb) => orb.hidden);
+      await pending;
+      await this.page.unroute("**/api/tomovis/event");
+      await H.waitIdle(this.page);
+      const done = await this.page.$eval("#tv-busy", (orb) => orb.hidden);
+      R.equal([early, late, done], [true, false, true], "orb hidden at 120 ms, shown at 520 ms, hidden after");
+      return "hidden at 120 ms, shown at 520 ms, hidden when the queue drained";
+    });
+
+    await this.run.check("4.3 pages", "Play keeps ticking on another TomoVic page; shortcuts and title belong to the TomoVis page only", async () => {
+      await this.send({ type: "click", widget: "tab1PlayButton" });
+      const before = (await this.control("tab1SpinBox")).value;
+      await this.page.evaluate(() => { window.location.hash = "#/home"; });
+      await this.page.waitForTimeout(1300);
+      const title = await this.page.title();
+      const prevented = await this.page.evaluate(() => {
+        const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+        document.body.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+      const away = await this.page.evaluate(() => window.app.tomovisPage.ctx.session.snapshot.controls.tab1SpinBox.value);
+      await this.page.evaluate(() => { window.location.hash = "#/tomovis"; });
+      await this.page.waitForTimeout(300);
+      const back = await this.page.title();
+      await this.send({ type: "click", widget: "tab1PlayButton" });
+      const advanced = (away - before + 24) % 24;
+      R.assert(advanced >= 2, `only ${advanced} slices while away`);
+      R.equal([title, prevented, back], ["TomoVic Control Console", false, "TomoVis"], "page switch");
+      return `${advanced} slices advanced on the Home page; title restored; Ctrl+S not taken off the TomoVis page`;
+    });
+  }
+
   async colorDialog() {
     await this.run.check("5.4 color", "QColorDialog look-alike: fields follow the colour, live updates, OK returns, Cancel restores", async () => {
       await this.page.evaluate(() => {
@@ -570,6 +655,7 @@ class ShellChecks {
     await this.sessionDialogs();
     await this.timerAndPlay();
     await this.kitAgainstServer();
+    await this.queueAndPage();
     await this.colorDialog();
     await this.expiry();
     await this.scriptsPage();

@@ -34,6 +34,9 @@ class TomoVisMenuBar {
       });
       title.addEventListener("keydown", (event) => this.titleKey(event, title));
     });
+    element.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest(".tv-menubar__item")) this.closeMenu();
+    });
     ctx.bus.on("snapshot", () => this.refresh());
   }
 
@@ -84,7 +87,7 @@ class TomoVisMenuBar {
     title.classList.add("is-open");
     title.setAttribute("aria-expanded", "true");
 
-    this.menu = new TomoVisMenu(this.ctx, this.items(key), { onClose: () => this.closed(title) });
+    this.menu = new TomoVisMenu(this.ctx, this.items(key), { onClose: () => this.closed(title), ignore: this.element });
     this.menu.onKeyOut = (direction) => this.step(direction);
     this.menu.openBelow(title);
     if (keyboard) this.menu.first();
