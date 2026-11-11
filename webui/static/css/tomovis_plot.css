@@ -218,4 +218,19 @@
 }
 .tv-script-slicer__error[hidden] { display: none; }
 .tv-script-slicer__figure { display: flex; }
+.tv-script-slicer__figure[hidden] { display: none; }
+.tv-script-slicer__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 800px;
+  height: 600px;
+  max-width: 100%;
+  background: var(--tv-pane);
+  border-radius: var(--r-input);
+  font-family: var(--sans);
+  font-size: var(--tv-label);
+  color: var(--ink-dim);
+}
+.tv-script-slicer__empty[hidden] { display: none; }
 .tv-script-slicer__figure .tv-mpl { flex: none; width: 800px; }

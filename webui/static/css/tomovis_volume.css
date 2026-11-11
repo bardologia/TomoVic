@@ -83,15 +83,17 @@
 .tv-volume__buttons .tv-button { width: 100px; min-width: 0; padding: 0 6px; }
 
 .tv-script-volume { display: flex; flex-direction: column; gap: 12px; }
+.tv-script-volume__head { display: grid; gap: 4px; }
 .tv-script-volume__title {
   margin: 0;
-  font-family: var(--mono);
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
   color: var(--ink);
 }
-.tv-script-volume__row { flex-wrap: wrap; }
-.tv-script-volume__path { width: 520px; max-width: 100%; }
+.tv-script-volume__lead { margin: 0; max-width: 720px; color: var(--ink-dim); }
+.tv-script-volume__row { width: min(820px, 100%); }
+.tv-script-volume__path { flex: 1 1 auto; width: auto; }
 .tv-script-volume__error {
   margin: 0;
   font-family: var(--mono);

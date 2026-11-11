@@ -11,7 +11,7 @@ class TomoVisSlicerScript {
 
     root.classList.add("tv-script-slicer");
     const head = TomoVisInput.el("div", "tv-script-slicer__head");
-    head.append(TomoVisInput.el("h3", "tv-script-slicer__title", "SlicerMatplotlib"), TomoVisInput.el("p", "tv-script-slicer__lead", "Every range slice of an .hd5 tomogram with a range attribute, each column normalised to 0..1. Click the figure, then press j for the previous slice and k for the next."));
+    head.append(TomoVisInput.el("h3", "tv-script-slicer__title", "SlicerMatplotlib.py"), TomoVisInput.el("p", "tv-script-slicer__lead", "Every range slice of an .hd5 tomogram with a range attribute, each column normalised to 0..1. Click the figure, then press j for the previous slice and k for the next."));
 
     const row = TomoVisInput.el("div", "tv-row tv-script-slicer__file");
     this.path = ctx.kit.local("line", { placeholder: "/path/to/tomogram.hd5", onReturn: () => this.load() });
@@ -26,7 +26,9 @@ class TomoVisSlicerScript {
     this.error.hidden = true;
 
     this.figureHost = TomoVisInput.el("div", "tv-script-slicer__figure");
-    root.append(head, row, this.error, this.figureHost);
+    this.empty      = TomoVisInput.el("div", "tv-script-slicer__empty", "Load an .hd5 tomogram to open the SlicerMatplotlib figure.");
+    this.figureHost.hidden = true;
+    root.append(head, row, this.error, this.empty, this.figureHost);
     this.figure = new MplFigureView(this.figureHost, ctx, "script_slicer", { focusable: true, size: TomoVisSlicerScript.SIZE, attach: false });
   }
 
@@ -62,6 +64,8 @@ class TomoVisSlicerScript {
     this.showError("");
     try {
       await this.ctx.session.scriptSlicer(path);
+      this.empty.hidden      = true;
+      this.figureHost.hidden = false;
       this.figure.attach();
       this.figure.wrap.focus({ preventScroll: true });
     } catch (error) {

@@ -136,7 +136,6 @@ class TomoVisVolumeScriptScene {
 }
 
 class TomoVisVolumeScript {
-  static DEFAULT_PATH = "/ste/rnd/User/mart_gs/tomo_16afrisr0502_Lhv_Capon_Afrisar15x40.hd5";
   static FILTER       = "HDF5 (*.hd5)";
 
   constructor(root, ctx) {
@@ -153,17 +152,18 @@ class TomoVisVolumeScript {
     const kit = this.ctx.kit;
     this.root.classList.add("tv-script-volume");
 
-    const title = TomoVisInput.el("h3", "tv-script-volume__title", "VolumeRendering.py");
+    const title = TomoVisInput.el("div", "tv-script-volume__head");
+    title.append(TomoVisInput.el("h3", "tv-script-volume__title", "VolumeRendering.py"), TomoVisInput.el("p", "tv-script-volume__lead", "The normalised volume of an .hd5 tomogram and its voxels above 0.4 on a vispy canvas. Click the canvas, then press 1 for the next camera, 2 for the next rendering method, 3 to swap the volumes, 4 for the next colormap, [ and ] for the iso threshold, 0 to reset the cameras and F11 for full screen."));
     const row   = TomoVisInput.el("div", "tv-row tv-script-volume__row");
-    this.path   = kit.local("line", { placeholder: "path of an .hd5 tomogram on the console host" });
-    this.path.set({ text: TomoVisVolumeScript.DEFAULT_PATH });
+    this.path   = kit.local("line", { placeholder: "/path/to/tomogram.hd5" });
+    this.path.set({ text: "" });
     this.path.el.classList.add("tv-script-volume__path");
     this.path.options.onReturn = () => this.load();
     this.browseButton = kit.local("button", { text: "Browse" });
     this.loadButton   = kit.local("button", { text: "Load" });
     this.browseButton.onChange = () => this.browse();
     this.loadButton.onChange   = () => this.load();
-    row.append(kit.local("label", { text: "File" }).el, this.path.el, this.browseButton.el, this.loadButton.el, TomoVisInput.el("span", "tv-stretch"));
+    row.append(kit.local("label", { text: "File" }).el, this.path.el, this.browseButton.el, this.loadButton.el);
 
     this.error = TomoVisInput.el("p", "tv-script-volume__error");
     this.error.hidden = true;
