@@ -158,7 +158,6 @@ class PgRoiPlot {
     this.bottom    = new PgAxisItem("bottom", { linkView: this.vb });
     this.items     = [];
     this.curves    = [];
-    this.extras    = [];
     this.mouseHovering = false;
     this.autoBtn   = { visible: false, rect: { x: 0, y: 0, w: 14, h: 14 } };
     this.opts = {

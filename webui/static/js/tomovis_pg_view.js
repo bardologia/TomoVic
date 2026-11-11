@@ -280,7 +280,6 @@ class PgGraphicsView {
     this.lastDrag    = null;
     this.hoverItems  = new Set();
     this.lastHover   = null;
-    this.lastPos     = null;
     this.overlays    = [];
     this.sigPrepareForPaint = new PgSignal();
     host.append(this.el);
@@ -422,7 +421,6 @@ class PgGraphicsView {
     this.clickEvents.push(new PgMouseEvent({ button, scenePos: pos, screenPos: { x: event.clientX, y: event.clientY }, time: performance.now(), modifiers }));
     const focusable = this.itemsNear(pos.x, pos.y).find((item) => item.focusable);
     if (focusable) this.focusItem = focusable;
-    this.lastPos = pos;
   }
 
   pointerMove(event) {
@@ -436,7 +434,6 @@ class PgGraphicsView {
     const modifiers = PgMouseEvent.modifiers(event);
     const hover     = this.sendHover(pos, event.buttons === 0, modifiers);
     if (event.buttons === 0) this.lastHover = hover;
-    this.lastPos = pos;
     if (event.buttons === 0) return;
 
     const now = performance.now();
