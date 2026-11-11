@@ -186,6 +186,7 @@ class DialogStubs:
         """
 
         def answer(parent, title, text, *rest):
+            """Logs the message box and answers Ok."""
             self.events.append({"kind": "message_box", "level": level, "title": title, "text": text})
             return QtWidgets.QMessageBox.Ok
 
@@ -706,6 +707,7 @@ class RgbLevelsShim:
         shim = self
 
         def set_levels(view, *args, **kwds):
+            """Routes per-channel level lists to the rgba level mode while enabled, else calls the original setLevels."""
             if shim.enabled and len(args) == 2 and isinstance(args[0], list):
                 pairs = [(float(low), float(high)) for low, high in zip(args[0], args[1])]
                 view.ui.histogram.setLevelMode("rgba")
@@ -772,6 +774,7 @@ class TomoVisSession:
         session  = self
 
         def recording(volume, dataVolume):
+            """Keeps a copy of the rendered array and calls the original renderVolume."""
             session.volume_inputs.append(np.array(dataVolume, copy=True))
             return original(volume, dataVolume)
 

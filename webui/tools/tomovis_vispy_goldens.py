@@ -298,6 +298,7 @@ class WindowScene:
         window = self.window
 
         def load():
+            """Builds the Volume in place of the placeholder, renders ``data`` and enables the ISO slider at 1..100, as ensure3DLoaded does."""
             window.volume = visualizer.Volume()
             if window.tab4Placeholder is not None:
                 window.fourthTabWidgetLayout.removeWidget(window.tab4Placeholder)
@@ -343,9 +344,20 @@ class ScriptScene:
     """The VolumeRendering.py scene, built by the script's own statements.
 
     Attributes:
-        canvas, view, vis_volume_1, vis_volume_2, fly_camera, turntable_camera, arcball_camera, axis_view, axis_camera, axis : The script's objects.
-        center : Volume centre the script resets to.
-        driver : VispyEventDriver on the canvas.
+        canvas                : SceneCanvas with keys="interactive", 1000x800.
+        view                  : ViewBox holding both volumes.
+        vis_volume_1          : Volume visual of the normalised data.
+        vis_volume_2          : Volume visual of the data thresholded at 0.4.
+        fly_camera            : FlyCamera with the script's fov.
+        turntable_camera      : TurntableCamera with the script's fov.
+        arcball_camera        : ArcballCamera with the script's fov.
+        center                : Volume centre the script resets to.
+        axis_view             : ViewBox of the XYZ gizmo.
+        axis_camera           : Turntable camera of the gizmo, fov 0.
+        axis                  : XYZAxis visual of the gizmo.
+        opaque_colormaps      : Cycle over vispy's get_colormaps().
+        translucent_colormaps : Cycle over TransFire and TransGrays.
+        driver                : VispyEventDriver on the canvas.
     """
 
     def __init__(self, volume_1: np.ndarray) -> None:
@@ -389,6 +401,8 @@ class ScriptScene:
         self.update_axis_view()
 
         class TransFire(BaseColormap):
+            """The script's translucent fire colormap."""
+
             glsl_map = """
             vec4 translucent_fire(float t) {
                 return vec4(pow(t, 0.5), t, t*t, max(0, t*1.05 - 0.05));
@@ -396,6 +410,8 @@ class ScriptScene:
             """
 
         class TransGrays(BaseColormap):
+            """The script's translucent grey colormap."""
+
             glsl_map = """
             vec4 translucent_grays(float t) {
                 return vec4(t, t, t, t*0.05);
