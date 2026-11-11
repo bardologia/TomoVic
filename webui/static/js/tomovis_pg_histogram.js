@@ -763,7 +763,7 @@ class PgHistogramLut {
   layout(w, h) {
     const inner = { x: 1, y: 1, w: w - 2, h: h - 2 };
     const axisW = Math.round(this.axis.preferredWidth());
-    const gradW = 30;
+    const gradW = this.gradient.visible ? 30 : 0;
     const vbW   = Math.max(45, Math.min(152, inner.w - axisW - gradW));
     this.axis.setGeometry(inner.x, inner.y, axisW, inner.h);
     this.vb.setGeometry(inner.x + axisW, inner.y, vbW, inner.h);
@@ -930,6 +930,7 @@ class PgHistogramLut {
       this.regions[0].setVisible(true);
       this.gradient.visible = true;
     }
+    if (this.view.width > 0 && this.view.height > 0) this.layout(this.view.width, this.view.height);
     this.view.update();
   }
 }
