@@ -75,7 +75,7 @@ class TomoVisHarness {
   }
 
   static async chooseFile(page, absolutePath) {
-    await page.waitForSelector(".tv-filedialog .tv-filedialog__table tbody tr, .tv-filedialog .tv-filedialog__table tbody:empty", { timeout: 15000 });
+    await page.waitForSelector(".tv-filedialog[data-dir]", { timeout: 15000 });
     await page.fill(".tv-filedialog .tv-filedialog__name", absolutePath);
     await page.click(".tv-filedialog .tv-filedialog__accept");
     await page.waitForSelector(".tv-filedialog", { state: "detached", timeout: 15000 });

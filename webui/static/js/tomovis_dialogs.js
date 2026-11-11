@@ -229,14 +229,16 @@ class TomoVisFileDialog {
     this.future   = [];
     this.sortKey  = "name";
     this.sortAsc  = true;
+    this.ticket   = 0;
   }
 
   async run() {
     this.modal = new TomoVisModal({ title: this.title, className: "tv-filedialog", layer: this.layer, escape: null });
     this.build();
     const opened = this.modal.open();
-    await this.navigate(this.start, false);
-    if (this.dir === null) await this.navigate("", false);
+    const ticket = this.ticket + 1;
+    const shown  = await this.navigate(this.start, false);
+    if (!shown && this.ticket === ticket) await this.navigate("", false);
     this.nameField.focus();
     const result = await opened;
     return result || { accepted: false, path: null, filter: this.filter };
@@ -250,9 +252,12 @@ class TomoVisFileDialog {
     this.lookIn = TomoVisInput.el("input", "tv-line tv-filedialog__lookin");
     this.lookIn.type       = "text";
     this.lookIn.spellcheck = false;
+    this.lookInEdited = false;
+    this.lookIn.addEventListener("input", () => { this.lookInEdited = true; });
     this.lookIn.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
+      this.lookInEdited = false;
       this.navigate(this.lookIn.value.trim(), true);
     });
     this.backButton    = this.toolButton("Back", "tv-filedialog__back", () => this.back());
@@ -309,6 +314,7 @@ class TomoVisFileDialog {
     body.append(top, this.listWrap, grid);
     this.modal.escape = { accepted: false, path: null, filter: this.filter };
     this.updateAccept();
+    this.updateNav();
   }
 
   toolButton(label, className, action) {
@@ -325,7 +331,10 @@ class TomoVisFileDialog {
   }
 
   async navigate(path, record) {
+    this.ticket  += 1;
+    const ticket  = this.ticket;
     const listing = await this.session.listDir(path, this.patterns());
+    if (ticket !== this.ticket) return false;
     if (!listing || listing.ok === false || listing.error) {
       this.lookIn.classList.add("is-invalid");
       setTimeout(() => this.lookIn.classList.remove("is-invalid"), 900);
@@ -342,7 +351,9 @@ class TomoVisFileDialog {
     this.home    = listing.home;
     this.entries = listing.entries;
     this.selected = -1;
-    this.lookIn.value = this.dir;
+    if (!this.lookInEdited) this.lookIn.value = this.dir;
+    this.modal.el.dataset.dir     = this.dir;
+    this.modal.el.dataset.listing = `${this.dir}|${this.filter}`;
     this.renderList();
     this.updateNav();
     return true;

@@ -524,9 +524,9 @@ class QtSpinBoxView extends QtWidgetView {
     this.el.style.setProperty("--tv-spin-chars", String(Math.max(this.format(this.minimum).length, this.format(this.maximum).length)));
     if (!("value" in state)) return;
 
-    const focused   = document.activeElement === this.input;
-    const unchanged = previous && previous.value === state.value;
-    if (focused && ((this.name && this.kit.pending(this.name)) || unchanged)) return;
+    const focused = document.activeElement === this.input;
+    const echo    = state.value === this.value;
+    if (focused && ((this.name && this.kit.pending(this.name)) || echo)) return;
 
     this.value       = state.value;
     this.input.value = this.format(state.value);
@@ -879,9 +879,9 @@ class QtLineEditView extends QtWidgetView {
     if ("placeholder" in state) this.input.placeholder = state.placeholder;
     if (!("text" in state)) return;
 
-    const focused   = document.activeElement === this.input;
-    const unchanged = previous && previous.text === state.text;
-    if (focused && ((this.name && this.kit.pending(this.name)) || unchanged)) return;
+    const focused = document.activeElement === this.input;
+    const echo    = state.text === this.text;
+    if (focused && ((this.name && this.kit.pending(this.name)) || echo)) return;
     this.text        = state.text;
     this.input.value = state.text;
   }
@@ -1032,9 +1032,10 @@ class TomoVisMenu {
     this.el       = null;
     this.rows     = [];
     this.active   = -1;
-    this.child    = null;
-    this.timer    = null;
-    this.onKeyOut = null;
+    this.child      = null;
+    this.childIndex = -1;
+    this.timer      = null;
+    this.onKeyOut   = null;
   }
 
   setItems(items) {
@@ -1125,11 +1126,19 @@ class TomoVisMenu {
   }
 
   hover(i) {
-    this.setActive(i, false);
     clearTimeout(this.timer);
-    const item = this.items[i];
-    if (this.child && this.child.items !== (item.submenu || null)) this.closeChild();
-    if (item.submenu && item.enabled !== false && !this.child) this.timer = setTimeout(() => this.openChild(i), TomoVisMenu.SUBMENU_DELAY);
+    const item       = this.items[i];
+    const selectable = this.selectable(i);
+    this.setActive(selectable ? i : -1, false);
+
+    if (this.child && this.childIndex !== i) {
+      this.timer = setTimeout(() => {
+        this.closeChild();
+        if (selectable && item.submenu) this.openChild(i);
+      }, TomoVisMenu.SUBMENU_DELAY);
+      return;
+    }
+    if (selectable && item.submenu && !this.child) this.timer = setTimeout(() => this.openChild(i), TomoVisMenu.SUBMENU_DELAY);
   }
 
   setActive(i, scroll) {
@@ -1145,15 +1154,22 @@ class TomoVisMenu {
     if (!item || !item.submenu || item.enabled === false || !this.el) return;
     this.closeChild();
     const rect = this.rows[i].getBoundingClientRect();
-    this.child = new TomoVisMenu(this.ctx, item.submenu, { parent: this });
+    this.child      = new TomoVisMenu(this.ctx, item.submenu, { parent: this });
+    this.childIndex = i;
     this.child.openAt(rect.right - 2, rect.top - 4, { flipRight: rect.left + 2 });
+    this.child.el.addEventListener("pointerenter", () => {
+      clearTimeout(this.timer);
+      this.rows.forEach((row, k) => row.classList.toggle("is-active", k === i));
+      this.active = i;
+    });
     return this.child;
   }
 
   closeChild() {
     if (!this.child) return;
     this.child.dismiss(false);
-    this.child = null;
+    this.child      = null;
+    this.childIndex = -1;
   }
 
   activate(i, byPointer) {

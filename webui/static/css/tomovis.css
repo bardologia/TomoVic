@@ -522,18 +522,10 @@
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.tv-menu__mark.is-radio::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-  opacity: 0.55;
-}
 .tv-menu__mark.is-radio.is-on::after {
   content: "";
   position: absolute;
-  inset: 3px;
+  inset: 2px;
   border-radius: 50%;
   background: currentColor;
 }
@@ -643,7 +635,14 @@
   border-bottom: 0;
   border-radius: 1px 1px 0 0;
 }
-.tv-filedialog__icon.is-file { width: 11px; height: 14px; border: 2px solid var(--ink-faint); border-radius: 1px; }
+.tv-filedialog__icon.is-file {
+  width: 11px;
+  height: 14px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 1px 4px 1px 1px;
+  background: linear-gradient(var(--ink-faint), var(--ink-faint)) 2px 4px / 5px 1.5px no-repeat, linear-gradient(var(--ink-faint), var(--ink-faint)) 2px 7.5px / 5px 1.5px no-repeat;
+}
+.tv-filedialog__table tbody tr.is-selected .tv-filedialog__icon.is-file { border-color: currentColor; }
 .tv-filedialog__grid {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 110px;
