@@ -946,6 +946,8 @@ class QtPushButtonView extends QtWidgetView {
 }
 
 class QtRadioView extends QtWidgetView {
+  static ARROWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
   build() {
     const root = TomoVisInput.el("span", "tv-radio");
     root.setAttribute("role", "radio");
@@ -986,13 +988,50 @@ class QtRadioView extends QtWidgetView {
       this.click("key");
       return;
     }
-    const moves = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
-    if (!(event.key in moves)) return;
+    if (!QtRadioView.ARROWS.has(event.key)) return;
     event.preventDefault();
-    const peers = this.kit.peers(this).filter((view) => view.enabled);
-    const next  = peers[(peers.indexOf(this) + moves[event.key] + peers.length) % peers.length];
-    next.el.focus();
-    next.click("key");
+    const candidate = this.moveTarget(event.key);
+    if (!candidate) return;
+    if (this.checked) candidate.click("key");
+    candidate.el.focus();
+  }
+
+  static rect(element) {
+    const box    = element.getBoundingClientRect();
+    const x      = Math.round(box.left);
+    const y      = Math.round(box.top);
+    const right  = x + Math.round(box.width) - 1;
+    const bottom = y + Math.round(box.height) - 1;
+    return { x, y, right, bottom, cx: Math.trunc((x + right) / 2), cy: Math.trunc((y + bottom) / 2) };
+  }
+
+  moveTarget(key) {
+    const target    = QtRadioView.rect(this.el);
+    let   candidate = null;
+    let   bestScore = -1;
+
+    for (const button of this.kit.peers(this)) {
+      if (button === this || !button.enabled || button.el.hidden || !button.el.isConnected) continue;
+      const rect = QtRadioView.rect(button.el);
+
+      let score;
+      if (rect.x < target.right && target.x < rect.right && (key === "ArrowUp" || key === "ArrowDown")) {
+        score = Math.abs(rect.cy - target.cy) * 65536 + Math.abs(rect.cx - target.cx);
+      } else if (rect.y < target.bottom && target.y < rect.bottom && (key === "ArrowLeft" || key === "ArrowRight")) {
+        score = Math.abs(rect.cx - target.cx) * 65536 + Math.abs(rect.cy - target.cy);
+      } else {
+        score = 1073741824 + (rect.cy - target.cy) ** 2 + (rect.cx - target.cx) ** 2;
+      }
+
+      if (score > bestScore && candidate) continue;
+
+      const ahead = { ArrowUp: rect.cy < target.cy, ArrowDown: rect.cy > target.cy, ArrowLeft: rect.cx < target.cx, ArrowRight: rect.cx > target.cx }[key];
+      if (ahead) {
+        candidate = button;
+        bestScore = score;
+      }
+    }
+    return candidate;
   }
 }
 
