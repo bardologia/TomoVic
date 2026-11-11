@@ -11,12 +11,21 @@ copied window code reaches a figure through the ``MatplotlibWidget`` API it
 used (``getFigure``, ``draw``). The Qt toolbar's Save entry is rebuilt here
 from ``NavigationToolbar2QT.save_figure`` (matplotlib 3.11.2), with the save
 directory remembered per page session.
+
+TomoVis ran with matplotlib's default rcParams. The console process also
+hosts code that changes the global rcParams (the cube explorer's figure
+archiver switches to a 300 dpi serif paper style while it saves), so every
+TomoVis figure operation runs under matplotlib's "default" style through
+``TomoVisRc``, serialised by one lock so that concurrent pages never restore
+each other's parameters.
 """
 
 from __future__ import annotations
 
+import functools
 import itertools
 import os
+import threading
 
 import matplotlib as mpl
 from matplotlib.backends.backend_webagg_core import FigureCanvasWebAggCore, FigureManagerWebAgg, NavigationToolbar2WebAgg
@@ -25,6 +34,34 @@ from matplotlib.figure                       import Figure
 from tomovis.events         import TomoVisEventError
 from tomovis.figure_options import FigureOptionsEditor, SubplotTool
 from web_logger             import WebLogger
+
+
+class TomoVisRc:
+    """Runs TomoVis figure code under matplotlib's default rcParams.
+
+    Attributes:
+        LOCK : Re-entrant lock held while the default style is active.
+    """
+
+    LOCK = threading.RLock()
+
+    @classmethod
+    def styled(cls, method):
+        """Decorates a method so it runs under the lock and matplotlib's "default" style.
+
+        Args:
+            method : Function to wrap.
+
+        Returns:
+            The wrapped function.
+        """
+
+        @functools.wraps(method)
+        def wrapper(*args, **kwargs):
+            with cls.LOCK, mpl.style.context("default"):
+                return method(*args, **kwargs)
+
+        return wrapper
 
 
 class FigureMessages:
@@ -105,6 +142,7 @@ class TomoVisFigure:
 
     NUMBERS = itertools.count(1)
 
+    @TomoVisRc.styled
     def __init__(self, name: str, logger: WebLogger, keymap: bool = False) -> None:
         """Builds the figure, canvas, manager and toolbar.
 
@@ -151,6 +189,7 @@ class TomoVisFigure:
 
         self.pending_draw = True
 
+    @TomoVisRc.styled
     def resize(self, width: int, height: int, dpr: float) -> None:
         """Sizes the figure as the browser canvas: dpi 100 x ratio, pixels = CSS size x ratio.
 
@@ -164,6 +203,7 @@ class TomoVisFigure:
         self.canvas.handle_event({"type": "resize", "width": int(width), "height": int(height)})
         self.canvas.handle_event({"type": "refresh"})
 
+    @TomoVisRc.styled
     def mouse(self, event: dict) -> None:
         """Forwards one mouse event in mpl.js form to the canvas.
 
@@ -173,6 +213,7 @@ class TomoVisFigure:
 
         self.canvas.handle_event(dict(event))
 
+    @TomoVisRc.styled
     def key(self, event: dict) -> None:
         """Forwards one key event in mpl.js form ("k" + key with modifier prefixes) to the canvas.
 
@@ -182,6 +223,7 @@ class TomoVisFigure:
 
         self.canvas.handle_event(dict(event))
 
+    @TomoVisRc.styled
     def toolbarButton(self, name: str) -> None:
         """Runs a toolbar button: home, back, forward, pan or zoom.
 
@@ -191,6 +233,7 @@ class TomoVisFigure:
 
         getattr(self.toolbar, name)()
 
+    @TomoVisRc.styled
     def refresh(self) -> None:
         """Resends a full frame, the history button states and the navigation mode."""
 
@@ -225,6 +268,7 @@ class TomoVisFigure:
             "selected_filter" : selectedFilter,
         }
 
+    @TomoVisRc.styled
     def save(self, fname: str) -> bool:
         """Saves the figure as the Qt toolbar does, remembering the directory.
 
@@ -291,6 +335,7 @@ class TomoVisFigure:
             raise TomoVisEventError("figure op event 'key' must be an mpl.js key string")
         return event
 
+    @TomoVisRc.styled
     def handle(self, op: str, payload: dict) -> dict | None:
         """Runs one figure operation of the API.
 
@@ -364,6 +409,7 @@ class TomoVisFigure:
             return {"ok": self.save(payload["path"])}
         raise TomoVisEventError(f"unknown figure op '{op}'")
 
+    @TomoVisRc.styled
     def drain(self, prefix: str) -> tuple[list[dict], dict]:
         """Renders when due and returns the ordered messages with named PNG frames.
 

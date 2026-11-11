@@ -35,7 +35,7 @@ from skimage import exposure
 
 from tomovis.cube_readers import CubeReaders
 from tomovis.events       import TomoVisEventError, TomoVisEvents
-from tomovis.figure_host  import TomoVisFigure
+from tomovis.figure_host  import TomoVisFigure, TomoVisRc
 from tomovis.pg_models    import PgColorMap, PgImageViewModel, PgInfiniteLineModel, PgLineSegmentRoiModel
 from tomovis.qt_widgets   import QtAction, QtActionGroup, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLineEdit, QtMenu, QtPushButton, QtRadioButton, QtRegExpValidator, QtSlider, QtSpinBox, QtStackedWidget, QtTabWidget, QtTimer, SlotBoundary
 from tomovis.session_file import SessionFile
@@ -209,6 +209,7 @@ class TomoVisWindow:
         volume_serial  : Bumped whenever a new volume is prepared.
     """
 
+    @TomoVisRc.styled
     def __init__(self, logger: WebLogger, has3d: bool = True, **kwargs) -> None:
         """Builds the window as TomoVis.__init__ does.
 
@@ -2154,6 +2155,7 @@ class TomoVisWindow:
         self.tab3Plot.draw()
         self.tab3ClearButton.setEnabled(False)
 
+    @TomoVisRc.styled
     def handle(self, event: dict) -> None:
         """Applies one browser event as the Qt widget operation it stands for.
 
@@ -2176,6 +2178,7 @@ class TomoVisWindow:
 
         return {"plot": self.tab2Plot, "profile": self.tab3Plot}
 
+    @TomoVisRc.styled
     def drain(self) -> WindowOutput:
         """Collects everything produced since the previous drain.
 

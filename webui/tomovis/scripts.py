@@ -23,7 +23,7 @@ import matplotlib.cm as cm
 import numpy as np
 from matplotlib.backend_bases import key_press_handler
 
-from tomovis.figure_host import TomoVisFigure
+from tomovis.figure_host import TomoVisFigure, TomoVisRc
 from tomovis.tools       import TomoVisTools
 from web_logger          import WebLogger
 
@@ -162,6 +162,7 @@ class SlicerMatplotlibScript:
             return
         key_press_handler(event, event.canvas, event.canvas.toolbar)
 
+    @TomoVisRc.styled
     def load(self, name: str) -> TomoVisFigure:
         """Reads the file and builds the script's figure on the middle slice.
 

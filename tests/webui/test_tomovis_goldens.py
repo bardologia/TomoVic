@@ -33,6 +33,7 @@ import numpy as np
 import pytest
 
 from tests.webui.conftest import REPO_ROOT
+from tomovis.figure_host   import TomoVisRc
 from tomovis.window        import TomoVisWindow
 from web_logger            import WebLogger
 
@@ -327,6 +328,7 @@ class SnapshotProbe:
 
         return {"locations": [float(value) for value in axis.get_ticklocs()], "labels": [label.get_text() for label in axis.get_ticklabels()]}
 
+    @TomoVisRc.styled
     def figure(self, figure, size_px: list[int]) -> dict:
         """The goldens' figure record at the golden's pixel size."""
 

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import io
 
+import matplotlib as mpl
 import numpy as np
 import pytest
 from PIL import Image
 
-from tests.webui.test_tomovis_goldens import GoldenReplay
+from tests.webui.test_tomovis_goldens import GoldenReplay, replay_scenario
 from tomovis.figure_host              import TomoVisFigure
 from web_logger                       import WebLogger
 
@@ -254,3 +255,17 @@ def test_window_draws_once_per_event_with_a_frame(tmp_path):
     assert len(frames) == 1
     assert Image.open(io.BytesIO(output.frames[frames[0]["blob"]])).size == (PLOT_W, PLOT_H)
     assert np.asarray(Image.open(io.BytesIO(output.frames[frames[0]["blob"]]))).shape[2] == 4
+
+
+def test_figures_ignore_global_rcparams_set_by_other_console_code(tmp_path):
+    """Figures follow matplotlib's defaults even while other console code changed the global rcParams (paper style)."""
+
+    paper = {"figure.dpi": 300, "font.family": "serif", "lines.linewidth": 7.0, "axes.prop_cycle": mpl.cycler(color=["black"])}
+    with mpl.rc_context(paper):
+        _, differences = replay_scenario("plot_xline_profile", tmp_path)
+        figure         = TomoVisFigure("plot", WebLogger("tomovis-test"))
+
+        assert mpl.rcParams["figure.dpi"] == 300
+
+    assert differences == []
+    assert figure.figure.dpi == 100

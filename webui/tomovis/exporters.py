@@ -18,7 +18,7 @@ import numpy
 from PIL import Image
 
 from tomovis.events      import TomoVisEventError
-from tomovis.figure_host import TomoVisFigure
+from tomovis.figure_host import TomoVisFigure, TomoVisRc
 
 
 class ExportWriter:
@@ -182,6 +182,7 @@ class MatplotlibPlotExporter:
                     raise ValueError('Unknown spine location: %s' % loc)
                 ax.xaxis.set_ticks_position('bottom')
 
+    @TomoVisRc.styled
     def export(self, mpw: TomoVisFigure, plot: dict) -> None:
         """Draws the plot into the export figure.
 
