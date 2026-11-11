@@ -122,6 +122,7 @@ class PgGeom {
 
 class PgMouseEvent {
   static BUTTONS = ["left", "middle", "right"];
+  static MASKS   = { left: 1, right: 2, middle: 4 };
 
   static modifiers(event) {
     return { shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey };
@@ -325,10 +326,6 @@ class PgGraphicsView {
     });
   }
 
-  visible() {
-    return this.width > 0 && this.height > 0 && this.el.offsetParent !== null;
-  }
-
   paintNow() {
     if (this.width === 0 || this.height === 0) return;
     this.sigPrepareForPaint.emit();
@@ -410,6 +407,10 @@ class PgGraphicsView {
   pointerDown(event) {
     const button = PgMouseEvent.BUTTONS[event.button];
     if (!button) return;
+    this.press(button, event);
+  }
+
+  press(button, event) {
     event.preventDefault();
     this.el.setPointerCapture(event.pointerId);
     this.el.focus({ preventScroll: true });
@@ -425,6 +426,12 @@ class PgGraphicsView {
   }
 
   pointerMove(event) {
+    const chord = PgMouseEvent.BUTTONS[event.button];
+    if (chord) {
+      if (event.buttons & PgMouseEvent.MASKS[chord]) this.press(chord, event);
+      else this.release(chord, event);
+      return;
+    }
     const pos       = this.local(event);
     const modifiers = PgMouseEvent.modifiers(event);
     const hover     = this.sendHover(pos, event.buttons === 0, modifiers);
@@ -447,7 +454,10 @@ class PgGraphicsView {
   }
 
   pointerUp(event) {
-    const button    = PgMouseEvent.BUTTONS[event.button];
+    this.release(PgMouseEvent.BUTTONS[event.button], event);
+  }
+
+  release(button, event) {
     const pos       = this.local(event);
     const modifiers = PgMouseEvent.modifiers(event);
 
@@ -1829,9 +1839,16 @@ class PgAxisItem {
     });
   }
 
-  logTickStrings(values, scale, spacing) {
-    const estrings = values.map((x) => PgFormat.g(Math.pow(10, x), 6));
-    return estrings;
+  logTickStrings(values, scale) {
+    const sup = { 0: "\u2070", 1: "\u00b9", 2: "\u00b2", 3: "\u00b3", 4: "\u2074", 5: "\u2075", 6: "\u2076", 7: "\u2077", 8: "\u2078", 9: "\u2079" };
+    return values.map((x) => {
+      const e = PgFormat.g(Math.pow(10, x) * scale, 1);
+      if (!e.includes("e")) return e;
+      const [v, p] = e.split("e");
+      const sign = p[0] === "-" ? "\u207b" : "";
+      const pot  = p.slice(1).replace(/^0+/, "").split("").map((d) => sup[d]).join("");
+      return `${v === "1" ? "" : `${v}\u00b7`}10${sign}${pot}`;
+    });
   }
 
   span() {
@@ -1858,6 +1875,13 @@ class PgAxisItem {
     else [tickStart, tickStop, tickDir] = [r.y, r.y, 1];
 
     const tickLevels = this.tickValues(this.range[0], this.range[1], length);
+    if (this.grid !== false && this.linked) {
+      const lv = this.linked.rect;
+      if (this.orientation === "left") tickStart = lv.x + lv.w;
+      else if (this.orientation === "right") tickStart = lv.x;
+      else if (this.orientation === "top") tickStart = lv.y + lv.h;
+      else tickStart = lv.y;
+    }
     const dif        = this.range[1] - this.range[0];
     let xScale;
     let offset;
@@ -1881,7 +1905,8 @@ class PgAxisItem {
     tickLevels.forEach(([, ticks], i) => {
       tickPositions.push([]);
       const tickLength = this.style.tickLength / (i * 0.5 + 1.0);
-      const alpha      = 255 / (i + 1);
+      let alpha        = 255 / (i + 1);
+      if (this.grid !== false) alpha *= (this.grid / 255) * Math.min(1, Math.max(0, (0.05 * length) / (ticks.length + 1)));
       for (const v of ticks) {
         const x = v * xScale - offset;
         if (x < xMin || x > xMax) {
@@ -1890,7 +1915,8 @@ class PgAxisItem {
         }
         tickPositions[i].push(x);
         const p1 = axis === 0 ? { x: tickStart, y: base + x } : { x: base + x, y: tickStart };
-        const p2 = axis === 0 ? { x: tickStop + tickLength * tickDir, y: base + x } : { x: base + x, y: tickStop + tickLength * tickDir };
+        const ext = this.grid === false ? tickLength * tickDir : 0;
+        const p2  = axis === 0 ? { x: tickStop + ext, y: base + x } : { x: base + x, y: tickStop + ext };
         tickSpecs.push({ alpha, p1, p2 });
       }
     });
@@ -2310,7 +2336,7 @@ class PgViewBoxMenu {
         { text: "1 button", checkable: true, radio: "mouse", checked: view.state.mouseMode === "rect", onTrigger: () => view.setMouseMode("rect") },
       ] },
     ];
-    const extra = [...view.getContextMenus(ev)];
+    const extra = view.getContextMenus(ev).map((item) => (typeof item.submenu === "function" ? { ...item, submenu: item.submenu() } : item));
     if (view.scene && view.scene.exportEntry) extra.push(view.scene.exportEntry(view));
     if (extra.length) items.push({ separator: true }, ...extra);
     return items;
