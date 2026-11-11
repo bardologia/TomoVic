@@ -15,9 +15,11 @@
 }
 
 .page--tomovis {
+  --tv-pad-x: clamp(0px, calc((100vw - 1100px) / 2), 18px);
+  --tv-pad-y: clamp(0px, calc((100dvh - 880px) / 2), 18px);
   position: relative;
   z-index: 2;
-  padding: 18px;
+  padding: var(--tv-pad-y) var(--tv-pad-x);
   min-height: 100dvh;
   overflow-x: auto;
 }
@@ -26,10 +28,11 @@
 .tv-window {
   flex: 1 0 auto;
   display: grid;
-  grid-template-rows: auto var(--tv-menubar-h) auto minmax(0, 1fr) var(--tv-status-h);
+  grid-template-rows: var(--tv-menubar-h) auto minmax(0, 1fr) var(--tv-status-h);
+  grid-template-columns: minmax(0, 1fr);
   min-width: 1100px;
   min-height: 880px;
-  height: calc(100dvh - 36px);
+  height: calc(100dvh - 2 * var(--tv-pad-y));
   background: var(--frost-panel);
   -webkit-backdrop-filter: var(--frost);
   backdrop-filter: var(--frost);
@@ -43,12 +46,15 @@
 }
 
 .tv-titlebar {
+  grid-row: 1;
+  grid-column: 1;
+  justify-self: end;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 30px;
-  padding: 4px 12px;
-  border-bottom: 2px solid var(--line);
+  padding: 0 12px;
+  pointer-events: none;
   font-family: var(--display);
   font-size: 13px;
   font-weight: 700;
@@ -56,9 +62,11 @@
   color: var(--ink-dim);
   user-select: none;
 }
-.tv-titlebar__orb { margin-left: auto; --orb-theme: dark; }
+.tv-titlebar__orb { --orb-theme: dark; }
 
 .tv-menubar {
+  grid-row: 1;
+  grid-column: 1;
   display: flex;
   align-items: stretch;
   gap: 2px;
