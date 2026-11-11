@@ -622,6 +622,20 @@ class VolumeChecks {
     });
   }
 
+  async expiry() {
+    await this.run.check("3.1/3D", "an expired session leaves the 3D tab on its placeholder with the fresh window's ISO slider", async () => {
+      const old = await this.page.evaluate(() => window.app.tomovisPage.ctx.session.sid);
+      await this.page.evaluate((sid) => fetch("/api/tomovis/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid }) }), old);
+      await this.page.evaluate(() => window.app.tomovisPage.ctx.session.send({ type: "sync" }).catch(() => null));
+      await this.page.waitForFunction((sid) => window.app.tomovisPage.ctx.session.sid && window.app.tomovisPage.ctx.session.sid !== sid, old, { timeout: 15000 });
+      await H.waitIdle(this.page);
+      this.expectedErrors = true;
+      const s = await this.state();
+      R.equal([s.placeholder, s.canvas, s.hasVolume, s.serial, s.slider], [true, false, false, 0, { enabled: false, minimum: 0, maximum: 99, value: 0 }], "3D tab after expiry");
+      return "placeholder back, canvas removed, slider 0..99 at 0 and disabled";
+    });
+  }
+
   async realistic() {
     const file = path.join(REPO, "logs/tomovis_port/fixtures/realistic_traun_hv.hd5");
     if (!fs.existsSync(file)) return;
@@ -716,13 +730,14 @@ class VolumeChecks {
     await this.placeholder();
     await this.singleVolume();
     await this.channels();
+    await this.expiry();
     await this.realistic();
     await this.logRoute();
     await this.script();
     await this.noWebGL();
 
     await opened.browser.close();
-    const errors = [...opened.errors, ...this.errors];
+    const errors = [...opened.errors, ...this.errors].filter((e) => !(this.expectedErrors && e.includes("404 (Not Found)")));
     const ok     = this.run.summary(errors);
     fs.writeFileSync(path.join(this.out, "volume_checks.json"), JSON.stringify({ results: this.run.results, errors }, null, 2));
     process.exit(ok ? 0 : 1);

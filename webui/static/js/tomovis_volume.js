@@ -259,7 +259,8 @@ class TomoVisVolumeTab {
     const volume = snapshot.volume;
     const slider = snapshot.controls.isoThresholdTab4Slider;
 
-    if (previous === null) this.isoThresholdTab4Slider.set({ minimum: slider.minimum, maximum: slider.maximum, value: slider.value, enabled: slider.enabled });
+    const fresh = previous === null || (volume.serial === 0 && this.serial !== 0);
+    if (fresh) this.isoThresholdTab4Slider.set({ minimum: slider.minimum, maximum: slider.maximum, value: slider.value, enabled: slider.enabled });
     else if (!slider.enabled && this.isoThresholdTab4Slider.enabled) this.isoThresholdTab4Slider.set({ enabled: false });
 
     if (!volume.rendered) this.volume = null;
