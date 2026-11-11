@@ -34,6 +34,7 @@ from script_catalog         import ScriptCatalog
 from script_config_resolver import ScriptConfigResolver
 from stream_hub             import StreamHub
 from system_monitor         import SystemMonitor
+from tomovis.session_store  import TomoVisSessions
 from web_logger             import WebLogger
 
 from routers.cube_routers    import CubeRouter, SliceRouter
@@ -42,6 +43,7 @@ from routers.library_routers import ContentLibraryRouter
 from routers.results_routers import DatasetRouter, ResultsRouter
 from routers.static_router   import StaticRouter
 from routers.system_router   import SystemRouter
+from routers.tomovis_router  import TomoVisRouter
 
 
 class _Server(ThreadingHTTPServer):
@@ -143,6 +145,7 @@ class WebUIServer:
         self.datasets       = DatasetBrowser(self.logger)
         self.launcher       = RunLauncher(self.paths, self.logger, self.resolver, self.processes)
         self.run_configs    = RunConfigReader(self.logger)
+        self.tomovis        = TomoVisSessions(self.logger)
 
         self.router = RequestRouter(self.logger, [
             StaticRouter(self.paths, self.results),
@@ -157,6 +160,7 @@ class WebUIServer:
             SavedRunRouter(self.paths, self.saved_runs, self.launcher),
             RunConfigRouter(self.run_configs),
             SystemRouter(self.system, self.watchdog, self.contention, self.detacher, self.notifier, self.nuke, self.processes, self.logger),
+            TomoVisRouter(self.tomovis, self.logger),
         ], self.gate)
 
     def _report_ready(self) -> None:
