@@ -499,6 +499,8 @@ class PgImageView {
     this.menuBtn   = TomoVisInput.el("button", "tv-button tv-pg-btn", "Menu");
     this.roiBtn.type  = "button";
     this.menuBtn.type = "button";
+    TomoVisInput.plainPushButton(this.roiBtn);
+    TomoVisInput.plainPushButton(this.menuBtn);
     this.roiBtn.setAttribute("aria-pressed", "false");
     this.main.append(this.gvHost, this.histHost, this.roiBtn, this.menuBtn);
     this.splitter.append(this.main, this.handle, this.plotHost);

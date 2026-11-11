@@ -213,7 +213,7 @@ class MplToolbar {
         continue;
       }
       const [text, tooltip, image, method] = item;
-      const button = TomoVisInput.el("button", "tv-mpl-tool");
+      const button = TomoVisInput.noFocusButton(TomoVisInput.el("button", "tv-mpl-tool"));
       const icon   = TomoVisInput.el("img", "tv-mpl-tool__icon");
       button.type           = "button";
       button.title          = tooltip;

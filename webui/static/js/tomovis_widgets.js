@@ -14,6 +14,19 @@ class TomoVisInput {
     return node;
   }
 
+  static plainPushButton(button) {
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") event.preventDefault();
+    });
+    return button;
+  }
+
+  static noFocusButton(button) {
+    button.tabIndex = -1;
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    return button;
+  }
+
   static mnemonicFree(text) {
     return String(text).replace(/&&/g, "\u0000").replace(/&/g, "").replace(/\u0000/g, "&");
   }
@@ -922,7 +935,7 @@ class QtPushButtonView extends QtWidgetView {
     if (this.options.ariaLabel) button.setAttribute("aria-label", this.options.ariaLabel);
     this.checked = false;
     button.addEventListener("click", () => this.click());
-    return button;
+    return TomoVisInput.plainPushButton(button);
   }
 
   focusables() {

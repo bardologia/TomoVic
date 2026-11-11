@@ -601,7 +601,10 @@ class PgExportDialog {
     this.copyBtn   = el("button", "tv-button", "Copy");
     this.exportBtn = el("button", "tv-button", "Export");
     this.closeBtn  = el("button", "tv-button", "Close");
-    for (const b of [this.copyBtn, this.exportBtn, this.closeBtn]) b.type = "button";
+    for (const b of [this.copyBtn, this.exportBtn, this.closeBtn]) {
+      b.type = "button";
+      TomoVisInput.plainPushButton(b);
+    }
     buttons.append(this.copyBtn, this.exportBtn, this.closeBtn);
     body.append(el("span", "tv-label", "Item to export:"), this.tree, el("span", "tv-label", "Export format"), this.list, el("span", "tv-label", "Export options"), this.params, buttons);
     this.el.append(this.title, body);
@@ -724,7 +727,7 @@ class PgExportDialog {
         } });
         view.set({ text: p.value });
       } else if (p.type === "color") {
-        const button = TomoVisInput.el("button", "tv-pg-export__colorbtn");
+        const button = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-pg-export__colorbtn"));
         button.type = "button";
         const paint = () => {
           button.style.background = PgPen.css(p.value);

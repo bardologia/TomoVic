@@ -33,7 +33,7 @@ class TomoVisSlicerScript {
   }
 
   button(text, action) {
-    const button = TomoVisInput.el("button", "tv-button", text);
+    const button = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-button", text));
     button.type = "button";
     button.addEventListener("click", action);
     return button;
