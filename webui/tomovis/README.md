@@ -39,6 +39,10 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   `Could not import file:\n<error>` and keeps the previous cube. Files are always closed.
 - **D-4.** File dialogs browse the server, and every save writes on the server.
 - **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `.
+- **matplotlib defaults.** TomoVis ran with matplotlib's default rcParams. In the console, the cube
+  explorer's figure archiver changes the global rcParams (300 dpi, serif) whenever it saves. Every
+  TomoVis figure operation therefore runs under `matplotlib.style.context("default")`, behind one
+  lock (`TomoVisRc` in `figure_host.py`).
 
 Crash fixes (the original printed a traceback and kept a half-applied state):
 
