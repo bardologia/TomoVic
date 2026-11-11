@@ -418,6 +418,37 @@ class FixerChecks {
     });
   }
 
+  async firstAutoRange() {
+    await this.run.check("G-05 F-110", "the first auto-range after an import with the default ROI sticking out converges to pyqtgraph's view range at 900x340", async () => {
+      await this.fresh();
+      await this.page.addStyleTag({ content: ".tv-panel.tv-slicer { grid-template-rows: 340px 340px auto auto !important; } .tv-slicer__stack { width: 1060px; }" });
+      await this.page.waitForTimeout(200);
+      await this.importFile("hd5", path.join(this.inputs, "fusar_two_key_elev.hd5"));
+      await this.page.waitForTimeout(1500);
+      const golden = H.golden("import_fusar_two_key_elev").steps[1].state.views;
+      const ours   = await this.T(() => { const t = window.app.tomovisPage.views[0]; return { imv1_1: t.views.imv1_1.view.viewRange(), imv2_1: t.views.imv2_1.view.viewRange(), size: [t.views.imv1_1.view.rect.w, t.views.imv1_1.view.rect.h], pending: t.views.imv1_1.view.needsAutoRange }; });
+      const paints = await this.T(() => new Promise((resolve) => { const vb = window.app.tomovisPage.views[0].views.imv1_1.view; let n = 0; const original = vb.updateAutoRange.bind(vb); vb.updateAutoRange = () => { n += 1; original(); }; setTimeout(() => { vb.updateAutoRange = original; resolve(n); }, 600); }));
+      R.equal(ours.size, [900, 340], "view size");
+      for (const name of ["imv1_1", "imv2_1"]) {
+        const flat = ours[name].flat();
+        const want = golden[name].view_range.flat();
+        flat.forEach((v, k) => R.assert(Math.abs(v - want[k]) < 1e-6, `${name} view range ${JSON.stringify(ours[name])} vs ${JSON.stringify(golden[name].view_range)}`));
+      }
+      R.equal([ours.pending, paints], [false, 0], "the feedback loop has settled");
+      const hits = await this.T(() => {
+        const roi  = window.app.tomovisPage.views[0].roi;
+        const [a, b] = roi.endpoints().map((h) => roi.devicePoint(h.pos()));
+        const len  = Math.hypot(b.x - a.x, b.y - a.y);
+        const n    = [-(b.y - a.y) / len, (b.x - a.x) / len];
+        const mid  = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+        return [3, 10, 14, 15, 17, 20].map((d) => [d, roi.hit(mid[0] + n[0] * d, mid[1] + n[1] * d)]);
+      });
+      R.equal(hits, [[3, true], [10, true], [14, true], [15, true], [17, false], [20, false]], "ROI hit width across the line, as pyqtgraph's shape measured in the original");
+      await this.fresh();
+      return `imv1_1 y ${ours.imv1_1[1].map((v) => v.toFixed(6)).join("..")}, golden ${golden.imv1_1.view_range[1].map((v) => v.toFixed(6)).join("..")}; hit width 16 px`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1440, height: 1000 } });
     this.options.base = opened.base;
@@ -435,6 +466,7 @@ class FixerChecks {
     if (this.wanted("formats")) await this.imageFormats();
     if (this.wanted("mplwindow")) await this.matplotlibWindows();
     if (this.wanted("copy")) await this.svgCopy();
+    if (this.wanted("autorange")) await this.firstAutoRange();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors].filter((e) => !(this.wanted("mplwindow") && e === "console: Failed to load resource: the server responded with a status of 404 (Not Found)"));
