@@ -146,6 +146,7 @@ class TomoVisTabStrip {
       tab.addEventListener("click", () => this.choose(index));
       tab.addEventListener("keydown", (event) => this.key(event));
     });
+    element.addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     ctx.bus.on("snapshot", ({ snapshot }) => this.follow(snapshot));
     this.render();
   }
@@ -168,6 +169,19 @@ class TomoVisTabStrip {
     event.preventDefault();
     this.step(moves[event.key]);
     this.tabs[this.current].focus();
+  }
+
+  overTabs(event) {
+    const first = this.tabs[0].getBoundingClientRect();
+    const last  = this.tabs[this.tabs.length - 1].getBoundingClientRect();
+    return event.clientX >= first.left && event.clientX < last.right && event.clientY >= Math.min(first.top, last.top) && event.clientY < Math.max(first.bottom, last.bottom);
+  }
+
+  wheel(event) {
+    if (!this.overTabs(event)) return;
+    event.preventDefault();
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    this.step(delta < 0 ? -1 : 1);
   }
 
   follow(snapshot) {
