@@ -3,6 +3,7 @@
 class TomoVisSlicerTab {
   static VIEWS     = ["imv1_1", "imv1_2", "imv2_1", "imv2_2"];
   static VALIDATOR = "-?[0-9]+[.]?[0-9]{,4}";
+  static SPACING   = 6;
   static FIELDS    = [["Ax", "tab1QLineEdit1"], ["Ay", "tab1QLineEdit2"], ["Angle [°]", "tab1QLineEdit3"], ["Length", "tab1QLineEdit4"], ["Pos x", "tab1QLineEdit5"], ["Pos y", "tab1QLineEdit6"]];
 
   constructor(root, ctx) {
@@ -36,9 +37,10 @@ class TomoVisSlicerTab {
       const host = el("div", "tv-slicer__pane");
       host.dataset.view = name;
       this.stacks[i < 2 ? 0 : 1].append(host);
-      this.views[name]   = new PgImageView(this.ctx, host, { name: "ImageView" });
+      this.views[name]   = new PgImageView(this.ctx, host, { name: "ImageView", onHintChanged: () => this.layoutPanes() });
       this.applied[name] = -1;
     });
+    this.resizeObserver = new ResizeObserver(() => this.layoutPanes());
 
     this.chkBox  = kit.bound("checkbox", "tab1ChkBox");
     this.slider  = kit.bound("slider", "tab1Slider", { minWidth: 400 });
@@ -63,7 +65,9 @@ class TomoVisSlicerTab {
     this.plotButton = kit.bound("button", "tab1PlotButton", { text: "Plot", maxWidth: 100 });
     row2.append(el("span", "tv-stretch"), this.setButton.el, this.plotButton.el);
 
+    this.rows = [row1, row2];
     this.root.replaceChildren(this.stacks[0], this.stacks[1], row1, row2);
+    for (const node of [this.root, ...this.stacks]) this.resizeObserver.observe(node);
   }
 
   buildItems() {
@@ -82,6 +86,26 @@ class TomoVisSlicerTab {
     this.views.imv1_1.addItem(this.sliceLine);
     this.sliceLine.hide();
     this.lineView = "imv1_1";
+  }
+
+  layoutPanes() {
+    const style = getComputedStyle(this.root);
+    const total = this.root.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - this.rows[0].offsetHeight - this.rows[1].offsetHeight - 3 * TomoVisSlicerTab.SPACING;
+    if (this.root.clientHeight <= 0 || total <= 0) return;
+    const chain = this.stacks.map((_, k) => {
+      const panes = TomoVisSlicerTab.VIEWS.slice(2 * k, 2 * k + 2).map((name) => this.views[name]);
+      return new QtLayoutStruct({
+        sizeHint    : Math.max(...panes.map((pane) => Math.max(pane.sizeHint(), pane.minimumSizeHint()))),
+        minimumSize : Math.max(...panes.map((pane) => pane.minimumSizeHint())),
+        expansive   : true,
+        empty       : false,
+        spacing     : TomoVisSlicerTab.SPACING,
+      });
+    });
+    QtLayoutEngine.geomCalc(chain, 0, chain.length, 0, total + TomoVisSlicerTab.SPACING);
+    this.root.style.gridTemplateRows = `${chain[0].size}px minmax(0, 1fr) auto auto`;
+    const heights = this.stacks.map((stack) => stack.clientHeight);
+    TomoVisSlicerTab.VIEWS.forEach((name, i) => this.views[name].layout(heights[i < 2 ? 0 : 1]));
   }
 
   activate() {

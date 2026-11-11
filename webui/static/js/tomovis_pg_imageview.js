@@ -475,9 +475,23 @@ class PgNormalizePanel {
 }
 
 class PgImageView {
-  constructor(ctx, host, { name = "ImageView" } = {}) {
+  static HANDLE        = 2;
+  static MAIN_MINIMUM  = 101;
+  static PLOT_MINIMUM  = 40;
+  static SPLITTER_HINT = 232;
+  static PLOT_HINT     = 30;
+  static NORM_HEIGHT   = 110;
+
+  constructor(ctx, host, { name = "ImageView", onHintChanged = null } = {}) {
     this.ctx       = ctx;
     this.name      = name;
+
+    this.onHintChanged = onHintChanged;
+    this.height        = 0;
+    this.splitterHint  = PgImageView.SPLITTER_HINT;
+    this.splitterModel = new QtSplitterModel(PgImageView.HANDLE, [{ minimum: PgImageView.MAIN_MINIMUM, hint: PgImageView.SPLITTER_HINT }, { minimum: PgImageView.PLOT_MINIMUM, hint: PgImageView.PLOT_HINT, hidden: true }]);
+    this.handleDrag    = null;
+
     this.image     = null;
     this.imageDisp = null;
     this.axes      = {};
@@ -540,6 +554,10 @@ class PgImageView {
       this.roiClicked();
     });
     this.menuBtn.addEventListener("click", (event) => this.menuClicked(event));
+    this.handle.addEventListener("pointerdown", (event) => this.handlePress(event));
+    this.handle.addEventListener("pointermove", (event) => this.handleMove(event));
+    this.handle.addEventListener("pointerup", (event) => this.handleRelease(event));
+    this.handle.addEventListener("pointercancel", (event) => this.handleRelease(event));
     this.roi.sigRegionChanged.connect(() => this.roiChanged());
     this.normRoi.sigRegionChangeFinished.connect(() => this.updateNorm());
 
@@ -549,6 +567,70 @@ class PgImageView {
 
   get roiChecked() {
     return this.roiBtn.getAttribute("aria-pressed") === "true";
+  }
+
+  get normShown() {
+    return !this.norm.el.hidden;
+  }
+
+  sizeHint() {
+    return this.splitterHint + (this.normShown ? PgImageView.NORM_HEIGHT : 0);
+  }
+
+  minimumSizeHint() {
+    const plotShown = !this.splitterModel.items[1].hidden;
+    const splitter  = PgImageView.MAIN_MINIMUM + (plotShown ? PgImageView.HANDLE + PgImageView.PLOT_MINIMUM : 0);
+    return splitter + (this.normShown ? PgImageView.NORM_HEIGHT : 0);
+  }
+
+  layout(height) {
+    this.height = height;
+    this.splitterModel.setLength(height - (this.normShown ? PgImageView.NORM_HEIGHT : 0));
+    this.applySplitter();
+  }
+
+  applySplitter() {
+    if (this.height <= 0) return;
+    const [main, plot] = this.splitterModel.items;
+    this.main.style.flex     = `0 0 ${main.size}px`;
+    this.plotHost.style.flex = `0 0 ${plot.size}px`;
+    this.main.classList.toggle("is-collapsed", main.collapsed);
+    this.plotHost.classList.toggle("is-collapsed", plot.collapsed);
+  }
+
+  setRoiPlotVisible(visible) {
+    const changed = this.splitterModel.setHidden(1, !visible);
+    this.splitter.classList.toggle("is-split", visible);
+    if (changed) {
+      const plot = this.splitterModel.items[1];
+      this.splitterHint = PgImageView.SPLITTER_HINT + (visible ? Math.max(plot.size, plot.minimum) : 0);
+    }
+    this.applySplitter();
+    if (changed && this.onHintChanged) this.onHintChanged(this);
+  }
+
+  handleY(event) {
+    return Math.floor(event.clientY - this.splitter.getBoundingClientRect().top);
+  }
+
+  handlePress(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    this.handle.setPointerCapture(event.pointerId);
+    this.handleDrag = { offset: this.handleY(event) - this.splitterModel.handleTop(1) };
+    this.handle.classList.add("is-pressed");
+  }
+
+  handleMove(event) {
+    if (!this.handleDrag || !(event.buttons & 1)) return;
+    this.splitterModel.moveSplitter(this.handleY(event) - this.handleDrag.offset, 1);
+    this.applySplitter();
+  }
+
+  handleRelease(event) {
+    if (!this.handleDrag || event.button > 0) return;
+    this.handleDrag = null;
+    this.handle.classList.remove("is-pressed");
   }
 
   addItem(item, ignoreBounds = false) {
@@ -684,9 +766,11 @@ class PgImageView {
   }
 
   normToggled(visible) {
+    const changed = this.normShown !== visible;
     this.norm.el.hidden = !visible;
     if (visible && this.norm.roiCheck.checked) this.normRoi.show();
     else this.normRoi.hide();
+    if (changed && this.onHintChanged) this.onHintChanged(this);
   }
 
   updateImage(autoHistogramRange = true) {
@@ -697,10 +781,12 @@ class PgImageView {
   }
 
   roiClicked() {
+    let showRoiPlot = false;
     if (this.roiChecked) {
+      showRoiPlot = true;
       this.roi.show();
       this.roiPlot.setMouseEnabled(true, true);
-      this.splitter.classList.add("is-split");
+      this.splitterModel.setSizes([Math.trunc(this.height * 0.6), Math.trunc(this.height * 0.4)]);
       this.roiChanged();
       for (const c of this.roiCurves) c.setVisible(true);
       this.roiPlot.showAxis("left");
@@ -709,8 +795,8 @@ class PgImageView {
       this.roiPlot.setMouseEnabled(false, false);
       for (const c of this.roiCurves) c.setVisible(false);
       this.roiPlot.hideAxis("left");
-      this.splitter.classList.remove("is-split");
     }
+    this.setRoiPlotVisible(showRoiPlot);
     this.roiPlot.view.update();
   }
 

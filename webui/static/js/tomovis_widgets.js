@@ -155,6 +155,413 @@ class QtRegExpValidator {
   }
 }
 
+class QtLayoutStruct {
+  static MAX = 524287;
+
+  constructor({ stretch = 0, sizeHint = 0, minimumSize = 0, maximumSize = QtLayoutStruct.MAX, expansive = false, empty = true, spacing = 0 } = {}) {
+    this.stretch     = stretch;
+    this.sizeHint    = sizeHint;
+    this.minimumSize = minimumSize;
+    this.maximumSize = maximumSize;
+    this.expansive   = expansive;
+    this.empty       = empty;
+    this.spacing     = spacing;
+    this.done        = false;
+    this.pos         = 0;
+    this.size        = 0;
+  }
+
+  smartSizeHint() {
+    return this.stretch > 0 ? this.minimumSize : this.sizeHint;
+  }
+
+  effectiveSpacer(uniformSpacer) {
+    return uniformSpacer >= 0 ? uniformSpacer : this.spacing;
+  }
+}
+
+class QtLayoutEngine {
+  static toFixed(i) {
+    return i * 256;
+  }
+
+  static fRound(i) {
+    return (i % 256 < 128) ? Math.trunc(i / 256) : 1 + Math.trunc(i / 256);
+  }
+
+  static geomCalc(chain, start, count, pos, space, spacer = -1) {
+    let cHint              = 0;
+    let cMin               = 0;
+    let sumStretch         = 0;
+    let sumSpacing         = 0;
+    let expandingCount     = 0;
+    let allEmptyNonstretch = true;
+    let pendingSpacing     = -1;
+    let spacerCount        = 0;
+
+    for (let i = start; i < start + count; i += 1) {
+      const data = chain[i];
+      data.done   = false;
+      cHint      += data.smartSizeHint();
+      cMin       += data.minimumSize;
+      sumStretch += data.stretch;
+      if (!data.empty) {
+        if (pendingSpacing >= 0) {
+          sumSpacing += pendingSpacing;
+          spacerCount += 1;
+        }
+        pendingSpacing = data.effectiveSpacer(spacer);
+      }
+      if (data.expansive) expandingCount += 1;
+      allEmptyNonstretch = allEmptyNonstretch && data.empty && !data.expansive && data.stretch <= 0;
+    }
+
+    let extraspace = 0;
+
+    if (space < cMin + sumSpacing) {
+      const minSize = cMin + sumSpacing;
+      if (spacer >= 0) {
+        spacer     = minSize > 0 ? Math.trunc(spacer * space / minSize) : 0;
+        sumSpacing = spacer * spacerCount;
+      }
+
+      const minimumSizes = chain.slice(start, start + count).map((data) => data.minimumSize).sort((a, b) => a - b);
+      const spaceLeft    = space - sumSpacing;
+
+      let sum       = 0;
+      let idx       = 0;
+      let spaceUsed = 0;
+      let current   = 0;
+      while (idx < count && spaceUsed < spaceLeft) {
+        current   = minimumSizes[idx];
+        spaceUsed = sum + current * (count - idx);
+        sum      += current;
+        idx      += 1;
+      }
+      idx -= 1;
+
+      const deficit        = spaceUsed - spaceLeft;
+      const items          = count - idx;
+      const deficitPerItem = Math.trunc(deficit / items);
+      const remainder      = deficit % items;
+      const maxval         = current - deficitPerItem;
+
+      let rest = 0;
+      for (let i = start; i < start + count; i += 1) {
+        let maxv = maxval;
+        rest += remainder;
+        if (rest >= items) {
+          maxv -= 1;
+          rest -= items;
+        }
+        const data = chain[i];
+        data.size = Math.min(data.minimumSize, maxv);
+        data.done = true;
+      }
+    } else if (space < cHint + sumSpacing) {
+      let n          = count;
+      let spaceLeft  = space - sumSpacing;
+      let overdraft  = cHint - spaceLeft;
+
+      for (let i = start; i < start + count; i += 1) {
+        const data = chain[i];
+        if (!data.done && data.minimumSize >= data.smartSizeHint()) {
+          data.size  = data.smartSizeHint();
+          data.done  = true;
+          spaceLeft -= data.smartSizeHint();
+          n         -= 1;
+        }
+      }
+
+      let finished = n === 0;
+      while (!finished) {
+        finished = true;
+        const fpOver = QtLayoutEngine.toFixed(overdraft);
+        let   fpW    = 0;
+        for (let i = start; i < start + count; i += 1) {
+          const data = chain[i];
+          if (data.done) continue;
+          fpW += Math.trunc(fpOver / n);
+          const w = QtLayoutEngine.fRound(fpW);
+          data.size = data.smartSizeHint() - w;
+          fpW      -= QtLayoutEngine.toFixed(w);
+          if (data.size < data.minimumSize) {
+            data.done  = true;
+            data.size  = data.minimumSize;
+            finished   = false;
+            overdraft -= data.smartSizeHint() - data.minimumSize;
+            n         -= 1;
+            break;
+          }
+        }
+      }
+    } else {
+      let n         = count;
+      let spaceLeft = space - sumSpacing;
+
+      for (let i = start; i < start + count; i += 1) {
+        const data = chain[i];
+        if (!data.done && (data.maximumSize <= data.smartSizeHint() || (!allEmptyNonstretch && data.empty && !data.expansive && data.stretch === 0))) {
+          data.size   = data.smartSizeHint();
+          data.done   = true;
+          spaceLeft  -= data.size;
+          sumStretch -= data.stretch;
+          if (data.expansive) expandingCount -= 1;
+          n -= 1;
+        }
+      }
+      extraspace = spaceLeft;
+
+      let surplus;
+      let deficit;
+      do {
+        surplus = 0;
+        deficit = 0;
+        const fpSpace = QtLayoutEngine.toFixed(spaceLeft);
+        let   fpW     = 0;
+        for (let i = start; i < start + count; i += 1) {
+          const data = chain[i];
+          if (data.done) continue;
+          extraspace = 0;
+          if (sumStretch > 0) fpW += Math.trunc((fpSpace * data.stretch) / sumStretch);
+          else if (expandingCount > 0) fpW += Math.trunc((fpSpace * (data.expansive ? 1 : 0)) / expandingCount);
+          else fpW += Math.trunc(fpSpace / n);
+          const w = QtLayoutEngine.fRound(fpW);
+          data.size = w;
+          fpW      -= QtLayoutEngine.toFixed(w);
+          if (w < data.smartSizeHint()) deficit += data.smartSizeHint() - w;
+          else if (w > data.maximumSize) surplus += w - data.maximumSize;
+        }
+        if (deficit > 0 && surplus <= deficit) {
+          for (let i = start; i < start + count; i += 1) {
+            const data = chain[i];
+            if (!data.done && data.size < data.smartSizeHint()) {
+              data.size   = data.smartSizeHint();
+              data.done   = true;
+              spaceLeft  -= data.smartSizeHint();
+              sumStretch -= data.stretch;
+              if (data.expansive) expandingCount -= 1;
+              n -= 1;
+            }
+          }
+        }
+        if (surplus > 0 && surplus >= deficit) {
+          for (let i = start; i < start + count; i += 1) {
+            const data = chain[i];
+            if (!data.done && data.size > data.maximumSize) {
+              data.size   = data.maximumSize;
+              data.done   = true;
+              spaceLeft  -= data.maximumSize;
+              sumStretch -= data.stretch;
+              if (data.expansive) expandingCount -= 1;
+              n -= 1;
+            }
+          }
+        }
+      } while (n > 0 && surplus !== deficit);
+      if (n === 0) extraspace = spaceLeft;
+    }
+
+    const extra = Math.trunc(extraspace / (spacerCount + 2));
+    let   p     = pos + extra;
+    for (let i = start; i < start + count; i += 1) {
+      const data = chain[i];
+      data.pos = p;
+      p       += data.size;
+      if (!data.empty) p += data.effectiveSpacer(spacer) + extra;
+    }
+  }
+}
+
+class QtSplitterModel {
+  static HANDLE_MARGIN = 1;
+  static WIDGET_MAX    = 16777215;
+
+  constructor(handleSize, widgets) {
+    this.handleSize  = handleSize;
+    this.length      = 0;
+    this.collapsible = true;
+    this.items       = widgets.map((widget) => ({
+      minimum      : widget.minimum,
+      maximum      : QtSplitterModel.WIDGET_MAX,
+      sizer        : widget.hint,
+      hidden       : Boolean(widget.hidden),
+      collapsed    : false,
+      handleHidden : true,
+      pos          : 0,
+      size         : 0,
+    }));
+    this.recalc();
+  }
+
+  setLength(length) {
+    this.length = length;
+    this.doResize();
+  }
+
+  setHidden(index, hidden) {
+    if (this.items[index].hidden === hidden) return false;
+    this.items[index].hidden = hidden;
+    this.recalc();
+    return true;
+  }
+
+  setSizes(sizes) {
+    this.items.forEach((item, i) => {
+      item.collapsed = false;
+      item.sizer     = Math.max(sizes[i] === undefined ? 0 : sizes[i], 0);
+      if (item.sizer === 0) {
+        if (this.collapsible && item.minimum > 0) item.collapsed = true;
+        else item.sizer = item.minimum;
+      } else if (item.sizer < item.minimum) {
+        item.sizer = item.minimum;
+      }
+    });
+    this.doResize();
+  }
+
+  sizes() {
+    return this.items.map((item) => (item.hidden ? 0 : item.size));
+  }
+
+  recalc() {
+    let first        = true;
+    let allInvisible = this.items.length !== 0;
+    for (const item of this.items) {
+      if (allInvisible && !item.hidden && !item.collapsed) allInvisible = false;
+      item.handleHidden = first || item.hidden;
+      if (!item.hidden) first = false;
+    }
+    if (allInvisible) {
+      const shown = this.items.find((item) => !item.hidden);
+      if (shown) shown.collapsed = false;
+    }
+    this.doResize();
+  }
+
+  doResize() {
+    const chain = [];
+    for (const item of this.items) {
+      const handle = new QtLayoutStruct();
+      if (item.handleHidden) handle.maximumSize = 0;
+      else Object.assign(handle, { sizeHint: this.handleSize, minimumSize: this.handleSize, maximumSize: this.handleSize, empty: false });
+      chain.push(handle);
+
+      const widget = new QtLayoutStruct();
+      if (item.hidden || item.collapsed) widget.maximumSize = 0;
+      else Object.assign(widget, { minimumSize: item.minimum, maximumSize: item.maximum, empty: false, stretch: item.sizer, sizeHint: item.minimum, expansive: true });
+      chain.push(widget);
+    }
+    QtLayoutEngine.geomCalc(chain, 0, chain.length, 0, this.length, 0);
+    this.items.forEach((item, i) => this.setGeo(item, chain[i * 2 + 1].pos, chain[i * 2 + 1].size, false));
+  }
+
+  setGeo(item, pos, size, allowCollapse) {
+    item.pos  = pos;
+    item.size = size;
+    if (allowCollapse) item.collapsed = size <= 0 && item.minimum > 0 && !item.hidden;
+  }
+
+  handleTop(index) {
+    return this.items[index].pos - this.handleSize - QtSplitterModel.HANDLE_MARGIN;
+  }
+
+  addContribution(index, range, mayCollapse) {
+    const item = this.items[index];
+    if (item.hidden) return;
+    if (!item.handleHidden) {
+      range.min += this.handleSize;
+      range.max += this.handleSize;
+    }
+    if (mayCollapse || !item.collapsed) range.min += item.minimum;
+    range.max += item.maximum;
+  }
+
+  findWidgetJustBeforeOrJustAfter(index, delta) {
+    let i = delta < 0 ? index + delta : index;
+    do {
+      const item = this.items[i];
+      if (!item.hidden) return { index: i, collapsibleSize: this.collapsible ? item.minimum : 0 };
+      i += delta;
+    } while (i >= 0 && i < this.items.length);
+    return { index: -1, collapsibleSize: 0 };
+  }
+
+  getRange(index) {
+    const before = this.findWidgetJustBeforeOrJustAfter(index, -1);
+    const after  = this.findWidgetJustBeforeOrJustAfter(index, +1);
+    const lower  = { min: 0, max: 0 };
+    const upper  = { min: 0, max: 0 };
+    for (let i = 0; i < index; i += 1) this.addContribution(i, lower, i === before.index);
+    for (let i = index; i < this.items.length; i += 1) this.addContribution(i, upper, i === after.index);
+
+    const size           = this.length;
+    const smartMinBefore = Math.max(lower.min, size - upper.max);
+    const smartMaxBefore = Math.min(lower.max, size - upper.min);
+    const min            = smartMinBefore;
+    const max            = smartMaxBefore;
+    let   farMin         = min;
+    let   farMax         = max;
+    if (lower.min - before.collapsibleSize >= size - upper.max) farMin -= before.collapsibleSize;
+    if (size - (upper.min - after.collapsibleSize) <= lower.max) farMax += after.collapsibleSize;
+    return { farMin, min, max, farMax };
+  }
+
+  adjustPos(pos, index) {
+    const threshold = 40;
+    const range     = this.getRange(index);
+    let   adjusted;
+    if (pos >= range.min) {
+      if (pos <= range.max) {
+        adjusted = pos;
+      } else {
+        const delta = pos - range.max;
+        const width = range.farMax - range.max;
+        adjusted = delta > Math.trunc(width / 2) && delta >= Math.min(threshold, width) ? range.farMax : range.max;
+      }
+    } else {
+      const delta = range.min - pos;
+      const width = range.min - range.farMin;
+      adjusted = delta > Math.trunc(width / 2) && delta >= Math.min(threshold, width) ? range.farMin : range.min;
+    }
+    return { pos: adjusted, range };
+  }
+
+  doMove(backwards, hPos, index, delta, mayCollapse, positions, widths) {
+    if (index < 0 || index >= this.items.length) return;
+    const item   = this.items[index];
+    const nextId = backwards ? index - delta : index + delta;
+    if (item.hidden) {
+      this.doMove(backwards, hPos, nextId, delta, this.collapsible, positions, widths);
+      return;
+    }
+    const hs = item.handleHidden ? 0 : this.handleSize;
+    let   ws = backwards ? hPos - item.pos : (item.pos + item.size - 1) - hPos - hs + 1;
+    if (ws > 0 || (!item.collapsed && !mayCollapse)) {
+      ws = Math.min(ws, item.maximum);
+      ws = Math.max(ws, item.minimum);
+    } else {
+      ws = 0;
+    }
+    positions[index] = backwards ? hPos - ws : hPos + hs;
+    widths[index]    = ws;
+    this.doMove(backwards, backwards ? hPos - ws - hs : hPos + hs + ws, nextId, delta, this.collapsible, positions, widths);
+  }
+
+  moveSplitter(pos, index) {
+    const adjusted  = this.adjustPos(pos, index);
+    const positions = new Array(this.items.length).fill(0);
+    const widths    = new Array(this.items.length).fill(0);
+    const target    = adjusted.pos;
+    this.doMove(false, target, index, +1, this.collapsible && target > adjusted.range.max, positions, widths);
+    this.doMove(true, target, index - 1, +1, this.collapsible && target < adjusted.range.min, positions, widths);
+    this.items.forEach((item, i) => {
+      if (!item.hidden) this.setGeo(item, positions[i], widths[i], true);
+    });
+    for (const item of this.items) item.sizer = item.size;
+  }
+}
+
 class QtWidgetView {
   constructor(kit, kind, name, options) {
     this.kit      = kit;
@@ -1437,6 +1844,9 @@ class TomoVisWidgets {
 
 window.TomoVisInput        = TomoVisInput;
 window.QtRegExpValidator   = QtRegExpValidator;
+window.QtLayoutStruct      = QtLayoutStruct;
+window.QtLayoutEngine      = QtLayoutEngine;
+window.QtSplitterModel     = QtSplitterModel;
 window.QtWidgetView        = QtWidgetView;
 window.QtCheckBoxView      = QtCheckBoxView;
 window.QtSliderView        = QtSliderView;
