@@ -4,8 +4,10 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { TomoVisHarness as H, TomoVisCheckRun as R, REPO } from "./harness.mjs";
 
-const require      = createRequire(import.meta.url);
-const { chromium } = require("playwright-core");
+const require       = createRequire(import.meta.url);
+const REALISTIC     = path.join(REPO, "logs/tomovis_port/fixtures/realistic_traun_hv.hd5");
+const REALISTIC_RGB = path.join(REPO, "logs/tomovis_port/fixtures/realistic_pseudo_rgb.npy");
+const { chromium }  = require("playwright-core");
 
 class FixerChecks {
   constructor(options) {
@@ -491,6 +493,82 @@ class FixerChecks {
     });
   }
 
+  async fit() {
+    await this.run.check("GL-01/GL-02/GL-03 fit", "at 1100x880 the window is the original's 1100x880 with no scrolling; at 1440x900 it fills the viewport; the title sits in the menu bar row", async () => {
+      const results = [];
+      for (const [width, height, original] of [[1100, 880, "10_single_loaded_default_roi.png"], [1440, 900, null]]) {
+        await this.page.setViewportSize({ width, height });
+        await this.fresh();
+        await this.importFile("hd5", REALISTIC);
+        await this.page.waitForTimeout(800);
+        const m = await this.T(() => {
+          const win  = document.querySelector("#tv-window").getBoundingClientRect();
+          const page = document.querySelector(".page--tomovis");
+          const bar  = document.querySelector("#tv-menubar").getBoundingClientRect();
+          const head = document.querySelector("#tv-titlebar").getBoundingClientRect();
+          const stat = document.querySelector("#tv-status").getBoundingClientRect();
+          const sect = page.getBoundingClientRect();
+          return { win: [win.left, win.top, win.width, win.height], scroll: [document.documentElement.scrollWidth, sect.height, page.scrollWidth, page.clientWidth], titleInBar: head.top >= bar.top && head.bottom <= bar.bottom + 1, statusBottom: stat.bottom };
+        });
+        const name = `fit_${width}x${height}`;
+        await H.shot(this.page, name, "fixer", { element: "#tv-window" });
+        await H.shot(this.page, `${name}_viewport`, "fixer");
+        if (original) H.compareShot(name, path.join(this.options.originals, original), "fixer");
+        results.push([width, height, m]);
+        R.assert(m.win[0] >= 0 && m.win[1] >= 0 && m.win[0] + m.win[2] <= width && m.win[1] + m.win[3] <= height, `window ${JSON.stringify(m.win)} inside ${width}x${height}`);
+        R.assert(m.scroll[0] <= width && m.scroll[1] <= height && m.scroll[2] <= m.scroll[3], `section fits, no horizontal scrolling ${JSON.stringify(m.scroll)} (TomoVic's footer follows below every full-height page)`);
+        R.assert(m.titleInBar, "title in the menu bar row");
+        R.assert(m.statusBottom <= height, `status line visible (${m.statusBottom})`);
+      }
+      R.equal(results[0][2].win.slice(2), [1100, 880], "window size at 1100x880");
+      await this.page.setViewportSize({ width: 1440, height: 1000 });
+      await this.fresh();
+      return results.map(([w, h, m]) => `${w}x${h}: window ${m.win.slice(2).join("x")} at ${m.win.slice(0, 2).join(",")}`).join("; ");
+    });
+
+    await this.run.check("GL-04 strip", "RGB level mode gives the hidden gradient's column to the histogram view, as Qt's layout skips hidden items", async () => {
+      await this.page.setViewportSize({ width: 1100, height: 880 });
+      await this.fresh();
+      await this.importFile("npy", REALISTIC_RGB);
+      await this.page.waitForTimeout(800);
+      const strip = await this.T(() => { const h = window.app.tomovisPage.views[0].views.imv1_2.histogram; return { vb: h.vb.rect, axis: h.axis.rect || null, width: h.view.width, gradient: h.gradient.visible }; });
+      await H.shot(this.page, "fit_rgb_strip", "fixer", { element: "#tv-window" });
+      H.compareShot("fit_rgb_strip", path.join(this.options.originals, "70_rgb_levels_fixed_loaded_default_roi.png"), "fixer");
+      await this.page.setViewportSize({ width: 1440, height: 1000 });
+      await this.fresh();
+      R.equal(strip.gradient, false, "gradient hidden");
+      R.assert(strip.vb.x + strip.vb.w >= strip.width - 3, `view reaches the strip's right edge ${JSON.stringify(strip)}`);
+      return `strip ${strip.width}px, view ${Math.round(strip.vb.x)}..${Math.round(strip.vb.x + strip.vb.w)}`;
+    });
+  }
+
+  async scriptsPanels() {
+    await this.run.check("GL-05 scripts", "the two scripts panels share the head style, an empty path field and the same kind of empty state", async () => {
+      await this.page.goto(`${this.options.base}/#/tomovis_scripts`);
+      await this.page.waitForFunction(() => window.app.tomovisScriptsPage && window.app.tomovisScriptsPage.views.length === 2, null, { timeout: 30000 });
+      const look = await this.T(() => {
+        const panel = (root, kind) => {
+          const title = document.querySelector(`${root} .tv-script-${kind}__title`);
+          const lead  = document.querySelector(`${root} .tv-script-${kind}__lead`);
+          const box   = document.querySelector(`${root} .tv-script-${kind}__path`);
+          const field = box.matches("input") ? box : box.querySelector("input");
+          const empty = document.querySelector(`${root} .tv-script-${kind}__empty`);
+          const cs    = getComputedStyle(title);
+          return { title: title.textContent, font: [cs.fontFamily, cs.fontSize, cs.fontWeight], lead: Boolean(lead), value: field.value, placeholder: field.placeholder, fieldWidth: Math.round(box.getBoundingClientRect().width), empty: empty && !empty.hidden ? getComputedStyle(kind === "volume" ? empty.parentElement : empty).backgroundColor : null };
+        };
+        return [panel("#tv-script-slicer", "slicer"), panel("#tv-script-volume", "volume")];
+      });
+      await H.shot(this.page, "gl05_scripts_page", "fixer", { fullPage: true });
+      await H.openTomoVis(this.page);
+      R.equal(look.map((p) => p.title), ["SlicerMatplotlib.py", "VolumeRendering.py"], "titles");
+      R.equal(look[0].font, look[1].font, "same title font");
+      R.equal(look.map((p) => [p.lead, p.value, p.placeholder]), [[true, "", "/path/to/tomogram.hd5"], [true, "", "/path/to/tomogram.hd5"]], "lead and path field");
+      R.equal(look[0].fieldWidth, look[1].fieldWidth, "same field width");
+      R.equal(look[0].empty, look[1].empty, "same empty state background");
+      return `field ${look[0].fieldWidth}px, empty ${look[0].empty}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1440, height: 1000 } });
     this.options.base = opened.base;
@@ -510,6 +588,8 @@ class FixerChecks {
     if (this.wanted("copy")) await this.svgCopy();
     if (this.wanted("autorange")) await this.firstAutoRange();
     if (this.wanted("fullscreen")) await this.scriptFullscreen();
+    if (this.wanted("fit")) await this.fit();
+    if (this.wanted("scripts")) await this.scriptsPanels();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors].filter((e) => !(this.wanted("mplwindow") && e === "console: Failed to load resource: the server responded with a status of 404 (Not Found)"));
@@ -524,5 +604,6 @@ class FixerChecks {
 }
 
 const options = H.args(process.argv);
-options.audit = process.env.TOMOVIS_AUDIT_DIR || path.join(REPO, "logs/tomovis_port/fixer/originals");
+options.audit     = process.env.TOMOVIS_AUDIT_DIR || path.join(REPO, "logs/tomovis_port/fixer/originals");
+options.originals = process.env.TOMOVIS_ORIGINAL_SHOTS || path.join(REPO, "logs/tomovis_port/original_shots");
 await new FixerChecks(options).main();
