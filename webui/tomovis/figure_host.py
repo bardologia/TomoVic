@@ -28,6 +28,7 @@ import os
 import threading
 
 import matplotlib as mpl
+import matplotlib.style
 from matplotlib.backends.backend_webagg_core import FigureCanvasWebAggCore, FigureManagerWebAgg, NavigationToolbar2WebAgg
 from matplotlib.figure                       import Figure
 
