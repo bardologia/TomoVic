@@ -60,6 +60,7 @@ class TomoVisRc:
 
         @functools.wraps(method)
         def wrapper(*args, **kwargs):
+            """Calls the wrapped method with the class lock held and matplotlib's "default" style active."""
             with cls.LOCK, mpl.style.context("default"):
                 return method(*args, **kwargs)
 

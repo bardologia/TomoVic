@@ -148,6 +148,7 @@ def test_matplotlib_keymap_is_inactive(plotted):
     """F-136: 'g' does not toggle the grid on the Plot figure, while a figure with the keymap does."""
 
     def grid_after_g(figure: TomoVisFigure) -> bool:
+        """Presses 'g' over the figure's first axes and tells whether any x grid line is visible afterwards."""
         Mouse(figure).event("motion_notify", 400, 150, 0)
         figure.handle("key", {"event": {"type": "key_press", "key": "kg"}})
         figure.canvas.draw()

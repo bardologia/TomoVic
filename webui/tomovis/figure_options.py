@@ -178,6 +178,7 @@ class FigureOptionsForm:
         sep       = (None, None)
 
         def convert_limits(lim, converter):
+            """Maps an axis's (min, max) limits to datetimes under a DateConverter and to floats otherwise."""
             if isinstance(converter, DateConverter):
                 return map(num2date, lim)
             return map(float, lim)
