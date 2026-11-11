@@ -993,6 +993,7 @@ class QtTabWidget(QtWidget):
 
     Attributes:
         titles         : Tab titles in order.
+        pages          : Per tab, the object told when its page is shown (an object with ``showEvent``), or None.
         index          : Current tab index.
         currentChanged : Signal(int) emitted when the current tab changes.
     """
@@ -1007,17 +1008,23 @@ class QtTabWidget(QtWidget):
 
         super().__init__(boundary, name)
         self.titles         = []
+        self.pages          = []
         self.index          = -1
         self.currentChanged = Signal(self, "currentChanged")
 
-    def addTab(self, title: str) -> int:
+    def addTab(self, title: str, page=None) -> int:
         """Appends a tab; the first tab becomes current.
+
+        Args:
+            title : Tab title.
+            page  : Object whose ``showEvent`` runs each time the tab's page is shown, or None.
 
         Returns:
             Index of the new tab.
         """
 
         self.titles.append(title)
+        self.pages.append(page)
         if self.index < 0:
             self.index = 0
         return len(self.titles) - 1
@@ -1038,7 +1045,7 @@ class QtTabWidget(QtWidget):
         return self.index
 
     def setCurrentIndex(self, index: int) -> None:
-        """Selects a tab; emits currentChanged on change.
+        """Selects a tab, shows its page, then emits currentChanged, in QTabWidget's order.
 
         Args:
             index : Tab index; out-of-range indices are ignored, as Qt does.
@@ -1048,6 +1055,8 @@ class QtTabWidget(QtWidget):
         if not 0 <= index < len(self.titles) or index == self.index:
             return
         self.index = index
+        if self.pages[index] is not None:
+            self.pages[index].showEvent()
         self.currentChanged.emit(index)
 
 

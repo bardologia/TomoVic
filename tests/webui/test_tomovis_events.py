@@ -102,6 +102,37 @@ def test_ctrl_f_without_data_does_not_crash(tmp_path):
     assert replay.window.tab2ChkBox3.isEnabled()
 
 
+def test_profile_plot_without_data_leaves_the_empty_axes_of_the_original(tmp_path):
+    """E-011 variant (F-070): X [m] then Plot (profile) on an empty window leaves one undrawn 0..1 axes, as the original's exception after add_subplot did."""
+
+    replay = GoldenReplay(tmp_path)
+    replay.send({"type": "check", "widget": "tab2ChkBox3", "checked": True})
+    replay.send({"type": "click", "widget": "tab2PlotButton"})
+    axes = replay.window.tab3Plot.getFigure().axes
+
+    assert replay.slot_errors == []
+    assert len(axes) == 1
+    assert (axes[0].get_xlim(), axes[0].get_ylim(), axes[0].get_title(), len(axes[0].lines)) == ((0.0, 1.0), (0.0, 1.0), "", 0)
+    assert replay.window.tabWidget.currentIndex() == 0
+    assert not replay.window.tab3_plotted and not replay.window.tab3ClearButton.isEnabled()
+
+
+def test_figure_renders_when_its_tab_is_first_shown(tmp_path):
+    """A figure renders on the first show of its tab page, as a Qt canvas does on its first resize event, and not on later shows."""
+
+    replay = GoldenReplay(tmp_path)
+    replay.send({"type": "check", "widget": "tab2ChkBox3", "checked": True})
+    replay.send({"type": "click", "widget": "tab2PlotButton"})
+
+    frames = []
+    for index in (2, 0, 2):
+        replay.window.handle({"type": "tab", "index": index})
+        output = replay.window.drain()
+        frames.append([message for message in output.figures.get("profile", []) if message["type"] == "frame"])
+
+    assert [len(sent) for sent in frames] == [1, 0, 0]
+
+
 def test_trigger_needs_every_parent_menu_enabled(loaded):
     """A menu click on an action inside the disabled Channel menu does nothing."""
 

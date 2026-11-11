@@ -126,6 +126,7 @@ class TomoVisFigure:
         toolbar           : Navigation toolbar.
         socket            : Message collector registered as the manager's only web socket.
         pending_draw      : Whether a render is due before the next drain.
+        shown             : Whether the figure's tab page has been shown once.
         savefig_directory : Start directory of the next Save dialog, remembered after each save.
         dialogs           : Message boxes requested by figure operations since the last drain.
         subplot_tool      : The Configure subplots dialog, built on first use and kept, as the Qt toolbar keeps it.
@@ -165,6 +166,7 @@ class TomoVisFigure:
         self.toolbar           = self.manager.toolbar
         self.socket            = FigureMessages()
         self.pending_draw      = False
+        self.shown             = False
         self.savefig_directory = os.path.expanduser(mpl.rcParams['savefig.directory'])
         self.dialogs           = []
         self.subplot_tool      = None
@@ -187,6 +189,20 @@ class TomoVisFigure:
     def draw(self) -> None:
         """Requests a render (MatplotlibWidget.draw); the frame is produced once per request at drain time."""
 
+        self.pending_draw = True
+
+    def showEvent(self) -> None:
+        """Renders on the first show of the figure's tab page.
+
+        A Qt canvas in a tab page that was never shown gets its first resize
+        event when the page appears, and FigureCanvasQT.resizeEvent ends in
+        ``draw_idle``. Changes the window left undrawn before that, such as the
+        Profile axes of E-011, therefore appear when the tab is first opened.
+        """
+
+        if self.shown:
+            return
+        self.shown        = True
         self.pending_draw = True
 
     @TomoVisRc.styled

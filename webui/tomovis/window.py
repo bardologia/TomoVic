@@ -522,8 +522,8 @@ class TomoVisWindow:
 
         self.tabWidget = QtTabWidget(self.boundary, "tabWidget")
         self.tabWidget.addTab("Slicer")
-        self.tabWidget.addTab("Plot")
-        self.tabWidget.addTab("Profile")
+        self.tabWidget.addTab("Plot", self.tab2Plot)
+        self.tabWidget.addTab("Profile", self.tab3Plot)
         if self.has3d:
             self.tab3d_index = self.tabWidget.addTab("3D")
 
@@ -1885,7 +1885,13 @@ class TomoVisWindow:
         return True
 
     def updateProfilePlot(self):
-        """Draws the Profile tab (F-081, F-082); returns False without a plotted tomogram (E-011) (visualizer.py:1995)."""
+        """Draws the Profile tab (F-081, F-082); returns False without a plotted tomogram (E-011) (visualizer.py:1995).
+
+        Without a tomogram the original raised at the first use of the missing
+        array: in the RGB branch before any axes existed, in the mono branch
+        after ``add_subplot(111)``. The returns sit at the same places, so the
+        mono branch leaves the empty 0..1 axes in the undrawn figure.
+        """
 
         mv = self.tab3Plot.getFigure()
         mv.clear()
@@ -1932,9 +1938,9 @@ class TomoVisWindow:
             plot.tick_params(labelsize=18)
 
         else:
+            plot = mv.add_subplot(111)
             if self.d2Norm is None:
                 return False
-            plot = mv.add_subplot(111)
             z = np.linspace(self.z_view_range[0], self.z_view_range[1], num=self.d2Norm.shape[0])
             plot.plot(z, np.flipud(self.d2Norm[..., x_idx]), linewidth=3)
             plot.tick_params(labelsize=18)
