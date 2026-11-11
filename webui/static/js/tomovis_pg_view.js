@@ -1492,7 +1492,7 @@ class PgImageItem {
   }
 
   viewBounds() {
-    if (!this.image) return null;
+    if (!this.image) return { x: 0, y: 0, w: 0, h: 0 };
     return { x: 0, y: 0, w: this.shape[0], h: this.shape[1] };
   }
 
