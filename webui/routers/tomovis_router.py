@@ -284,7 +284,7 @@ class TomoVisRouter(SubRouter):
         exchange.send_json({"ok": True, "path": str(target)})
 
     def log(self, exchange: HttpExchange) -> None:
-        """Logs lines the browser printed (3D tab, volume script) with the TomoVis prefix."""
+        """Logs lines the browser printed (3D tab, volume script) with the TomoVis prefix, vispy's error lines at error level."""
 
         entry = self.entry(exchange, exchange.body.get("sid"))
         if entry is None:
@@ -293,8 +293,7 @@ class TomoVisRouter(SubRouter):
         if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
             exchange.send_json({"error": "lines must be a list of strings"}, 400)
             return
-        for line in lines:
-            self.logger.info(TomoVisTools.TERMINAL_PREFIX + line)
+        TomoVisConsole(self.logger).relay(lines)
         exchange.send_json({"ok": True})
 
     def script_slicer(self, exchange: HttpExchange) -> None:

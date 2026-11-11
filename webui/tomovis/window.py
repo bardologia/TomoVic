@@ -47,9 +47,12 @@ class TomoVisConsole:
     """Replacement of ``print``: each line goes to the console log with the TomoVis prefix (D-7).
 
     Attributes:
+        LEVELS : Level names of vispy's log lines ("ERROR: ...", "WARNING: ...") to WebLogger methods.
         logger : Console logger.
         lines  : Lines printed since the last drain.
     """
+
+    LEVELS = {"ERROR": "error", "WARNING": "warning"}
 
     def __init__(self, logger: WebLogger) -> None:
         """Starts with no lines.
@@ -72,6 +75,16 @@ class TomoVisConsole:
         line = " ".join(str(argument) for argument in args)
         self.lines.append(line)
         getattr(self.logger, level)(TomoVisTools.TERMINAL_PREFIX + line)
+
+    def relay(self, lines: list[str]) -> None:
+        """Logs lines the browser printed, at vispy's level for its "ERROR:" and "WARNING:" lines and at info otherwise.
+
+        Args:
+            lines : Lines printed by the 3D tab or the volume script, in order.
+        """
+
+        for line in lines:
+            self.print(line, level=self.LEVELS.get(line.split(":", 1)[0], "info"))
 
     def drain(self) -> list[str]:
         """Returns and clears the printed lines."""

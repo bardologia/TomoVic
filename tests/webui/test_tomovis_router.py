@@ -288,6 +288,18 @@ def test_log_lines_reach_the_console_log(server):
     assert client.post("log", {"sid": sid, "lines": "no"})[0] == 400
 
 
+def test_log_lines_keep_vispy_error_levels(server):
+    """Browser lines carrying vispy's "ERROR:" or "WARNING:" level are logged at that level, others at info (D-7, F-153)."""
+
+    client, logger, _ = server
+    sid               = client.session()
+    lines             = ["ERROR: Invoking FlyCamera.on_timer for TimerEvent: TypeError: x", "WARNING: y", "ISO threshold: 2.0", "Camera: ERROR"]
+
+    assert client.post("log", {"sid": sid, "lines": lines})[0] == 200
+    levels = {record["message"]: record["level"] for record in logger.recent()}
+    assert [levels["TomoVis: " + line] for line in lines] == ["ERROR", "WARN", "INFO", "INFO"]
+
+
 def test_scripts_routes(server):
     """SlicerMatplotlib answers with its figure frames; VolumeRendering with both volumes and its prints."""
 
