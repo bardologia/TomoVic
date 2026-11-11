@@ -204,5 +204,5 @@ Messages, in order: `{type: "image_mode", mode}`, `{type: "frame", blob}` (PNG; 
 over the last frame), `{type: "message", message}` (cursor readout, can contain `\n`),
 `{type: "cursor", cursor}`, `{type: "rubberband", x0, y0, x1, y1}` (device px, origin at the bottom left,
 all -1 to remove), `{type: "history_buttons", Back, Forward}`, `{type: "navigate_mode", mode}`,
-`{type: "resize", size, forward}`, `{type: "figure_label", label}`. matplotlib's `draw` requests are
-answered on the server.
+`{type: "resize", size, forward}`, `{type: "figure_label", label}`. matplotlib's `draw` and `refresh`
+requests are answered on the server.

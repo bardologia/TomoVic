@@ -366,7 +366,8 @@ class TomoVisFigure:
         """Renders when due and returns the ordered messages with named PNG frames.
 
         WebAgg's ``draw`` requests (from ``draw_idle``) are answered here with a
-        render, as mpl.js answers them, and never leave the server.
+        render and its ``refresh`` requests with a refresh, as mpl.js answers
+        them; neither leaves the server.
 
         Args:
             prefix : Blob name prefix for this figure's frames.
@@ -382,6 +383,8 @@ class TomoVisFigure:
             for message in batch:
                 if message["type"] == "draw":
                     self.pending_draw = True
+                elif message["type"] == "refresh":
+                    self.canvas.handle_event({"type": "refresh"})
                 elif message["type"] == "frame":
                     blob         = f"{prefix}{len(frames)}"
                     frames[blob] = pngs[message["index"]]
