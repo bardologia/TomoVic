@@ -300,6 +300,8 @@ class TomoVisWindow:
         self.slot_errors.append({"type": type(exc).__name__, "message": str(exc)})
 
     def createLayout(self):
+        """Creates the menus, actions, widgets and models of the four tabs (visualizer.py:220)."""
+
         self.reg_ex01 = "-?[0-9]+[.]?[0-9]{,4}"
 
         self.fileMenu = QtMenu(self.boundary, "fileMenu", "&File")
@@ -525,6 +527,8 @@ class TomoVisWindow:
             self.tab3d_index = self.tabWidget.addTab("3D")
 
     def getCurrentMetadata(self):
+        """Returns the 36 session metadata values (F-021) (visualizer.py:683)."""
+
         Ax, Ay, Bx, By, theta, d = self.computeLinePar()
 
         metadata = {
@@ -596,6 +600,8 @@ class TomoVisWindow:
         self.dialogs.request("file", payload, lambda result: continuation(str(result.get("path") or "")))
 
     def saveFileCallBack(self):
+        """File > Save: stops Play and asks for the target file (F-020) (visualizer.py:741)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
 
@@ -610,6 +616,8 @@ class TomoVisWindow:
         self.fileDialog("save", "Save File", "Visualizer (*.hd5)", self.saveFileAccepted)
 
     def saveFileAccepted(self, filename):
+        """Writes the session to the chosen file and reports the outcome (visualizer.py:741)."""
+
         if not filename:
             return
 
@@ -633,12 +641,16 @@ class TomoVisWindow:
             )
 
     def openFileCallBack(self):
+        """File > Open: stops Play and asks for a session file (F-022) (visualizer.py:791)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
 
         self.fileDialog("open", "Open File", "Visualizer (*.hd5)", self.openFileAccepted)
 
     def openFileAccepted(self, filename):
+        """Restores a session file: cube, metadata, ROI, plots (visualizer.py:791)."""
+
         if not filename:
             return
 
@@ -693,11 +705,15 @@ class TomoVisWindow:
         self.dialogs.message("critical", "Import error", f"Could not import file:\n{str(error)}")
 
     def importFuSARCallBack(self):
+        """File > Import > hd5: stops Play and asks for the file (F-011) (visualizer.py:856)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
         self.fileDialog("open", "Open File", "FuSAR Tomo (*.hd5)", self.importFuSARAccepted)
 
     def importFuSARAccepted(self, name):
+        """Imports the chosen FuSAR Tomo file (visualizer.py:856)."""
+
         if name != '':
             try:
                 cube = self.readers.fusar(name)
@@ -717,11 +733,15 @@ class TomoVisWindow:
             self.initializeVisualizerWithData()
 
     def importUAVSARCallBack(self):
+        """File > Import > h5: stops Play and asks for the file (F-012) (visualizer.py:891)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
         self.fileDialog("open", "Open File", "UAVSAR Tomo (*.h5)", self.importUAVSARAccepted)
 
     def importUAVSARAccepted(self, name):
+        """Imports the chosen UAVSAR Tomo file (visualizer.py:891)."""
+
         if name != '':
             try:
                 data = self.readers.uavsar(name)
@@ -733,11 +753,15 @@ class TomoVisWindow:
             self.initializeVisualizerWithData()
 
     def importNpyCallBack(self):
+        """File > Import > npy: stops Play and asks for the file (F-013) (visualizer.py:909)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
         self.fileDialog("open", "Open File", "Numpy (*.npy)", self.importNpyAccepted)
 
     def importNpyAccepted(self, name):
+        """Imports the chosen .npy file (visualizer.py:909)."""
+
         if name != '':
             try:
                 data = self.readers.npy(name)
@@ -749,11 +773,15 @@ class TomoVisWindow:
             self.initializeVisualizerWithData()
 
     def importRATCallBack(self):
+        """File > Import > rat: stops Play and asks for the file (F-014) (visualizer.py:925)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
         self.fileDialog("open", "Open File", "RAT file (*.rat)", self.importRATAccepted)
 
     def importRATAccepted(self, name):
+        """Imports the chosen RAT file (visualizer.py:925)."""
+
         if name != '':
             try:
                 data = self.readers.rat(name)
@@ -765,12 +793,16 @@ class TomoVisWindow:
             self.initializeVisualizerWithData()
 
     def setDefaultElevRangeIfMissing(self):
+        """Sets the elevation range to [0, shape[-1] - 1] (F-015, Q-001) (visualizer.py:941)."""
+
         if self.data is None:
             return
         nz = self.data.shape[-1]
         self.z_range = [0, (nz - 1)]
 
     def initializeVisualizerWithData(self):
+        """Initialises controls and views for a newly loaded cube (F-017, F-018) (visualizer.py:947)."""
+
         self.volume_present = False
         self.volume_rendered = False
         self.tab2_plotted = False
@@ -848,6 +880,8 @@ class TomoVisWindow:
             self.tab1Slider.setMaximum(1)
 
     def ensure3DLoaded(self):
+        """Prepares the 3D volume when the 3D tab is shown for a new cube (F-091, F-092) (visualizer.py:1034)."""
+
         if not self.has3d:
             return
 
@@ -874,10 +908,14 @@ class TomoVisWindow:
             self.volume_rendered = True
 
     def onTabChanged(self, index):
+        """Loads the 3D view when its tab becomes current (visualizer.py:1068)."""
+
         if self.tab3d_index is not None and index == self.tab3d_index:
             self.ensure3DLoaded()
 
     def signals(self):
+        """Connects the slots of the non-3D widgets (visualizer.py:1072)."""
+
         self.roi_1.sigRegionChanged.connect(self.updateTomogram)
         self.roi_1.sigRegionChanged.connect(self.updatePositionROI)
         self.tab1Timer.timeout.connect(self.runTab1Slider)
@@ -904,6 +942,8 @@ class TomoVisWindow:
         self.tabWidget.currentChanged.connect(self.onTabChanged)
 
     def moveSliceLineTo(self, target_view):
+        """Moves the slice line into another top view (visualizer.py:1111)."""
+
         if not hasattr(self, "slice_line"):
             return
 
@@ -917,6 +957,8 @@ class TomoVisWindow:
             target_view.addItem(self.slice_line)
 
     def chChanged(self):
+        """Data > Channel: switches the displayed channel (F-048), stopping before the display without data (E-007) (visualizer.py:1124)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
 
@@ -963,6 +1005,8 @@ class TomoVisWindow:
             self.tab1ComboBox.setEnabled(True)
 
     def displayData(self):
+        """Shows the top view: mono sqrt-sum or RGB composite (F-031, F-032) (visualizer.py:1168)."""
+
         if self.nChannels > 1 and self.allChMenu.isChecked() is True:
             data = [(np.sum(np.abs(self.data[0]), axis=0) ** 2).T]
             for i in range(1, self.nChannels):
@@ -1011,6 +1055,8 @@ class TomoVisWindow:
         self.imv1.setCurrentWidget(self.imv1_1)
 
     def displayTomogram(self):
+        """Shows the tomogram view: mono or RGB (F-038, F-039) (visualizer.py:1216)."""
+
         if self.nChannels > 1 and self.allChMenu.isChecked() is True:
             d2 = np.zeros([self.aux.shape[0], self.aux.shape[1], self.aux.shape[2]], dtype='uint8')
             self.d2 = np.zeros([self.aux.shape[0], self.aux.shape[1], self.aux.shape[2]], dtype=np.float32)
@@ -1052,6 +1098,8 @@ class TomoVisWindow:
         self.imv2.setCurrentWidget(self.imv2_1)
 
     def clearTomogramViews(self):
+        """Clears the tomogram and both tomogram views (F-040) (visualizer.py:1257)."""
+
         self.d2 = None
         self.aux = None
 
@@ -1060,6 +1108,8 @@ class TomoVisWindow:
         self.imv2_2.clear()
 
     def updateTomogram(self):
+        """Extracts the tomogram along the clipped ROI line and redraws both panes (F-037) (visualizer.py:1271)."""
+
         line = self.getEffectiveROILine()
         if line is None:
             self.clearTomogramViews()
@@ -1161,6 +1211,8 @@ class TomoVisWindow:
             target_view.removeItem(clipped_roi)
 
     def valueChanged(self):
+        """Extracts the slice tomogram at the spin box index and redraws (F-044) (visualizer.py:1375)."""
+
         if self.nChannels > 1 and self.allChMenu.isChecked() is True:
             self.aux = np.zeros(
                 [
@@ -1180,6 +1232,8 @@ class TomoVisWindow:
         self.displayTomogram()
 
     def plotTomogram(self, d2toPlot):
+        """Draws the Plot tab image (F-061, F-062, F-063) (visualizer.py:1394)."""
+
         if d2toPlot is None:
             self.tab2_plotted = False
             mv = self.tab2Plot.getFigure()
@@ -1244,6 +1298,8 @@ class TomoVisWindow:
         self.tab2Plot.draw()
 
     def restoreTab2ControlsFromMetadata(self, metadata_attrs):
+        """Restores the Plot tab controls from session metadata (F-024) (visualizer.py:1458)."""
+
         self.tab2ClearButton.setEnabled(True)
         self.tab2AxesButton.setEnabled(True)
 
@@ -1295,6 +1351,8 @@ class TomoVisWindow:
             self.tab2SpinBox.setValue(float(metadata_attrs["x_line_value_m"]))
 
     def tab1PlotButtonClicked(self):
+        """Slicer Plot: resets the Plot tab controls and plots the tomogram (F-049) (visualizer.py:1509)."""
+
         if self.tab1Timer.isActive() is True:
             self.tab1Timer.stop()
 
@@ -1323,6 +1381,8 @@ class TomoVisWindow:
         self.plotTomogram(self.d2)
 
     def tab1UpdateColormap(self):
+        """Slicer Colormap: rebuilds the colour map and redraws (F-047) (visualizer.py:1537)."""
+
         self.cmap = self.tab1ComboBox.currentIndex()
         self.color = PgColorMap(np.linspace(0.0, 1.0, 256), self.tools.colortables(self.cmap)[1], self.cmap)
         if self.tab1ChkBox.isChecked() is True:
@@ -1331,6 +1391,8 @@ class TomoVisWindow:
             self.updateTomogram()
 
     def tab1ChkBoxChanged(self):
+        """Slices (Automatic): switches between slice and ROI mode (F-042) (visualizer.py:1545)."""
+
         if self.tab1ChkBox.isEnabled() is True:
             if self.tab1Timer.isActive():
                 self.tab1Timer.stop()
@@ -1362,9 +1424,13 @@ class TomoVisWindow:
                 self.updateTomogram()
 
     def tab1SliderChanged(self):
+        """Slice slider: forwards its value to the spin box (F-043) (visualizer.py:1581)."""
+
         self.tab1SpinBox.setValue(self.tab1Slider.value())
 
     def tab1SpinBoxChanged(self):
+        """Slice spin box: moves the slider and slice line and extracts the slice (F-043) (visualizer.py:1584)."""
+
         self.tab1Slider.setSliderPosition(self.tab1SpinBox.value())
 
         if hasattr(self, "slice_line"):
@@ -1374,6 +1440,8 @@ class TomoVisWindow:
         self.valueChanged()
 
     def tab1PlayButtonClicked(self):
+        """Play: starts or stops the 500 ms slice timer (F-046) (visualizer.py:1594)."""
+
         if self.tab1Timer.isActive():
             self.tab1Timer.stop()
             if self.nChannels == 1 or (self.nChannels > 1 and self.allChMenu.isChecked()):
@@ -1385,6 +1453,8 @@ class TomoVisWindow:
             self.tab1SpinBox.setEnabled(False)
 
     def computeLinePar(self):
+        """Returns the ROI endpoints, angle and length from its origin and handles (Q-024) (visualizer.py:1605)."""
+
         state = self.roi_1.getState()
         roi_pos_x = float(state['pos'][0])
         roi_pos_y = float(state['pos'][1])
@@ -1405,6 +1475,8 @@ class TomoVisWindow:
         return Ax, Ay, Bx, By, theta, d
 
     def clipLineToImage(self, Ax, Ay, Bx, By, width, height):
+        """Clips a segment to the image box with Liang-Barsky (F-036) (visualizer.py:1625)."""
+
         xmin, xmax = 0.0, float(width - 1)
         ymin, ymax = 0.0, float(height - 1)
 
@@ -1438,6 +1510,8 @@ class TomoVisWindow:
         return x0, y0, x1, y1
 
     def getCurrentImageShape(self):
+        """Returns (width, height) of the top view image (visualizer.py:1658)."""
+
         if getattr(self, "img", None) is None:
             return None, None
 
@@ -1448,6 +1522,8 @@ class TomoVisWindow:
         return w, h
 
     def getEffectiveROILine(self):
+        """Returns the ROI line clipped to the top view, None when it misses (visualizer.py:1668)."""
+
         h, w = self.getCurrentImageShape()
         if h is None or w is None:
             return None
@@ -1468,6 +1544,8 @@ class TomoVisWindow:
         return x0, y0, x1, y1, theta_eff, d_eff
 
     def createClippedROI(self, target_view):
+        """Adds a temporary ROI on the clipped line to a view (visualizer.py:1688)."""
+
         line = self.getEffectiveROILine()
         if line is None:
             return None
@@ -1489,6 +1567,8 @@ class TomoVisWindow:
         return roi
 
     def getROIAxisMode(self):
+        """Classifies the clipped line as azimuth, range or distance (visualizer.py:1708)."""
+
         line = self.getEffectiveROILine()
         if line is None:
             return "distance"
@@ -1508,6 +1588,8 @@ class TomoVisWindow:
         return "distance"
 
     def getEffectiveROIResolution(self):
+        """Returns the metres per sample along the clipped line (visualizer.py:1729)."""
+
         line = self.getEffectiveROILine()
         if line is None:
             return self.x_res
@@ -1520,6 +1602,8 @@ class TomoVisWindow:
         )
 
     def xPhysicalToIndex(self, x_value):
+        """Maps a plotted x value to a tomogram column, round half to even (F-083) (visualizer.py:1741)."""
+
         if self.data is None:
             return 0
 
@@ -1549,11 +1633,15 @@ class TomoVisWindow:
         return idx
 
     def syncXViewToAuto(self):
+        """Copies the automatic x label and limits to the plotted ones (visualizer.py:1770)."""
+
         self.x_label_view = self.x_label
         self.x_view_min = self.x_min
         self.x_view_max = self.x_max
 
     def updateXAxisLimits(self):
+        """Derives the automatic x label and limits (F-041) (visualizer.py:1775)."""
+
         if self.data is None:
             self.x_label = "Azimuth [m]"
             self.x_min = 0.0
@@ -1616,6 +1704,8 @@ class TomoVisWindow:
             self.x_max = (nx - 1) * roi_res if nx > 1 else 0.0
 
     def updatePositionROI(self):
+        """Writes the ROI geometry into the six ROI fields (F-034) (visualizer.py:1843)."""
+
         Ax, Ay, Bx, By, theta, d = self.computeLinePar()
 
         self.tab1QLineEdit1.setText('%.4f' % Ax)
@@ -1626,6 +1716,8 @@ class TomoVisWindow:
         self.tab1QLineEdit6.setText('%.4f' % self.roi_1.getState()['pos'][1])
 
     def applyMetadata(self, metadata_attrs):
+        """Restores labels, ranges, colour map, ROI, channel and slice from session metadata (F-023) (visualizer.py:1853)."""
+
         try:
 
             if "x_label" in metadata_attrs:
@@ -1741,6 +1833,8 @@ class TomoVisWindow:
         return all(self.tab1QLineEdit1.validator.validate(text) == QtRegExpValidator.ACCEPTABLE for text in texts)
 
     def tab1SetButtonClicked(self):
+        """Set: places the ROI from the six fields (F-035, E-009) (visualizer.py:1953)."""
+
         if (self.tab1QLineEdit1.text() != '' and self.tab1QLineEdit2.text() != '' and
             self.tab1QLineEdit3.text() != '' and self.tab1QLineEdit4.text() != '' and
             self.tab1QLineEdit5.text() != '' and self.tab1QLineEdit6.text() != '' and
@@ -1773,6 +1867,8 @@ class TomoVisWindow:
                     self.updateTomogram()
 
     def runTab1Slider(self):
+        """Play timer tick: advances the slice slider and wraps at the end (F-046) (visualizer.py:1983)."""
+
         if self.tab1Slider.isEnabled() is True:
             if self.tab1Slider.value() == self.tab1Slider.maximum():
                 self.tab1Slider.setValue(self.tab1Slider.minimum())
@@ -1780,12 +1876,16 @@ class TomoVisWindow:
             self.tab1Slider.setValue(self.tab1Slider.value() + 1)
 
     def plotProfile(self):
+        """Draws the profile and switches to the Profile tab; returns False when nothing was drawn (E-011) (visualizer.py:1990)."""
+
         if not self.updateProfilePlot():
             return False
         self.tabWidget.setCurrentIndex(2)
         return True
 
     def updateProfilePlot(self):
+        """Draws the Profile tab (F-081, F-082); returns False without a plotted tomogram (E-011) (visualizer.py:1995)."""
+
         mv = self.tab3Plot.getFigure()
         mv.clear()
 
@@ -1852,6 +1952,8 @@ class TomoVisWindow:
         return True
 
     def rePlot(self):
+        """Redraws the Plot tab with or without histogram equalization (F-072, E-011) (visualizer.py:2056)."""
+
         if self.tab2ChkBox2.isChecked() is True and self.tab2ChkBox2.isEnabled() is True:
             self.tab2Slider.setEnabled(True)
             self.bins = self.tab2Slider.value()
@@ -1873,10 +1975,14 @@ class TomoVisWindow:
             self.plotTomogram(self.d2)
 
     def tab2ChkBox2Changed(self):
+        """Histogram equalization or Plot colormap changed: replots while equalization is enabled (F-065, F-066) (visualizer.py:2073)."""
+
         if self.tab2ChkBox2.isEnabled() is True:
             self.rePlot()
 
     def tab2ChkBox3Changed(self):
+        """X [m]: shows or hides the x line and replots (F-067) (visualizer.py:2077)."""
+
         if self.tab2ChkBox3.isEnabled() is True:
             if self.tab2ChkBox3.isChecked() is True:
                 self.tab2SpinBox.setMinimum(float(min(self.x_view_min, self.x_view_max)))
@@ -1895,23 +2001,33 @@ class TomoVisWindow:
             self.rePlot()
 
     def tab2ChkBox4Changed(self):
+        """Full View: switches between half and full height and replots (F-068) (visualizer.py:2095)."""
+
         if self.tab2ChkBox4.isEnabled() is True:
             self.subplot = 111 if self.tab2ChkBox4.isChecked() is True else 211
             self.rePlot()
 
     def tab2ChkBox1Changed(self):
+        """Normalize: replots (F-064) (visualizer.py:2100)."""
+
         if self.tab2ChkBox1.isEnabled() is True:
             self.rePlot()
 
     def tab2SliderChanged(self):
+        """Equalization bins: replots (F-065) (visualizer.py:2104)."""
+
         if self.tab2Slider.isEnabled() is True:
             self.rePlot()
 
     def tab2SpinBoxChanged(self):
+        """X [m] value: replots (F-067) (visualizer.py:2108)."""
+
         if self.tab2SpinBox.isEnabled() is True:
             self.rePlot()
 
     def tab2AxesButtonClicked(self):
+        """Axes: asks for the Axes Settings dialog (F-069) (visualizer.py:2112)."""
+
         xLabelEdit = QtLineEdit(self.boundary, "xLabelEdit", self.x_label_view)
 
         zLabelEdit = QtLineEdit(self.boundary, "zLabelEdit", self.z_label)
@@ -1943,6 +2059,8 @@ class TomoVisWindow:
         self.dialogs.request("axes", payload, lambda result: self.tab2AxesAccepted(result, *fields))
 
     def tab2AxesAccepted(self, result, xLabelEdit, zLabelEdit, xMinSpin, xMaxSpin, zMinSpin, zMaxSpin):
+        """Applies the Axes Settings dialog's values (visualizer.py:2112)."""
+
         values = result.get("values") or {}
         if "x_label" in values:
             xLabelEdit.setText(str(values["x_label"]))
@@ -1997,11 +2115,15 @@ class TomoVisWindow:
             self.updateProfilePlot()
 
     def tab2PlotButtonClicked(self):
+        """Plot (profile): draws the profile (F-070) (visualizer.py:2220)."""
+
         if not self.plotProfile():
             return
         self.tab3ClearButton.setEnabled(True)
 
     def tab2ClearButtonClicked(self):
+        """Plot Clear: resets the Plot tab and clears both figures (F-071) (visualizer.py:2224)."""
+
         self.tab2_plotted = False
         self.tab3_plotted = False
 
@@ -2025,6 +2147,8 @@ class TomoVisWindow:
         self.tab2Plot.draw()
 
     def tab3ClearButtonClicked(self):
+        """Profile Clear: clears the profile figure (F-084) (visualizer.py:2247)."""
+
         self.tab3_plotted = False
         self.tab3Plot.getFigure().clear()
         self.tab3Plot.draw()
