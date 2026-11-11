@@ -92,6 +92,7 @@ class TomoVisFigure:
         savefig_directory : Start directory of the next Save dialog, remembered after each save.
         dialogs           : Message boxes requested by figure operations since the last drain.
         subplot_tool      : The Configure subplots dialog, built on first use and kept, as the Qt toolbar keeps it.
+        handlers          : Objects whose bound methods are connected to the canvas; matplotlib only keeps weak references to them.
         options           : The Customize (figure options) editor.
         MOUSE_TYPES       : Mouse event types mpl.js sends.
         KEY_TYPES         : Key event types mpl.js sends.
@@ -129,6 +130,7 @@ class TomoVisFigure:
         self.savefig_directory = os.path.expanduser(mpl.rcParams['savefig.directory'])
         self.dialogs           = []
         self.subplot_tool      = None
+        self.handlers          = []
         self.options           = FigureOptionsEditor(self.figure)
 
         self.manager.set_window_title("")

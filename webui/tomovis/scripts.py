@@ -178,6 +178,7 @@ class SlicerMatplotlibScript:
         extent = [0, d2Norm.shape[1], float(range01[0]), float(range01[1])]
 
         figure = TomoVisFigure("script_slicer", self.logger, keymap=True)
+        figure.handlers.append(self)
         figure.canvas.mpl_disconnect(figure.manager.key_press_handler_id)
         figure.manager.key_press_handler_id = figure.canvas.mpl_connect("key_press_event", self.filteredKeymap)
 
