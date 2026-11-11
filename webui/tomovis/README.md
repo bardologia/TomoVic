@@ -39,7 +39,9 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
 - **D-3.** Imports are atomic. A read failure shows the critical message `Import error` /
   `Could not import file:\n<error>` and keeps the previous cube. Files are always closed.
 - **D-4.** File dialogs browse the server, and every save writes on the server.
-- **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `.
+- **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. Lines the browser
+  posts to `log` keep vispy's level: `ERROR: ...` lines are logged at error, `WARNING: ...` at warning, the
+  rest at info (`TomoVisConsole.relay`).
 - **matplotlib defaults.** TomoVis ran with matplotlib's default rcParams. In the console, the cube
   explorer's figure archiver changes the global rcParams (300 dpi, serif) whenever it saves. Every
   TomoVis figure operation therefore runs under `matplotlib.style.context("default")`, behind one
@@ -54,7 +56,7 @@ Crash fixes (the original printed a traceback and kept a half-applied state):
 | E-007 | Ctrl+F with no data: `chChanged` stops before `displayData` |
 | E-008 | D-3 |
 | E-009 | Set with a field that is not a number (`-`) does nothing |
-| E-011 | X [m] / Plot (profile) / histogram equalization without a tomogram: state changes are kept and the draw is skipped. Plot (profile) does not switch tabs |
+| E-011 | X [m] / Plot (profile) / histogram equalization without a tomogram: state changes are kept and the draw is skipped. Plot (profile) does not switch tabs; in the mono branch it leaves the empty 0..1 axes the original's `add_subplot(111)` created, which renders when the Profile tab is first shown (a figure renders on its tab's first show, as a Qt canvas does on its first resize event) |
 | E-012 | A clipped ROI of length zero samples nothing instead of raising `ZeroDivisionError` in `Point.norm` |
 
 ## API
