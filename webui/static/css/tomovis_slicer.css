@@ -222,6 +222,5 @@
 .tv-pg-export__buttons { display: flex; gap: 6px; }
 .tv-pg-export__buttons .tv-button { flex: 1 1 0; min-width: 0; }
 
-.tv-pg-mplwindow { width: 820px; }
 .tv-pg-mplwindow .tv-modal__body { padding: 8px; }
-.tv-pg-mplwindow__figure { width: 800px; height: 640px; position: relative; }
+.tv-pg-mplwindow__figure { position: relative; }

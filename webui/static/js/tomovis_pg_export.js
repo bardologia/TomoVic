@@ -449,7 +449,8 @@ class PgHdf5Exporter extends PgExporter {
 }
 
 class PgMatplotlibExporter extends PgExporter {
-  static NAME = "Matplotlib Window";
+  static NAME        = "Matplotlib Window";
+  static FIGURE_SIZE = [500, 400];
 
   constructor(dialog, target) {
     super(dialog, target);
@@ -491,13 +492,12 @@ class PgMatplotlibExporter extends PgExporter {
       return;
     }
     if (typeof window.MplFigureView !== "function") throw new Error("Matplotlib Window export needs MplFigureView from tomovis_mpl.js");
-    const modal = new TomoVisModal({ title: "Matplotlib Window", className: "tv-pg-mplwindow", buttons: [], escape: "Close", layer: this.ctx.layer });
+    const modal = new TomoVisModal({ title: "Matplotlib Window", className: "tv-pg-mplwindow", buttons: ["Close"], escape: "Close", layer: this.ctx.layer });
     const host  = TomoVisInput.el("div", "tv-pg-mplwindow__figure");
     modal.body.append(host);
-    const shown = modal.open();
     await this.ctx.session.figure("export", "export_matplotlib", { plot: this.plotSpec() });
-    const view = new window.MplFigureView(host, this.ctx, "export");
-    await shown;
+    const view  = new window.MplFigureView(host, this.ctx, "export", { size: PgMatplotlibExporter.FIGURE_SIZE });
+    await modal.open();
     view.dispose();
   }
 }

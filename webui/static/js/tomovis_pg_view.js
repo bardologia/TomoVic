@@ -1670,7 +1670,7 @@ class PgImageItem {
 }
 
 class PgAxisItem {
-  static FONT = "15px 'Noto Sans', 'DejaVu Sans', sans-serif";
+  static FONT = "16px 'Noto Sans', 'DejaVu Sans', sans-serif";
 
   constructor(orientation, { linkView = null, maxTickLength = -5, pen = "d", textPen = "d" } = {}) {
     this.orientation = orientation;
