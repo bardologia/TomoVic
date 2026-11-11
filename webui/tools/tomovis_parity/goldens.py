@@ -1055,6 +1055,7 @@ class GoldenRunner:
             outcome                 = self.session.perform(step["action"], self.resolve(step["args"]))
             state, arrays, figures  = self.session.probe.capture(self.session.window)
             errors                 += len(outcome["errors"])
+            arrays.update(self.session.volume_arrays())
             self.writer.step(index, step["action"], step["args"], outcome, state, arrays, figures)
 
         self.writer.finish(self.session.size)

@@ -777,6 +777,15 @@ class TomoVisSession:
 
         self.module.Volume.renderVolume = recording
 
+    def volume_arrays(self) -> dict:
+        """Returns the latest array the 3D tab passed to Volume.renderVolume.
+
+        Returns:
+            {"volume_input": array} once the 3D tab rendered in the current window, else an empty dict.
+        """
+
+        return {"volume_input": self.volume_inputs[-1]} if self.volume_inputs else {}
+
     def settle(self, rounds: int = 6) -> None:
         """Processes pending Qt events so layouts, resizes and redraws complete.
 
@@ -796,7 +805,8 @@ class TomoVisSession:
         """
 
         self.close_window()
-        self.window = self.module.TomoVis()
+        self.volume_inputs = []
+        self.window        = self.module.TomoVis()
         self.window.tab1Timer.blockSignals(True)
         self.window.resize(*self.size)
         self.window.show()
