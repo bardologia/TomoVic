@@ -599,6 +599,7 @@ class PgViewBox {
     this.linksBlocked = false;
     this.updating     = false;
     this.needsAutoRange = true;
+    this.matrix       = null;
     this.parentMenus  = [];
     this.menu         = null;
     this.state = {
@@ -952,6 +953,17 @@ class PgViewBox {
 
   prepareForPaint() {
     if (this.needsAutoRange && this.rect.w > 0 && this.rect.h > 0) this.updateAutoRange();
+    this.updateMatrix();
+  }
+
+  updateMatrix() {
+    const vr = this.viewRect();
+    if (vr.w === 0 || vr.h === 0 || this.rect.w === 0 || this.rect.h === 0) return;
+    const next = this.transform();
+    const last = this.matrix;
+    this.matrix = next;
+    if (last && last.sx === next.sx && last.sy === next.sy && last.tx === next.tx && last.ty === next.ty) return;
+    this.itemBoundsChanged();
   }
 
   updateAutoRange() {
