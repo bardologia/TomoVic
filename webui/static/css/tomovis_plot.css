@@ -2,7 +2,7 @@
 .tv-panel.tv-profile {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  row-gap: 9px;
+  row-gap: 6px;
 }
 
 .tv-plot__figure,
@@ -11,18 +11,19 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: 10px 10px 0;
+  padding: 9px;
 }
 
 .tv-plot__controls,
 .tv-profile__controls {
   gap: 6px;
-  min-height: 40px;
-  padding: 0 0 1px;
+  min-height: 0;
 }
+.tv-plot__controls { height: 39px; }
+.tv-profile__controls { height: 28px; }
 .tv-plot__controls .tv-label { flex: none; white-space: pre; }
 .tv-plot__controls .tv-slider { flex: 1 1 200px; width: auto; min-width: 120px; }
-.tv-plot__controls .tv-stretch { flex: 1 1 0; }
+.tv-plot__controls .tv-stretch { flex: 1 1 0; margin-left: -6px; }
 .tv-plot__spacer { flex: none; width: 5px; }
 
 .tv-mpl {

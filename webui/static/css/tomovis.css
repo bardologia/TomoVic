@@ -45,7 +45,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   background: var(--frost-panel);
   -webkit-backdrop-filter: var(--frost);
   backdrop-filter: var(--frost);
-  border: 2px solid var(--line);
+  box-shadow: 0 0 0 2px var(--line);
   border-radius: var(--r-card);
   font-family: var(--sans);
   font-size: var(--tv-label);
@@ -103,13 +103,16 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   display: flex;
   align-items: flex-end;
   gap: 2px;
+  height: 39px;
   padding: 9px 9px 0;
   user-select: none;
 }
 .tv-tab {
   position: relative;
-  bottom: -2px;
-  padding: 5px 14px 6px;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
   border: 2px solid var(--line);
   border-bottom-color: transparent;
   border-radius: var(--r-input) var(--r-input) 0 0;
@@ -120,13 +123,13 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   cursor: default;
 }
 .tv-tab:hover { color: var(--ink); }
-.tv-tab.is-current { background: var(--tv-surface); color: var(--ink); border-bottom-color: var(--tv-surface); z-index: 1; padding-top: 7px; }
+.tv-tab.is-current { height: 34px; margin: -2px 0; background: var(--tv-surface); color: var(--ink); border-bottom-color: var(--tv-surface); z-index: 1; }
 .tv-tab[hidden] { display: none; }
 .tv-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 
 .tv-stack {
   display: grid;
-  margin: 0 9px;
+  margin: 0 9px 9px;
   border: 2px solid var(--line);
   border-radius: 0 var(--r-card) var(--r-card) var(--r-card);
   background: var(--tv-surface);

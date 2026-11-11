@@ -2,7 +2,7 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto auto;
   row-gap: 6px;
-  padding: 9px 9px 6px;
+  padding: 9px;
 }
 
 .tv-slicer__stack {
@@ -18,7 +18,8 @@
 }
 .tv-panel.is-current .tv-slicer__pane.is-current { visibility: visible; }
 
-.tv-slicer__row { min-height: 34px; }
+.tv-slicer__row { height: 32px; min-height: 0; }
+.tv-slicer__row.tv-slicer__roi { height: 28px; }
 .tv-slicer__row > .tv-label { white-space: nowrap; }
 .tv-slicer__slider { width: 400px; }
 .tv-slicer__play { min-width: 0; width: 34px; padding: 0; }
