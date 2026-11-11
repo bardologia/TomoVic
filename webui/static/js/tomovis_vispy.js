@@ -1947,8 +1947,35 @@ ${snippet.after}
     this.floatLinear = Boolean(this.gl.getExtension("OES_texture_float_linear"));
     this.programs = new Map();
     this.luts     = new Map();
-    this.lines    = null;
+    this.uploaded = new Set();
+    this.gizmos   = new Set();
+    this.failures = new Map();
+    this.lost     = false;
+    this.disposed = false;
+    this.canvas   = null;
     this.setupGeometry();
+
+    element.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      this.lost = true;
+    });
+    element.addEventListener("webglcontextrestored", () => this.restore());
+  }
+
+  restore() {
+    if (this.disposed) return;
+    this.floatLinear = Boolean(this.gl.getExtension("OES_texture_float_linear"));
+    this.programs.clear();
+    this.luts.clear();
+    for (const visual of this.uploaded) {
+      visual.texture      = null;
+      visual.textureDirty = true;
+    }
+    for (const gizmo of this.gizmos) gizmo.state = null;
+    this.uploaded.clear();
+    this.setupGeometry();
+    this.lost = false;
+    if (this.canvas) this.canvas.update();
   }
 
   compile(type, source) {
@@ -2020,6 +2047,8 @@ ${snippet.after}
     if (visual.texture && !visual.textureDirty) return visual.texture;
     if (visual.texture) gl.deleteTexture(visual.texture);
     const [nz, ny, nx] = visual.shape;
+    const limit = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+    if (Math.max(nx, ny, nz) > limit) throw new VispyPyError("RuntimeError", `Volume of shape (${nz}, ${ny}, ${nx}) exceeds the GL 3D texture size limit ${limit}`);
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_3D, texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -2031,6 +2060,7 @@ ${snippet.after}
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     visual.texture      = texture;
     visual.textureDirty = false;
+    this.uploaded.add(visual);
     return texture;
   }
 
@@ -2052,6 +2082,8 @@ ${snippet.after}
   }
 
   render(canvas) {
+    this.canvas = canvas;
+    if (this.lost) return;
     const gl    = this.gl;
     const ratio = this.resize(canvas);
 
@@ -2073,11 +2105,24 @@ ${snippet.after}
       gl.scissor(x, y, w, h);
       for (const visual of view.visuals) {
         if (!visual.visible) continue;
-        if (visual instanceof VispyVolumeVisual) this.drawVolume(visual, view.camera);
-        else visual.draw(this, view.camera);
+        try {
+          if (visual instanceof VispyVolumeVisual) this.drawVolume(visual, view.camera);
+          else visual.draw(this, view.camera);
+        } catch (error) {
+          if (!(error instanceof VispyPyError)) throw error;
+          this.failed(canvas, visual, error);
+        }
       }
       gl.disable(gl.SCISSOR_TEST);
     }
+  }
+
+  failed(canvas, visual, error) {
+    const count = (this.failures.get(visual) || 0) + 1;
+    this.failures.set(visual, count);
+    const name = visual instanceof VispyVolumeVisual ? "Volume" : "XYZAxis";
+    if (count === 1) canvas.print(`ERROR: Drawing node ${name}: ${error.line}`);
+    else if (count === 2 ** Math.floor(Math.log2(count))) canvas.print(`ERROR: Drawing node ${name} repeat ${count}`);
   }
 
   translucentState() {
@@ -2130,6 +2175,8 @@ ${snippet.after}
 
   dispose() {
     const gl = this.gl;
+    this.disposed = true;
+    for (const visual of this.uploaded) this.release(visual);
     for (const { program } of this.programs.values()) gl.deleteProgram(program);
     for (const texture of this.luts.values()) gl.deleteTexture(texture);
     this.programs.clear();
@@ -2190,6 +2237,7 @@ void main() {
     gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
     this.state = { program, vao, matrix: gl.getUniformLocation(program, "u_visual_to_clip") };
+    renderer.gizmos.add(this);
   }
 
   draw(renderer, camera) {

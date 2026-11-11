@@ -170,7 +170,7 @@ class TomoVisVolumeScript {
     this.stage = TomoVisInput.el("div", "tv-script-volume__stage");
     this.empty = TomoVisInput.el("span", "tv-script-volume__empty", "Load an .hd5 tomogram to open the VolumeRendering canvas.");
     this.orb   = TomoVisInput.el("div", "tv-volume__orb");
-    this.orb.innerHTML = ThinkingOrb.html("working", 48, "Loading the volume");
+    this.orb.innerHTML = ThinkingOrb.html("working", 64, "Loading the volume");
     this.orb.hidden    = true;
     this.stage.append(this.empty, this.orb);
 

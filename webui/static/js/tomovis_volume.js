@@ -200,7 +200,7 @@ class TomoVisVolumeTab {
     this.cell        = TomoVisInput.el("div", "tv-volume__cell");
     this.placeholder = TomoVisInput.el("span", "tv-volume__placeholder", TomoVisVolumeTab.PLACEHOLDER);
     this.orb         = TomoVisInput.el("div", "tv-volume__orb");
-    this.orb.innerHTML = ThinkingOrb.html("working", 48, "Loading the 3D volume");
+    this.orb.innerHTML = ThinkingOrb.html("working", 64, "Loading the 3D volume");
     this.orb.hidden  = true;
     this.cell.append(this.placeholder, this.orb);
 
