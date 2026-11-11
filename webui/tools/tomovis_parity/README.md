@@ -122,6 +122,21 @@ and size of every file (ICO and CUR also with the uninitialised mask alignment b
 /home/bard/miniconda3/envs/tomovis/bin/python webui/tools/tomovis_parity/qt_image_formats.py
 ```
 
+## Slicer pane and splitter geometry
+
+`qt_layout.py` (also in the `tomovis` environment) imports `inputs/npy_real.npy` into fresh
+windows and records how Qt sizes the two visible Slicer ImageViews: the ROI buttons toggled at
+five window sizes, the Normalization group shown and hidden around ROI toggles, resizes and a
+slice change, and the ROI plot splitter handle dragged with mouse events up to and past both
+collapse points. Every step keeps each ImageView's height, its QSplitter sizes and the size hint
+and minimum size hint QVBoxLayout used, in `tests/webui/fixtures/tomovis_qt_layout/layout.json`.
+`tests/webui/tomovis_qt_layout_test.mjs` replays it against the port's qGeomCalc and QSplitter
+models.
+
+```
+/home/bard/miniconda3/envs/tomovis/bin/python webui/tools/tomovis_parity/qt_layout.py
+```
+
 ## Screenshots
 
 `shots.py` crops the DLR-TomoSAR test tomogram (150 x 1000 x 500 complex64, heights -20 m
