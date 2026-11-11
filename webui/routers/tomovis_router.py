@@ -72,6 +72,14 @@ class TomoVisRouter(SubRouter):
         table.add("POST", "/api/tomovis/script/slicer", self.script_slicer)
         table.add("GET",  "/api/tomovis/script/volume", self.script_volume)
 
+    def handle(self, exchange: HttpExchange) -> bool:
+        """Refuses POST bodies that are not JSON objects with 400, then dispatches through the route table."""
+
+        if exchange.method == "POST" and not isinstance(exchange.body, dict):
+            exchange.send_json({"error": "the request body must be a JSON object"}, 400)
+            return True
+        return super().handle(exchange)
+
     def entry(self, exchange: HttpExchange, sid, kind: str | None = None) -> TomoVisSessionEntry | None:
         """Looks a session up, answering 404 (unknown) or 400 (wrong kind) when it fails.
 

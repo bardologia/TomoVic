@@ -142,6 +142,7 @@ def test_event_errors(server):
     assert client.post("event", {"sid": sid, "seq": 1, "event": {"type": "value", "widget": "tab1Slider", "value": "x"}})[0] == 400
     assert client.post("event", {"sid": sid, "seq": 1, "event": {"type": "dialog_result", "token": "stale", "accepted": True}})[0] == 409
     assert client.post("session", {"kind": "other"})[0] == 400
+    assert client.request("POST", "event", b"[1, 2]")[0] == 400
 
 
 def test_sync_resends_every_current_image(server):
