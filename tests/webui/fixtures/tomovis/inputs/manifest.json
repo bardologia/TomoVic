@@ -1,0 +1,195 @@
+{
+  "fusar_both_attrs.hd5": {
+    "attributes": {
+      "tomogram.elevation_limits": "[-5.0, 15.0]",
+      "tomogram.range": "[100.0, 200.0]"
+    },
+    "description": "elevation_limits and range both present: elevation_limits wins",
+    "dtype": "float32",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "fusar_bytes_attrs.hd5": {
+    "attributes": {
+      "ps_az": "b'0.25'",
+      "ps_rg": "b'1.5'",
+      "tomogram.elevation_limits": "b'[-2.5, 7.5]'"
+    },
+    "description": "attributes stored as fixed-length byte strings (h5py returns numpy bytes)",
+    "dtype": "float32",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "fusar_no_attrs.hd5": {
+    "attributes": {},
+    "description": "no z attributes: default z range [0, shape[-1] - 1]",
+    "dtype": "float32",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "fusar_numeric_attrs.hd5": {
+    "attributes": {
+      "ps_az": "float 0.3",
+      "tomogram.elevation_limits": "float64 array [-1.0, 4.0]"
+    },
+    "description": "numeric (not string) attributes: eval() raises TypeError in the original",
+    "dtype": "float32",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "fusar_one_key_range.hd5": {
+    "attributes": {
+      "tomogram.range": "[0.0, 45.0]"
+    },
+    "description": "one key, float32, range attribute only, no pixel spacings",
+    "dtype": "float32",
+    "shape": [
+      16,
+      32,
+      24
+    ]
+  },
+  "fusar_three_keys.hd5": {
+    "attributes": {
+      "b_tomogram.range": "[-1.0, 1.0]"
+    },
+    "description": "three keys: the importer always takes key index 1 (b_tomogram)",
+    "dtype": "float32",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "fusar_two_key_elev.hd5": {
+    "attributes": {
+      "ps_az": "0.5",
+      "ps_rg": "0.75",
+      "tomogram.elevation_limits": "[-10.0, 30.0]"
+    },
+    "description": "two keys (theta, tomogram), complex64, elevation_limits on the dataset, ps_az and ps_rg strings on the file",
+    "dtype": "complex64",
+    "shape": [
+      16,
+      32,
+      24
+    ]
+  },
+  "npy_channels_2.npy": {
+    "attributes": {},
+    "description": "2 channels, float32, channel axis first",
+    "dtype": "float32",
+    "shape": [
+      2,
+      10,
+      24,
+      16
+    ]
+  },
+  "npy_channels_3.npy": {
+    "attributes": {},
+    "description": "3 channels, float32, channel axis first",
+    "dtype": "float32",
+    "shape": [
+      3,
+      10,
+      24,
+      16
+    ]
+  },
+  "npy_channels_4.npy": {
+    "attributes": {},
+    "description": "4 channels, float32, channel axis first",
+    "dtype": "float32",
+    "shape": [
+      4,
+      10,
+      24,
+      16
+    ]
+  },
+  "npy_complex_nan_inf.npy": {
+    "attributes": {},
+    "description": "complex64 with NaN, +inf and -inf samples, one azimuth-range line all NaN",
+    "dtype": "complex64",
+    "shape": [
+      12,
+      20,
+      16
+    ]
+  },
+  "npy_covariance_5d.npy": {
+    "attributes": {},
+    "description": "5-D 3x3 covariance-like cube; TomoVis keeps sqrt of the diagonal as 3 channels",
+    "dtype": "complex64",
+    "shape": [
+      3,
+      3,
+      8,
+      16,
+      12
+    ]
+  },
+  "npy_float64.npy": {
+    "attributes": {},
+    "description": "float64 single channel",
+    "dtype": "float64",
+    "shape": [
+      8,
+      12,
+      10
+    ]
+  },
+  "npy_one_range_line.npy": {
+    "attributes": {},
+    "description": "shape[-1] == 1: the slice slider stays at 0 and nothing is drawn on load",
+    "dtype": "float32",
+    "shape": [
+      6,
+      10,
+      1
+    ]
+  },
+  "npy_real.npy": {
+    "attributes": {},
+    "description": "float32 single channel",
+    "dtype": "float32",
+    "shape": [
+      16,
+      32,
+      24
+    ]
+  },
+  "rat_complex.rat": {
+    "attributes": {},
+    "description": "complex64 RAT 2.0 file written by ste_io.srat (1000-byte header, C-order payload)",
+    "dtype": "complex64",
+    "shape": [
+      12,
+      20,
+      16
+    ]
+  },
+  "uavsar_three_keys.h5": {
+    "attributes": {},
+    "description": "three keys (lat, lon, tomo); the importer takes key index 2 and applies np.rollaxis(x, 1, 0)",
+    "dtype": "float32",
+    "shape": [
+      32,
+      16,
+      24
+    ]
+  }
+}
