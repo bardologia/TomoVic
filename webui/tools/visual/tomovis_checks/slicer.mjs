@@ -200,7 +200,7 @@ class SlicerChecks {
       const handle = s.controls.roi_1.handles[1].pos;
       R.assert(Math.abs(handle[0] - 20) < 0.2 && Math.abs(handle[1] - 15) < 0.2 && handle[0] % 1 !== 0, `free handle at ${handle}`);
       R.equal([s.controls.tab1QLineEdit3.text, s.controls.tab1QLineEdit4.text], ["36.8699", "25.0000"], "fields");
-      R.assert(s.attributes.d2_shape[0] === 25, `tomogram width ${s.attributes.d2_shape}`);
+      R.assert(s.attributes.d2_shape[0] === Math.trunc(Math.hypot(handle[0], handle[1])), `tomogram width ${s.attributes.d2_shape} for a line of length ${Math.hypot(handle[0], handle[1])} (affineSlice takes int(length))`);
       return `handle ${handle.map((v) => v.toFixed(3))}, Angle ${s.controls.tab1QLineEdit3.text}, Length ${s.controls.tab1QLineEdit4.text}, d2 ${s.attributes.d2_shape}`;
     });
 
@@ -219,7 +219,9 @@ class SlicerChecks {
       await this.drag(a, { x: a.x + 40, y: a.y + 30 }, { cancel: true });
       const after  = await this.T(() => window.app.tomovisPage.views[0].roi.clientState());
       const server = (await this.snapshot()).controls.roi_1;
-      R.equal(after, before, "client state");
+      const flat = (state) => [...state.pos, ...state.size, state.angle, ...state.handles.flatMap((h) => [...h.pos, ...h.item])];
+      const gap  = Math.max(...flat(after).map((v, i) => Math.abs(v - flat(before)[i])));
+      R.assert(gap < 1e-9, `client state ${JSON.stringify(after)} vs ${JSON.stringify(before)} (setState goes through parent coordinates, so the last bit may differ)`);
       R.equal(server.pos, before.pos, "server pos");
       return "restored on both sides";
     });
@@ -370,10 +372,10 @@ class SlicerChecks {
       await this.page.locator(".tv-menu").last().locator(".tv-menu__item", { hasText: "1 button" }).click();
       const a1 = await this.scr("imv1_1", 2, 2);
       const b1 = await this.scr("imv1_1", 26, 20);
-      await this.drag(a1, b1);
+      await this.drag(b1, a1);
       const z1 = await this.T(() => window.app.tomovisPage.views[0].views.imv1_1.view.viewRange());
-      const a2 = await this.scr("imv1_1", 6, 6);
-      const b2 = await this.scr("imv1_1", 12, 12);
+      const a2 = await this.scr("imv1_1", 4, 14);
+      const b2 = await this.scr("imv1_1", 10, 19);
       await this.drag(a2, b2);
       await this.page.keyboard.press("-");
       await this.page.waitForTimeout(60);

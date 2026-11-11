@@ -554,9 +554,32 @@ class PgRoi {
   }
 }
 
+class PgPixelVectorCache {
+  static SIZE   = 100;
+  static global = new Map();
+
+  static key(roi, direction) {
+    const o  = roi.devicePoint([0, 0]);
+    const ex = roi.devicePoint([1, 0]);
+    const ey = roi.devicePoint([0, 1]);
+    return [ex.x - o.x, ex.y - o.y, ey.x - o.x, ey.y - o.y, direction[0], direction[1]].join(",");
+  }
+
+  static widthFactor(roi, direction) {
+    const key = PgPixelVectorCache.key(roi, direction);
+    if (roi.pixelVectorKey === key) return 4;
+    roi.pixelVectorKey = key;
+    if (PgPixelVectorCache.global.has(key)) return 4;
+    PgPixelVectorCache.global.set(key, true);
+    if (PgPixelVectorCache.global.size > PgPixelVectorCache.SIZE) PgPixelVectorCache.global.delete(PgPixelVectorCache.global.keys().next().value);
+    return 1;
+  }
+}
+
 class PgLineSegmentRoi extends PgRoi {
   constructor(positions, options = {}) {
     super({ pos: options.pos || [0, 0], size: [1, 1], ...options });
+    this.pixelVectorKey = null;
     for (const p of positions) this.addFreeHandle(p);
   }
 
@@ -579,12 +602,14 @@ class PgLineSegmentRoi extends PgRoi {
   }
 
   devicePoly() {
-    const [h1, h2] = this.endpoints().map((h) => this.devicePoint(h.pos()));
+    const [p1, p2] = this.endpoints().map((h) => h.pos());
+    const [h1, h2] = [p1, p2].map((p) => this.devicePoint(p));
     const dx = h2.x - h1.x;
     const dy = h2.y - h1.y;
     const len = Math.hypot(dx, dy);
     if (len === 0) return null;
-    const n = [(-dy / len) * 4, (dx / len) * 4];
+    const w = 4 * PgPixelVectorCache.widthFactor(this, [p2[0] - p1[0], p2[1] - p1[1]]);
+    const n = [(-dy / len) * w, (dx / len) * w];
     return [[h1.x + n[0], h1.y + n[1]], [h2.x + n[0], h2.y + n[1]], [h2.x - n[0], h2.y - n[1]], [h1.x - n[0], h1.y - n[1]]];
   }
 
@@ -608,6 +633,7 @@ class PgLineSegmentRoi extends PgRoi {
   }
 
   paint(ctx) {
+    this.devicePoly();
     const [h1, h2] = this.endpoints().map((h) => this.devicePoint(h.pos()));
     ctx.save();
     PgPen.apply(ctx, this.currentPen);
@@ -942,9 +968,10 @@ class PgAffineSlice {
   }
 }
 
-window.PgHandle          = PgHandle;
-window.PgRoi             = PgRoi;
-window.PgLineSegmentRoi  = PgLineSegmentRoi;
-window.PgRectRoi         = PgRectRoi;
-window.PgInfiniteLine    = PgInfiniteLine;
-window.PgAffineSlice     = PgAffineSlice;
+window.PgHandle           = PgHandle;
+window.PgRoi              = PgRoi;
+window.PgPixelVectorCache = PgPixelVectorCache;
+window.PgLineSegmentRoi   = PgLineSegmentRoi;
+window.PgRectRoi          = PgRectRoi;
+window.PgInfiniteLine     = PgInfiniteLine;
+window.PgAffineSlice      = PgAffineSlice;
