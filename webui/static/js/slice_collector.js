@@ -127,7 +127,11 @@ class SliceCollectorView {
 
     this.seenSerial = state.serial;
     const current = state.current;
-    if (current && current.tools.slices.ready && this.cubes.some((cube) => cube.id === current.id) && !this.selected.includes(current.id)) this.selected.push(current.id);
+    const entry   = current ? this.cubes.find((cube) => cube.id === current.id) : null;
+    if (!entry || !current.tools.slices.ready || this.selected.includes(current.id)) return;
+
+    this.selected.push(current.id);
+    if (this.runStrip) this.runStrip.reveal(entry);
   }
 
   _completeButton() {

@@ -189,16 +189,19 @@ class RunStrip {
     this.total.textContent = this.filter ? `${shown} / ${this.entries.length} runs` : `${this.entries.length} runs`;
   }
 
+  reveal(entry) {
+    if (entry.group === ".") { this.openGroups.add("."); return; }
+    const parts = entry.group.split("/");
+    let   rel   = "";
+    parts.forEach((part) => {
+      rel = rel ? `${rel}/${part}` : part;
+      this.openGroups.add(rel);
+    });
+  }
+
   _seed() {
     this.entries.forEach((entry) => {
-      if (!this._stateFor(entry)) return;
-      if (entry.group === ".") { this.openGroups.add("."); return; }
-      const parts = entry.group.split("/");
-      let   rel   = "";
-      parts.forEach((part) => {
-        rel = rel ? `${rel}/${part}` : part;
-        this.openGroups.add(rel);
-      });
+      if (this._stateFor(entry)) this.reveal(entry);
     });
 
     let node = this._buildTree();
