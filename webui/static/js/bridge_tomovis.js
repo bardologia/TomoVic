@@ -7,7 +7,7 @@ class TomoVisBridge {
   static FUSAR_FILTER = "FuSAR Tomo (*.hd5)";
 
   static preparing(dataset) {
-    const parts = [dataset.stage, `${Math.round(dataset.progress * 100)}%`].filter(Boolean);
+    const parts = [dataset.stage, `${DatasetWords.percent(dataset)}%`].filter(Boolean);
     return { text: `Preparing for the TomoVic tools: ${parts.join(" ")}`, actions: [] };
   }
 
@@ -244,11 +244,6 @@ class TomoVisScriptsBridge {
     this.filled = link;
   }
 
-  size(bytes) {
-    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-    return `${Math.round(bytes / (1024 * 1024))} MB`;
-  }
-
   complete(dataset) {
     return this.bridge.complete(dataset.id, ["height_range"], { onDone: () => this.shown() });
   }
@@ -258,7 +253,7 @@ class TomoVisScriptsBridge {
     if (dataset.state === "preparing") return TomoVisBridge.preparing(dataset);
 
     const large   = dataset.cube !== null && dataset.cube.bytes > TomoVisScriptsBridge.LARGE_BYTES;
-    const warning = large ? `This cube is ${this.size(dataset.cube.bytes)}; both scripts read it whole and the volume script sends it to the browser.` : "";
+    const warning = large ? `This cube is ${DatasetWords.bytes(dataset.cube.bytes)}; both scripts read it whole and the volume script sends it to the browser.` : "";
     const heights = dataset.pieces.height_range;
     if (dataset.tomovis.scripts_ready) return { text: warning, actions: [{ label: "Use the current dataset", run: () => this.fill(dataset.tomovis.scripts_link, true) }] };
     if (!heights.present) return { text: ["The scripts need the height range.", warning].filter(Boolean).join(" "), actions: heights.addable ? [{ label: "Add height range", run: () => this.complete(dataset) }] : [] };
