@@ -358,6 +358,7 @@ class App {
     window.tomogramView = this.tomogramView;
 
     this.sliceCollectorView = new window.SliceCollectorView({
+      datasetBar  : document.getElementById("sc-dataset-bar"),
       strip       : document.getElementById("sc-strip"),
       hint        : document.getElementById("sc-hint"),
       stage       : document.getElementById("sc-stage"),
@@ -441,6 +442,7 @@ class App {
     if (route === "cube") this.tomogramView.enter(param);
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
+    else this.sliceCollectorView.leave();
     if (route === "console") this.runConsole.onShow();
     if (route === "tomovis") this.tomovisPage.enter();
     else this.tomovisPage.leave();
