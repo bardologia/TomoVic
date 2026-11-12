@@ -11,6 +11,11 @@
   z-index: 3;
 }
 .tvb-caption[hidden] { display: none; }
+.tvb-caption .ds-indicator__name { flex: none; max-width: 32ch; }
+.tvb-caption .ds-indicator__links { flex: none; flex-wrap: nowrap; }
+.tvb-caption .ds-indicator__notice { flex: 0 1 auto; margin-left: auto; }
+.tvb-caption .ds-indicator__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvb-caption .ds-indicator__notice .ds-link { flex: none; }
 @media (max-height: 911.98px), (max-width: 900px) {
   .page--tomovis > .tvb-caption { display: none; }
 }
