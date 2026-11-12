@@ -261,9 +261,14 @@ class TomoVisRouter(SubRouter):
             exchange.send_json(entry.window.metadata())
 
     def fs(self, exchange: HttpExchange) -> None:
-        """Answers with one directory listing for the file dialog."""
+        """Answers with one directory listing for the file dialog; a missing or unreadable folder is an ordinary answer with ok false, a relative path a 400."""
 
-        exchange.send_result(self.lister.list(exchange.text("path"), exchange.texts("pattern")))
+        try:
+            listing = self.lister.list(exchange.text("path"), exchange.texts("pattern"))
+        except ValueError as error:
+            exchange.send_json({"ok": False, "error": str(error)}, 400)
+            return
+        exchange.send_json(listing)
 
     def write(self, exchange: HttpExchange) -> None:
         """Writes an exported image (PNG body) or text file (raw body) on the server."""

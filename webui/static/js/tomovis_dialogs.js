@@ -145,27 +145,10 @@ class TomoVisMessageBox {
 }
 
 class TomoVisFileDialog {
-  static STORAGE_KEY = "tomovis.lastDir";
-  static COLUMNS     = [["name", "Name"], ["size", "Size"], ["mtime", "Date Modified"]];
+  static COLUMNS = [["name", "Name"], ["size", "Size"], ["mtime", "Date Modified"]];
 
   static open(request) {
     return new TomoVisFileDialog(request).run();
-  }
-
-  static lastDir() {
-    try {
-      return window.localStorage.getItem(TomoVisFileDialog.STORAGE_KEY);
-    } catch (error) {
-      return null;
-    }
-  }
-
-  static rememberDir(dir) {
-    try {
-      window.localStorage.setItem(TomoVisFileDialog.STORAGE_KEY, dir);
-    } catch (error) {
-      return;
-    }
   }
 
   static parseFilter(filter) {
@@ -211,12 +194,13 @@ class TomoVisFileDialog {
     return date.toLocaleString(undefined, { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   }
 
-  constructor({ mode = "open", title = "", filters = [], selected_filter = null, directory = null, file = null, session = null, layer = null }) {
+  constructor({ mode = "open", title = "", filters = [], selected_filter = null, directory = null, file = null, session = null, layer = null, place }) {
     this.mode     = mode;
     this.title    = title;
     this.filters  = filters.length ? filters : ["All Files (*)"];
     this.filter   = selected_filter && this.filters.includes(selected_filter) ? selected_filter : this.filters[0];
-    this.start    = directory || TomoVisFileDialog.lastDir() || "";
+    this.place    = place;
+    this.start    = directory || place.lastVisited || "";
     this.file     = file || "";
     this.session  = session || TomoVisDialogs.current.ctx.session;
     this.kit      = TomoVisDialogs.current.ctx.kit;
@@ -237,9 +221,11 @@ class TomoVisFileDialog {
     this.modal = new TomoVisModal({ title: this.title, className: "tv-filedialog", layer: this.layer, escape: null });
     this.build();
     const opened = this.modal.open();
-    const ticket = this.ticket + 1;
-    const shown  = await this.navigate(this.start, false);
-    if (!shown && this.ticket === ticket) await this.navigate("", false);
+    for (const candidate of [this.start, this.place.lastVisited, ""]) {
+      if (candidate === null) continue;
+      const ticket = this.ticket + 1;
+      if (await this.navigate(candidate, false) || this.ticket !== ticket) break;
+    }
     this.nameField.focus();
     const result = await opened;
     return result || { accepted: false, path: null, filter: this.filter };
@@ -352,6 +338,7 @@ class TomoVisFileDialog {
     this.home    = listing.home;
     this.entries = listing.entries;
     this.selected = -1;
+    this.place.lastVisited = listing.path;
     if (!this.lookInEdited) this.lookIn.value = this.dir;
     this.modal.el.dataset.dir     = this.dir;
     this.modal.el.dataset.listing = `${this.dir}|${this.filter}`;
@@ -516,7 +503,6 @@ class TomoVisFileDialog {
       }
     }
 
-    TomoVisFileDialog.rememberDir(TomoVisFileDialog.split(path).dir);
     this.modal.close({ accepted: true, path, filter: this.filter });
   }
 }
@@ -845,9 +831,10 @@ class TomoVisDialogs {
   static current = null;
 
   constructor(ctx) {
-    this.ctx      = ctx;
-    this.handlers = new Map();
-    this.chain    = Promise.resolve();
+    this.ctx         = ctx;
+    this.handlers    = new Map();
+    this.chain       = Promise.resolve();
+    this.lastVisited = null;
   }
 
   activate() {
@@ -872,7 +859,7 @@ class TomoVisDialogs {
   }
 
   file(request) {
-    return TomoVisFileDialog.open({ ...request, session: this.ctx.session, layer: this.ctx.layer });
+    return TomoVisFileDialog.open({ ...request, session: this.ctx.session, layer: this.ctx.layer, place: this });
   }
 
   color(options) {

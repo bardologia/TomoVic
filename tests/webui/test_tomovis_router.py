@@ -254,6 +254,7 @@ def test_directory_listing(server, tmp_path):
     assert listing["ok"] and listing["parent"] == str(tmp_path.parent)
     assert [(entry["name"], entry["dir"]) for entry in listing["entries"]] == [("sub", True), ("a.npy", False), ("b.NPY", False)]
     assert client.request("GET", "fs?path=relative/path")[0] == 400
+    assert json.loads(client.request("GET", f"fs?path={tmp_path / 'missing'}")[1])["ok"] is False
     assert json.loads(client.request("GET", "fs")[1])["path"] == listing["home"]
 
 

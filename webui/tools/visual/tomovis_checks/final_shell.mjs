@@ -150,6 +150,66 @@ class FinalShellChecks {
     await this.T(() => { if (window.TomoVisMenu.root) window.TomoVisMenu.root.close(); });
   }
 
+  async dialogDir() {
+    await this.page.waitForSelector(".tv-filedialog[data-dir]", { timeout: 15000 });
+    return this.T(() => document.querySelector(".tv-filedialog").dataset.dir);
+  }
+
+  async browseTo(dir) {
+    await this.page.fill(".tv-filedialog__name", dir);
+    await this.page.press(".tv-filedialog__name", "Enter");
+    await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, dir, { timeout: 10000 });
+  }
+
+  async cancelDialog() {
+    await this.page.click(".tv-filedialog__cancel");
+    await this.page.waitForSelector(".tv-filedialog", { state: "detached" });
+    await H.waitIdle(this.page);
+  }
+
+  async lastVisited() {
+    await this.run.check("SH-03", "the chooser reopens the last folder browsed to, also after Cancel and after a failed save, for this page only", async () => {
+      await this.fresh();
+      const home     = await this.T(() => fetch("/api/tomovis/fs").then((r) => r.json()).then((l) => l.home));
+      const sessions = path.join(this.out, "sessions");
+      fs.mkdirSync(sessions, { recursive: true });
+      const seen = {};
+
+      await H.menu(this.page, "File", "Import", "npy");
+      seen.first = await this.dialogDir();
+      await this.browseTo(this.inputs);
+      await this.cancelDialog();
+      await H.menu(this.page, "File", "Import", "npy");
+      seen.second = await this.dialogDir();
+      await this.page.fill(".tv-filedialog__name", "npy_real.npy");
+      await this.page.click(".tv-filedialog__accept");
+      await this.page.waitForSelector(".tv-filedialog", { state: "detached" });
+      await H.waitIdle(this.page);
+
+      await H.menu(this.page, "File", "Save");
+      seen.save = await this.dialogDir();
+      await this.browseTo(sessions);
+      await this.page.fill(".tv-filedialog__name", path.join(sessions, "no_such_folder", "x.hd5"));
+      await this.page.click(".tv-filedialog__accept");
+      await this.page.waitForSelector(".tv-messagebox");
+      seen.error = await this.T(() => document.querySelector(".tv-messagebox .tv-modal__title").textContent);
+      await this.page.click('.tv-messagebox .tv-button:text-is("OK")');
+      await H.waitIdle(this.page);
+      await H.menu(this.page, "File", "Import", "npy");
+      seen.afterFailedSave = await this.dialogDir();
+      await this.cancelDialog();
+
+      await this.page.reload();
+      await H.openTomoVis(this.page);
+      await H.menu(this.page, "File", "Import", "npy");
+      seen.afterReload = await this.dialogDir();
+      await this.cancelDialog();
+
+      R.equal(seen, { first: home, second: this.inputs, save: this.inputs, error: "Save error", afterFailedSave: sessions, afterReload: home }, "start folders");
+      return JSON.stringify(seen);
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -161,6 +221,7 @@ class FinalShellChecks {
     if (this.wanted("opengl")) await this.openGlPrint();
     if (this.wanted("shortcuts")) await this.shortcutsInPopups();
     if (this.wanted("status")) await this.statusAfterSubmenu();
+    if (this.wanted("lastdir")) await this.lastVisited();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

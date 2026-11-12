@@ -38,7 +38,11 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   decoded, strings go through `ast.literal_eval`, and any other value passes through.
 - **D-3.** Imports are atomic. A read failure shows the critical message `Import error` /
   `Could not import file:\n<error>` and keeps the previous cube. Files are always closed.
-- **D-4.** File dialogs browse the server, and every save writes on the server.
+- **D-4.** File dialogs browse the server, and every save writes on the server. As Qt's file dialog does
+  within one run of TomoVis, a dialog opened without a folder of its own starts in the last folder any
+  dialog of the page browsed to, also when that dialog was cancelled or its save failed. The first dialog
+  of a page starts in the server user's home folder, where the original starts in the folder TomoVis was
+  launched from. A reload starts over, as a new start of TomoVis does.
 - **D-8.** A TomoVis window keeps its state until it is closed, however many other windows open. Each
   page holds one session on the server and sends a heartbeat every 60 s, also while the tab is hidden.
   The session ends when the page closes (its `pagehide` beacon) or when the page has sent nothing for
@@ -99,7 +103,7 @@ use `application/octet-stream` and are TVE1 envelopes. Errors come back as JSON 
 | GET `tables` | | `{colortables: {names[19], tables[19][256][3], default: 9, blue_red_yellow: 4}, plot_colormaps: {names[71], default: "jet"}}` |
 | GET `volume?sid=&serial=` | | envelope `{serial, shape, dtype: "float32"}` with blob `volume`; 404 for a stale serial |
 | GET `metadata?sid=` | | `getCurrentMetadata()` |
-| GET `fs?path=&pattern=*.npy&pattern=...` | empty path means home | `{ok, path, parent, home, entries: [{name, dir, size, mtime}]}`; 400 `{ok: false, error}` |
+| GET `fs?path=&pattern=*.npy&pattern=...` | empty path means home | `{ok, path, parent, home, entries: [{name, dir, size, mtime}]}`; `{ok: false, error}` for a folder that is missing or cannot be read; 400 for a relative path |
 | POST `write?sid=&path=&kind=image\|bytes` | body `image/png` or `application/octet-stream` | `{ok, path}`; 400 `{ok: false, error}` (unknown image extension, missing directory, relative path) |
 | POST `export_hdf5` | `{sid, path, name, column_mode, curves: [{x, y, name?}]}` | `{ok, path}` |
 | POST `log` | `{sid, lines: [str]}` | `{ok: true}` |

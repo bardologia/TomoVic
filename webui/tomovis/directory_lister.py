@@ -45,12 +45,15 @@ class DirectoryLister:
 
         Returns:
             {ok, path, parent, home, entries} or {ok: False, error} for a path that is not a readable directory.
+
+        Raises:
+            ValueError : For a relative path.
         """
 
         home   = str(Path.home())
         target = Path(path) if path else Path(home)
         if not target.is_absolute():
-            return {"ok": False, "error": f"'{path}' is not an absolute path"}
+            raise ValueError(f"'{path}' is not an absolute path")
         if not target.is_dir():
             return {"ok": False, "error": f"'{target}' is not a directory"}
         if not os.access(target, os.R_OK | os.X_OK):
