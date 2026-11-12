@@ -102,6 +102,7 @@
   user-select: none;
 }
 .tv-mpl-canvaswrap--fixed { flex: none; }
+.tv-mpl:fullscreen { background: var(--tv-surface); }
 .tv-mpl-canvaswrap:focus-visible { box-shadow: 0 0 0 3px var(--focus); }
 .tv-mpl-canvas,
 .tv-mpl-rubberband {

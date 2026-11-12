@@ -162,9 +162,24 @@ class TomoVisToolbar(NavigationToolbar2WebAgg):
 
 
 class TomoVisFigureManager(FigureManagerWebAgg):
-    """WebAgg figure manager that builds the TomoVis toolbar."""
+    """WebAgg figure manager that builds the TomoVis toolbar and stands in for a figure window.
+
+    A Qt figure window toggles full screen and closes itself; here the
+    manager sends those two window requests to the browser, which owns the
+    window.
+    """
 
     _toolbar2_class = TomoVisToolbar
+
+    def full_screen_toggle(self) -> None:
+        """Asks the browser to toggle the figure window's full screen state (keymap.fullscreen)."""
+
+        self._send_event("full_screen_toggle")
+
+    def destroy(self) -> None:
+        """Tells the browser that the figure window closed, as Gcf.destroy closes a pyplot figure's window."""
+
+        self._send_event("close")
 
 
 class TomoVisFigure:

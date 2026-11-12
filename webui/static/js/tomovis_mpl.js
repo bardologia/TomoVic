@@ -646,13 +646,14 @@ class MplFigureView {
   static OWNED_KEYS       = new Set(["ctrl+s", "ctrl+f", "F1", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", "Backspace"]);
   static MODIFIERS        = { Control: "ctrl", Alt: "alt", Shift: "shift", Meta: "meta" };
 
-  constructor(root, ctx, figureId, { toolbar = true, focusable = false, size = null, attach = true, persistent = false } = {}) {
+  constructor(root, ctx, figureId, { toolbar = true, focusable = false, size = null, attach = true, persistent = false, onClose = null } = {}) {
     this.root       = root;
     this.ctx        = ctx;
     this.id         = figureId;
     this.focusable  = focusable;
     this.fixed      = size;
     this.persistent = persistent;
+    this.onClose    = onClose;
     this.attached   = false;
     this.disposed   = false;
     this.sid        = null;
@@ -673,11 +674,7 @@ class MplFigureView {
     this.wrap.append(this.canvas, this.band.canvas);
     if (this.toolbar) this.el.append(this.toolbar.el);
     this.el.append(this.wrap);
-    if (size) {
-      this.wrap.classList.add("tv-mpl-canvaswrap--fixed");
-      this.wrap.style.width  = `${size[0]}px`;
-      this.wrap.style.height = `${size[1]}px`;
-    }
+    this.applySize();
     root.append(this.el);
 
     this.bindPointer();
@@ -688,10 +685,23 @@ class MplFigureView {
       snapshot : ctx.bus.on("snapshot", () => this.follow()),
     };
     this.onWindowResize = () => this.measure();
+    this.onFullScreen   = () => this.applySize();
     window.addEventListener("resize", this.onWindowResize);
+    document.addEventListener("fullscreenchange", this.onFullScreen);
     this.observer = new ResizeObserver(() => this.measure());
     this.observer.observe(this.wrap);
     if (attach) this.attach();
+  }
+
+  fullScreen() {
+    return document.fullscreenElement === this.el;
+  }
+
+  applySize() {
+    const fixed = Boolean(this.fixed) && !this.fullScreen();
+    this.wrap.classList.toggle("tv-mpl-canvaswrap--fixed", fixed);
+    this.wrap.style.width  = fixed ? `${this.fixed[0]}px` : "";
+    this.wrap.style.height = fixed ? `${this.fixed[1]}px` : "";
   }
 
   attach() {
@@ -733,8 +743,9 @@ class MplFigureView {
   measure() {
     if (!this.attached || this.disposed) return;
     const dpr    = window.devicePixelRatio || 1;
-    const width  = this.fixed ? this.fixed[0] : this.wrap.clientWidth;
-    const height = this.fixed ? this.fixed[1] : this.wrap.clientHeight;
+    const fixed  = this.fixed && !this.fullScreen();
+    const width  = fixed ? this.fixed[0] : this.wrap.clientWidth;
+    const height = fixed ? this.fixed[1] : this.wrap.clientHeight;
     if (width < 1 || height < 1) return;
 
     this.band.resize(width, height, dpr);
@@ -767,10 +778,25 @@ class MplFigureView {
         this.band.draw(message, this.canvas.height, this.ratio());
       } else if (message.type === "save") {
         this.saveFigure();
+      } else if (message.type === "full_screen_toggle") {
+        this.fullScreenToggle();
+      } else if (message.type === "close") {
+        this.closeWindow();
       } else if (!MplFigureView.IGNORED_MESSAGES.has(message.type)) {
         throw new Error(`TomoVis figure ${this.id} received an unknown message ${message.type}`);
       }
     }
+  }
+
+  fullScreenToggle() {
+    const change = this.fullScreen() ? document.exitFullscreen() : this.el.requestFullscreen();
+    change.catch((error) => this.ctx.session.raiseUnreported(error));
+  }
+
+  closeWindow() {
+    if (this.fullScreen()) document.exitFullscreen().catch((error) => this.ctx.session.raiseUnreported(error));
+    this.detach();
+    if (this.onClose) this.onClose();
   }
 
   toolbarMessage(message) {
@@ -926,6 +952,7 @@ class MplFigureView {
     this.attached = false;
     this.observer.disconnect();
     window.removeEventListener("resize", this.onWindowResize);
+    document.removeEventListener("fullscreenchange", this.onFullScreen);
     for (const [topic, fn] of Object.entries(this.handlers)) this.ctx.bus.off(topic, fn);
     if (this.options) this.options.close();
     this.el.remove();

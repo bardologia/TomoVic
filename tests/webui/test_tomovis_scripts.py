@@ -71,6 +71,20 @@ def test_slicer_keeps_the_rest_of_the_default_keymap(slicer):
     assert any(line.get_visible() for line in slicer.figure.axes[0].xaxis.get_gridlines())
 
 
+@pytest.mark.parametrize("key, message", [("f", "full_screen_toggle"), ("q", "close")])
+def test_slicer_window_keys_reach_the_browser(slicer, key, message):
+    """f asks for the figure window's full screen toggle and q closes it, as the pyplot window did; other keys send neither."""
+
+    press(slicer, "g")
+    quiet, _ = slicer.drain("f:")
+    press(slicer, key)
+    messages, _ = slicer.drain("f:")
+    window = [entry["type"] for entry in messages if entry["type"] in ("full_screen_toggle", "close")]
+
+    assert [entry["type"] for entry in quiet if entry["type"] in ("full_screen_toggle", "close")] == []
+    assert window == [message]
+
+
 @pytest.mark.parametrize("name, message", [("fusar_no_attrs.hd5", "No attribute 'range'."), ("fusar_three_keys.hd5", "Invalid dataset")])
 def test_slicer_reader_errors(name, message):
     """The script's own errors: no range attribute, no tomogram key among several."""

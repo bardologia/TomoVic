@@ -29,7 +29,7 @@ class TomoVisSlicerScript {
     this.empty      = TomoVisInput.el("div", "tv-script-slicer__empty", "Load an .hd5 tomogram to open the SlicerMatplotlib figure.");
     this.figureHost.hidden = true;
     root.append(head, row, this.error, this.empty, this.figureHost);
-    this.figure = new MplFigureView(this.figureHost, ctx, "script_slicer", { focusable: true, size: TomoVisSlicerScript.SIZE, attach: false });
+    this.figure = new MplFigureView(this.figureHost, ctx, "script_slicer", { focusable: true, size: TomoVisSlicerScript.SIZE, attach: false, onClose: () => this.closed() });
   }
 
   button(text, action) {
@@ -75,6 +75,11 @@ class TomoVisSlicerScript {
       this.loading = false;
       this.loadButton.disabled = false;
     }
+  }
+
+  closed() {
+    this.figureHost.hidden = true;
+    this.empty.hidden      = false;
   }
 
   activate() {

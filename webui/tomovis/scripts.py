@@ -5,7 +5,11 @@ per-column normalisation of every range slice and the matplotlib figure with
 its j/k slice stepping, drawn on a WebAgg-hosted figure with matplotlib's
 default keymap active. The original removed j and k from the global keymap
 rcParams; the port filters j and k out of the default key handler of this
-figure only, which leaves every other figure's keymap untouched.
+figure only, which leaves every other figure's keymap untouched. The
+original's figure lived in a pyplot window, where the fullscreen keys toggle
+the window and the quit keys close it through pyplot's figure registry; the
+port's figure is not registered with pyplot, so the quit keys close it
+through its manager directly.
 
 ``VolumeRenderingScript`` copies the data half of VolumeRendering.py
 (``read_h5_volume``, ``prepare_volume`` and the thresholded second volume);
@@ -19,6 +23,7 @@ from __future__ import annotations
 import ast
 
 import h5py
+import matplotlib as mpl
 import matplotlib.cm as cm
 import numpy as np
 from matplotlib.backend_bases import key_press_handler
@@ -156,11 +161,19 @@ class SlicerMatplotlibScript:
         fig.canvas.draw_idle()
 
     def filteredKeymap(self, event) -> None:
-        """matplotlib's default key handler without j and k (remove_keymap_conflicts, scoped to this figure)."""
+        """matplotlib's default key handler without j and k (remove_keymap_conflicts, scoped to this figure).
+
+        key_press_handler closes a figure on keymap.quit and keymap.quit_all
+        through pyplot's figure registry, which does not hold this figure;
+        those keys close it through its manager, as Gcf.destroy does for the
+        script's pyplot figure.
+        """
 
         if event.key in self.REMOVED_KEYS:
             return
         key_press_handler(event, event.canvas, event.canvas.toolbar)
+        if event.key in mpl.rcParams["keymap.quit"] or event.key in mpl.rcParams["keymap.quit_all"]:
+            event.canvas.manager.destroy()
 
     @TomoVisRc.styled
     def load(self, name: str) -> TomoVisFigure:
