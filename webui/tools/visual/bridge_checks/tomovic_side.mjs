@@ -337,10 +337,12 @@ class TomoVicSideChecks {
       await this.page.waitForFunction(() => window.app.launchView.config && Object.keys(window.app.launchView.dirty || {}).length > 0, null, { timeout: 30000 });
       const dirty = await this.T(() => window.app.launchView.dirty);
       R.equal(dirty.dataset_base_path, path.dirname(id), "dataset_base_path");
-      R.equal(dirty.dataset_filter, [path.basename(id)], "dataset_filter");
+      R.equal(dirty.dataset_filter, `['${path.basename(id)}']`, "dataset_filter");
+      await this.page.waitForFunction((name) => [...document.querySelectorAll(".picker__item")].some((row) => row.querySelector(".picker__item-name").textContent === name && row.querySelector("input").checked), path.basename(id), { timeout: 15000 });
+      R.equal(await this.page.locator(".ds-card").count(), 0, "dataset cards left open");
       await this.page.waitForTimeout(400);
       await this.shot("tc07_launch");
-      return `dataset_base_path ${dirty.dataset_base_path}, dataset_filter ${JSON.stringify(dirty.dataset_filter)}`;
+      return `dataset_base_path ${dirty.dataset_base_path}, dataset_filter ${dirty.dataset_filter} ticked in the picker`;
     });
   }
 
