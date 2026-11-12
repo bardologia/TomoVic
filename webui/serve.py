@@ -29,7 +29,7 @@ class ServeEntry:
     ``ssh -L 18765:/tmp/tomovic.sock server`` then brings to another computer.
 
     Attributes:
-        parser : Argument parser holding the host, port, socket and project-root options.
+        parser : Argument parser holding the host, port, socket, project-root and workspace options.
     """
 
     KEY_VARIABLE = "TOMOVIC_ACCESS_KEY"
@@ -43,6 +43,7 @@ class ServeEntry:
         self.parser.add_argument("--port", type=int, default=None, help=f"TCP port to listen on, default {self.DEFAULT_PORT}")
         self.parser.add_argument("--unix-socket", type=Path, default=None, help="listen on this Unix socket, created with mode 0600, instead of a TCP port; excludes --host and --port")
         self.parser.add_argument("--root", type=Path, default=None, help="project root the console operates on (jobs, logs, runs); defaults to the repository holding this file")
+        self.parser.add_argument("--workspace", type=Path, default=None, metavar="PATH", help="folder where TomoVis imports become runs the TomoVic tools read; default <repo root>/workspace")
 
     def _loopback(self, host: str) -> bool:
         """Returns whether `host` resolves to a loopback address, reachable from this machine only."""
@@ -69,7 +70,7 @@ class ServeEntry:
         if not access_key and not args.unix_socket and not self._loopback(host):
             self.parser.error(f"--host {host} lets other machines reach the console; set {self.KEY_VARIABLE} so only its link opens it")
 
-        server = WebUIServer(host=host, port=port, root=args.root, access_key=access_key, unix_socket=args.unix_socket)
+        server = WebUIServer(host=host, port=port, root=args.root, access_key=access_key, unix_socket=args.unix_socket, workspace=args.workspace)
         server.serve()
 
 

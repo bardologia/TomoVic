@@ -24,6 +24,7 @@ class ProjectPaths:
         logs_dir: Directory the web UI writes logs and state files into.
         gpu_pools_dir: Directory holding per-job live GPU pool files.
         saved_runs_dir: Directory holding saved launch configurations.
+        workspace_dir: Default dataset bridge workspace, where TomoVis imports become runs the TomoVic tools read.
     """
 
     REQUIRED_DIRS   = ("main", "configuration", "tools")
@@ -54,6 +55,7 @@ class ProjectPaths:
         self.logs_dir       = self.repo_root / "logs"
         self.gpu_pools_dir  = self.logs_dir / "gpu_pools"
         self.saved_runs_dir = self.logs_dir / "saved_runs"
+        self.workspace_dir  = self.repo_root / "workspace"
 
         self._require_repository()
 

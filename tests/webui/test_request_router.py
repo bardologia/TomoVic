@@ -21,11 +21,12 @@ from routers.results_routers import DatasetRouter, ResultsRouter
 from routers.static_router   import StaticRouter
 from routers.system_router   import SystemRouter
 from routers.tomovis_router  import TomoVisRouter
+from routers.workspace_router import WorkspaceRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 89
-SECTION_COUNT = 23
+ROUTE_COUNT   = 93
+SECTION_COUNT = 24
 
 RESOLUTIONS = [
     ("GET",  "/",                                StaticRouter),
@@ -67,6 +68,10 @@ RESOLUTIONS = [
     ("POST", "/api/impact/politeness",           SystemRouter),
     ("POST", "/api/tomovis/event",               TomoVisRouter),
     ("GET",  "/api/tomovis/script/volume",       TomoVisRouter),
+    ("GET",  "/api/workspace/current",           WorkspaceRouter),
+    ("POST", "/api/workspace/current",           WorkspaceRouter),
+    ("GET",  "/api/workspace/datasets",          WorkspaceRouter),
+    ("GET",  "/api/workspace/dataset",           WorkspaceRouter),
 ]
 
 
@@ -165,7 +170,8 @@ def build_routers() -> list:
         SavedRunRouter(None, None, None),
         RunConfigRouter(None),
         SystemRouter(None, None, None, None, None, None, None, None),
-        TomoVisRouter(None, None),
+        TomoVisRouter(None, None, None),
+        WorkspaceRouter(None),
     ]
 
 

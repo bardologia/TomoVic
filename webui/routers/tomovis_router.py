@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+from bridge.import_watch      import TomoVisImportWatch
 from routers.dispatch         import HttpExchange, RouteTable, SubRouter
 from tomovis.directory_lister import DirectoryLister
 from tomovis.envelope         import TomoVisEnvelope
@@ -29,6 +30,7 @@ class TomoVisRouter(SubRouter):
 
     Attributes:
         sessions          : Page session store.
+        watch             : Dataset bridge watch told about every window event, so a successful import reaches the TomoVic tools.
         logger            : Console logger.
         envelope          : Envelope packer.
         lister            : Directory lister for the file dialog.
@@ -41,15 +43,17 @@ class TomoVisRouter(SubRouter):
 
     EXPORT_FIGURE = re.compile(r"export:[1-9][0-9]{0,8}")
 
-    def __init__(self, sessions: TomoVisSessions, logger: WebLogger) -> None:
-        """Stores the session store and declares the routes.
+    def __init__(self, sessions: TomoVisSessions, watch: TomoVisImportWatch, logger: WebLogger) -> None:
+        """Stores the session store and the import watch and declares the routes.
 
         Args:
             sessions : Page session store.
+            watch    : Dataset bridge import watch.
             logger   : Console logger.
         """
 
         self.sessions          = sessions
+        self.watch             = watch
         self.logger            = logger
         self.envelope          = TomoVisEnvelope()
         self.lister            = DirectoryLister()
@@ -141,6 +145,11 @@ class TomoVisRouter(SubRouter):
 
         with entry.lock:
             window = entry.window
+            if window is None:
+                exchange.send_json({"error": "unknown TomoVis session"}, 404)
+                return
+
+            before = self.watch.before(window)
             try:
                 window.handle(exchange.body.get("event"))
             except TomoVisEventError as error:
@@ -148,6 +157,7 @@ class TomoVisRouter(SubRouter):
                 return
 
             output = window.drain()
+            self.watch.observe(entry.sid, exchange.body.get("event"), before, window, output.dialogs)
             blobs  = {f"view:{name}": image for name, image in output.views.items()}
             blobs.update(output.frames)
             header = {
@@ -235,6 +245,9 @@ class TomoVisRouter(SubRouter):
             return
 
         with entry.lock:
+            if entry.window is None:
+                exchange.send_json({"error": "unknown TomoVis session"}, 404)
+                return
             payload = entry.window.volumePayload(serial)
             if payload is None:
                 exchange.send_json({"error": "no volume with this serial"}, 404)
@@ -249,6 +262,9 @@ class TomoVisRouter(SubRouter):
         if entry is None:
             return
         with entry.lock:
+            if entry.window is None:
+                exchange.send_json({"error": "unknown TomoVis session"}, 404)
+                return
             exchange.send_json(entry.window.metadata())
 
     def fs(self, exchange: HttpExchange) -> None:

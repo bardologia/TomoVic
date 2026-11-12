@@ -13,6 +13,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib     import Path
 
+from bridge.dataset_bridge    import DatasetBridge
+from bridge.dataset_workspace import DatasetWorkspace
+from bridge.import_watch      import TomoVisImportWatch
 from config_registry        import ConfigRegistry
 from contention_monitor     import ContentionMonitor
 from cube_explorer          import CubeExplorer, SliceCollectionMailer, SliceCollector
@@ -44,6 +47,7 @@ from routers.results_routers import DatasetRouter, ResultsRouter
 from routers.static_router   import StaticRouter
 from routers.system_router   import SystemRouter
 from routers.tomovis_router  import TomoVisRouter
+from routers.workspace_router import WorkspaceRouter
 
 
 class _Server(ThreadingHTTPServer):
@@ -98,11 +102,13 @@ class WebUIServer:
         gate: Access gate admitting only browsers that hold the access key, None when the console has no key.
         logger: Console logger shared by every component.
         paths: Project path resolver rooted at the repository.
+        workspace: Dataset bridge workspace, the folder where TomoVis imports become runs the TomoVic tools read.
+        bridge: Dataset bridge sharing one current dataset between TomoVis and the TomoVic tools.
         router: Request router holding the ordered route handlers.
     """
 
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None, access_key: str = "", unix_socket: Path | None = None) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, root: Path | None = None, access_key: str = "", unix_socket: Path | None = None, workspace: Path | None = None) -> None:
         """Constructs every console component and assembles the request router.
 
         Args:
@@ -111,6 +117,7 @@ class WebUIServer:
             root: Repository root override; discovered from this file when None.
             access_key: Secret a browser must present before the console answers it, empty to answer every request.
             unix_socket: Path of a Unix socket to listen on instead of host and port, None to listen on TCP.
+            workspace: Dataset bridge workspace folder; the project's workspace_dir when None.
         """
 
         self.host        = host
@@ -146,6 +153,9 @@ class WebUIServer:
         self.launcher       = RunLauncher(self.paths, self.logger, self.resolver, self.processes)
         self.run_configs    = RunConfigReader(self.logger)
         self.tomovis        = TomoVisSessions(self.logger)
+        self.workspace      = DatasetWorkspace(self.paths.workspace_dir if workspace is None else workspace, self.cubes.roots, self.logger)
+        self.bridge         = DatasetBridge(self.workspace, self.cubes, self.slices, self.logger)
+        self.import_watch   = TomoVisImportWatch(self.bridge, self.logger)
 
         self.router = RequestRouter(self.logger, [
             StaticRouter(self.paths, self.results),
@@ -160,7 +170,8 @@ class WebUIServer:
             SavedRunRouter(self.paths, self.saved_runs, self.launcher),
             RunConfigRouter(self.run_configs),
             SystemRouter(self.system, self.watchdog, self.contention, self.detacher, self.notifier, self.nuke, self.processes, self.logger),
-            TomoVisRouter(self.tomovis, self.logger),
+            TomoVisRouter(self.tomovis, self.import_watch, self.logger),
+            WorkspaceRouter(self.bridge),
         ], self.gate)
 
     def _report_ready(self) -> None:
@@ -177,6 +188,7 @@ class WebUIServer:
             f"scripts      {len(scripts)} entry points",
             f"interpreter  {preferred}",
             f"envs found   {len(interpreters)}",
+            f"workspace    {self.workspace.root}",
         ])
 
     def _bind_unix_socket(self) -> _UnixServer:
@@ -213,10 +225,10 @@ class WebUIServer:
     def serve(self) -> None:
         """Serves the console until interrupted, then stops the background workers.
 
-        Starts the contention monitor and the progress watcher, runs the HTTP
-        server on a worker thread, and blocks in the detacher wait loop until a
-        keyboard interrupt or detach request arrives. A Unix socket is removed
-        again when the server stops.
+        Starts the contention monitor, the progress watcher and the dataset
+        bridge, runs the HTTP server on a worker thread, and blocks in the
+        detacher wait loop until a keyboard interrupt or detach request arrives.
+        A Unix socket is removed again when the server stops.
         """
 
         server        = self._bind_unix_socket() if self.unix_socket else _Server((self.host, self.port), _Handler)
@@ -226,6 +238,7 @@ class WebUIServer:
         self.contention.start()
         self.watchdog.start()
         self.progress_watch.start()
+        self.bridge.start()
 
         worker = threading.Thread(target=server.serve_forever, name="HttpServer", daemon=True)
         worker.start()
