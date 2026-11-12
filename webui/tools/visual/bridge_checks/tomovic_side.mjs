@@ -105,7 +105,7 @@ class TomoVicSideChecks {
   }
 
   async waitLoaded(id, timeout = 90000) {
-    await this.page.waitForFunction((i) => window.tomogramView.selectedId === i && window.tomogramView.meta && !window.tomogramView.polling, id, { timeout });
+    await this.page.waitForFunction((i) => window.tomogramView && window.tomogramView.selectedId === i && window.tomogramView.meta && !window.tomogramView.polling, id, { timeout });
   }
 
   async waitCompletion(piece) {
