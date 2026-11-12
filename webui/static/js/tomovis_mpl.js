@@ -302,10 +302,17 @@ class MplToolbar {
 }
 
 class MplAxesChooser {
+  static COMBO_CHROME = 27;
+
+  static comboHint(axes) {
+    return Math.max(...axes.map((entry) => QtFontMetrics.horizontalAdvance(entry.title, QtFontMetrics.APP))) + MplAxesChooser.COMBO_CHROME;
+  }
+
   static async choose(ctx, axes) {
     const modal = new TomoVisModal({ title: "Customize", className: "tv-mpl-chooser", buttons: ["OK", "Cancel"], escape: "Cancel", layer: ctx.layer });
     const combo = ctx.kit.local("combo", { items: axes.map((entry) => entry.title) });
     combo.set({ index: 0, enabled: true });
+    combo.el.style.minWidth = `${MplAxesChooser.comboHint(axes)}px`;
     combo.el.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !combo.popup) modal.close("OK");
     }, { capture: true });
