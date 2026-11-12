@@ -440,7 +440,7 @@ class MplFormLayout {
     this.form.sections.forEach((section, index) => {
       const tab    = TomoVisInput.el("button", "tv-tab", section.title);
       const page   = TomoVisInput.el("div", "tv-mpl-page");
-      const widget = section.kind === "combo" ? this.comboWidget(section) : this.formWidget(section.fields, true);
+      const widget = section.kind === "combo" ? this.comboWidget(section) : this.formWidget(section.fields);
       tab.type = "button";
       tab.setAttribute("role", "tab");
       tab.addEventListener("click", () => this.showTab(index));
@@ -466,7 +466,7 @@ class MplFormLayout {
   comboWidget(section) {
     const wrap  = TomoVisInput.el("div", "tv-mpl-combowidget");
     const stack = TomoVisInput.el("div", "tv-mpl-combowidget__stack");
-    const forms = section.pages.map((page) => this.formWidget(page.fields, false).forms[0]);
+    const forms = section.pages.map((page) => this.formWidget(page.fields).forms[0]);
     const combo = this.ctx.kit.local("combo", { items: section.pages.map((page) => page.title), onChange: (index) => this.showPage(forms, index) });
     combo.set({ index: 0, enabled: true });
     forms.forEach((form) => stack.append(form.el));
@@ -479,12 +479,12 @@ class MplFormLayout {
     forms.forEach((form, i) => { form.el.hidden = i !== index; });
   }
 
-  formWidget(fields, margin) {
-    const grid   = TomoVisInput.el("div", `tv-mpl-form${margin ? " tv-mpl-form--margin" : ""}`);
+  formWidget(fields) {
+    const grid   = TomoVisInput.el("div", "tv-mpl-form");
     const values = [];
     for (const field of fields) {
       if (field.kind === "separator") {
-        grid.append(TomoVisInput.el("span", "tv-mpl-form__label", " "), TomoVisInput.el("span", "", " "));
+        grid.append(TomoVisInput.el("span", "tv-mpl-form__label tv-mpl-form__sep", " "), TomoVisInput.el("span", "tv-mpl-form__sep", " "));
         continue;
       }
       if (field.kind === "comment") {
