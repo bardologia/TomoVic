@@ -109,6 +109,10 @@ class DatasetLayer {
     return DatasetLayer.stack[DatasetLayer.stack.length - 1] || null;
   }
 
+  static closeAll() {
+    [...DatasetLayer.stack].reverse().forEach((layer) => layer.close());
+  }
+
   show() {
     document.body.appendChild(this.root);
     DatasetLayer.stack.push(this);
@@ -1208,7 +1212,9 @@ class DatasetBridge {
   }
 
   launch(launch, name) {
-    window.app.launchView.pendingImport = { name, script: launch.script, overrides: launch.overrides };
+    const overrides = Object.fromEntries(Object.entries(launch.overrides).map(([key, value]) => [key, typeof value === "string" ? value : PythonLiteral.render(value)]));
+    DatasetLayer.closeAll();
+    window.app.launchView.pendingImport = { name, script: launch.script, overrides };
     if (window.location.hash === `#/launch/${launch.script}`) window.app.launchView.show(launch.script);
     else window.router.go(`launch/${launch.script}`);
   }
