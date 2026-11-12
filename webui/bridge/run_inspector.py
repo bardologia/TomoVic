@@ -434,6 +434,11 @@ class RunInspector:
         scripts_ready = ready and scripts.is_file() and pieces["height_range"]["present"]
         return {"link": str(link), "scripts_link": str(scripts), "revision": record.tomovis_revision, "ready": ready, "scripts_ready": scripts_ready}
 
+    def nbytes(self, header: tuple[tuple, str]) -> int:
+        """Returns the byte size of an array with the given (shape, dtype)."""
+
+        return int(np.prod(header[0], dtype=np.int64)) * np.dtype(header[1]).itemsize
+
     def payload(self, run_dir: Path, record: DatasetRecord | None, progress: tuple[str, float] | None, links: tuple[Path, Path] | None) -> dict:
         """Builds the Dataset payload of the workspace routes.
 
@@ -490,8 +495,3 @@ class RunInspector:
             "tools"        : self.tools(pieces, imported, tomovis),
             "tomovis"      : tomovis,
         }
-
-    def nbytes(self, header: tuple[tuple, str]) -> int:
-        """Returns the byte size of an array with the given (shape, dtype)."""
-
-        return int(np.prod(header[0], dtype=np.int64)) * np.dtype(header[1]).itemsize
