@@ -34,7 +34,7 @@
 }
 .page--tomovis.is-active { display: flex; flex-direction: column; }
 body.is-tomovis-page .footer { display: none; }
-body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2px), 12px); }
+body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2), 12px); }
 @media (max-width: 900px) {
   .page--tomovis { padding-top: calc(66px + var(--tv-pad-y)); }
   .page--tomovis .tv-window { height: calc(100dvh - 66px - 2 * var(--tv-pad-y)); }
