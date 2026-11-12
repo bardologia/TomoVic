@@ -916,7 +916,7 @@ class DatasetCard extends DatasetLayer {
     let   top    = rect.bottom + 8;
 
     if (this.placement === "right") {
-      left = rect.right + 12;
+      left = this.anchor.closest(".ds-indicator").getBoundingClientRect().right + 18;
       top  = rect.bottom - box.height;
     } else if (top + box.height > innerHeight - margin) {
       top = rect.top - 8 - box.height;
