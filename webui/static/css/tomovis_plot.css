@@ -110,31 +110,40 @@
 }
 .tv-mpl-rubberband { z-index: 1; }
 
+.tv-axes-dialog,
+.tv-mpl-chooser,
+.tv-mpl-subplots { --tv-field-h: 32px; min-width: 0; }
+.tv-axes-dialog .tv-modal__body,
+.tv-mpl-chooser .tv-modal__body { padding: 11px 11px 0; }
+.tv-axes-dialog .tv-modal__buttons,
+.tv-mpl-chooser .tv-modal__buttons { gap: 6px; padding: 6px 11px 11px; }
+
+.tv-axes-dialog { width: 280px; }
 .tv-axes-dialog__grid {
   display: grid;
-  grid-template-columns: auto 200px;
-  gap: 8px 10px;
+  grid-template-columns: minmax(0, 1fr) 195px;
+  gap: 6px;
   align-items: center;
 }
 .tv-axes-dialog__grid .tv-line,
 .tv-axes-dialog__grid .tv-spin { width: 100%; max-width: none; }
+.tv-axes-dialog__grid .tv-spin { height: 33px; }
 
-.tv-mpl-chooser .tv-modal__body {
-  display: grid;
-  gap: 8px;
-  min-width: 300px;
-}
+.tv-mpl-chooser .tv-modal__body { display: grid; gap: 6px; }
+.tv-mpl-chooser .tv-label { display: flex; align-items: center; height: 24px; }
 .tv-mpl-chooser .tv-combo { width: 100%; }
 
-.tv-mpl-subplots__columns { display: flex; gap: 16px; }
-.tv-mpl-subplots__column {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 190px;
-}
-.tv-mpl-subplots__stretch { flex: 1 1 auto; }
+.tv-mpl-subplots > .tv-modal__title:empty::before { content: "\00a0"; }
+.tv-mpl-subplots .tv-modal__body { padding: 11px; }
+.tv-mpl-subplots__columns { display: grid; grid-template-columns: 163px 163px; column-gap: 6px; }
+.tv-mpl-subplots__column { display: flex; flex-direction: column; gap: 6px; }
+.tv-mpl-subplots__column > .tv-group + .tv-button { margin-top: auto; }
 .tv-mpl-subplots__column > .tv-button { width: 100%; }
+.tv-mpl-subplots .tv-group { gap: 0; }
+.tv-mpl-subplots .tv-group__title { display: flex; align-items: center; height: 28px; padding-left: 2px; }
+.tv-mpl-subplots .tv-group__body { padding: 9px 10px 10px; }
+.tv-mpl-subplots .tv-mpl-form { grid-template-columns: minmax(0, 1fr) 73px; }
+.tv-mpl-subplots .tv-mpl-form .tv-spin { width: 73px; height: 33px; }
 
 .tv-mpl-window { box-shadow: 0 18px 44px var(--tv-shadow); }
 .tv-mpl-window > .tv-modal__title { display: flex; align-items: center; gap: 10px; padding-right: 6px; }

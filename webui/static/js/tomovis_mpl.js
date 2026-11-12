@@ -375,7 +375,7 @@ class MplSubplotDialog {
         form.append(TomoVisInput.el("label", "tv-label tv-mpl-form__label", name), spin.el);
       }
       box.body.append(form);
-      column.append(box.el, TomoVisInput.el("div", "tv-mpl-subplots__stretch"));
+      column.append(box.el);
       for (const text of group.buttons) {
         const button = TomoVisInput.el("button", "tv-button", text);
         button.type = "button";
