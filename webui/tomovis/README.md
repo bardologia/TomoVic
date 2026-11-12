@@ -45,7 +45,11 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   20 minutes, which only happens when the tab crashed, was killed, or was frozen by the browser that long.
   A request on a dropped session opens a fresh window with the warning
   `TomoVis session expired; a new window was opened.`
-- **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. Lines the browser
+- **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. The startup 3D check
+  that `visualizer.py` prints when it is imported is printed once per window session: the browser's WebGL2
+  probe stands in for `has_usable_opengl()`, so the line is `OpenGL context OK, version=(2, 0), profile=0`
+  when a WebGL2 context (version 2.0, no profiles) can be created and `QOpenGLContext.create() failed` when
+  it cannot, in which case the 3D tab is left out as F-090 says. Lines the browser
   posts to `log` keep vispy's level: `ERROR: ...` lines are logged at error, `WARNING: ...` at warning, the
   rest at info (`TomoVisConsole.relay`). A browser-side vispy callback error is logged as vispy's
   `_handle_exception` logs it: one multi-line `WARNING: Traceback (most recent call last): ...` entry, then

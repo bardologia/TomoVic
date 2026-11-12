@@ -362,3 +362,16 @@ def test_sessions_live_until_closed_or_gone(server):
     assert client.post("event", {"sid": others[1], **sync})[0] == 404
     assert client.post("alive", {"sid": others[1]})[0] == 404
 
+
+def test_window_sessions_print_the_opengl_check(server):
+    """Each window session prints has_usable_opengl()'s message for the browser's WebGL2 probe; scripts sessions print nothing (F-153)."""
+
+    client, logger, _ = server
+    before            = len(logger.recent(400))
+
+    client.session()
+    assert client.post("session", {"kind": "window", "webgl2": False})[0] == 200
+    client.session("scripts")
+
+    messages = [record["message"] for record in logger.recent(400)[before:]]
+    assert messages == ["TomoVis: OpenGL context OK, version=(2, 0), profile=0", "TomoVis: QOpenGLContext.create() failed"]

@@ -18,7 +18,7 @@ import threading
 import time
 
 from tomovis.figure_host import TomoVisFigure
-from tomovis.window      import TomoVisWindow
+from tomovis.window      import TomoVisConsole, TomoVisWindow
 from web_logger          import WebLogger
 
 
@@ -70,6 +70,8 @@ class TomoVisSessions:
     Attributes:
         IDLE_LIMIT : Default seconds without a request or heartbeat after which a session's page counts as gone.
         KINDS      : Session kinds the store opens.
+        GL_OK      : has_usable_opengl()'s message for a usable context; WebGL2 is version 2.0 and has no profiles (QSurfaceFormat.NoProfile = 0).
+        GL_FAILED  : has_usable_opengl()'s message when the context cannot be created.
         logger     : Console logger.
         idle_limit : Seconds without a request or heartbeat after which this store drops a session.
         entries    : Session id to entry.
@@ -78,6 +80,8 @@ class TomoVisSessions:
 
     IDLE_LIMIT = 1200.0
     KINDS      = ("window", "scripts")
+    GL_OK      = "OpenGL context OK, version=(2, 0), profile=0"
+    GL_FAILED  = "QOpenGLContext.create() failed"
 
     def __init__(self, logger: WebLogger, idle_limit: float = IDLE_LIMIT) -> None:
         """Creates an empty store.
@@ -91,6 +95,18 @@ class TomoVisSessions:
         self.idle_limit = idle_limit
         self.entries    = {}
         self.lock       = threading.Lock()
+
+    def printOpenGlCheck(self, webgl2: bool) -> None:
+        """Prints has_usable_opengl()'s message as visualizer.py does when it is imported (F-153).
+
+        The browser's WebGL2 probe stands in for the Qt offscreen context
+        check, and every window session stands for one start of TomoVis.
+
+        Args:
+            webgl2 : Whether the browser could create a WebGL2 context.
+        """
+
+        TomoVisConsole(self.logger).print(self.GL_OK if webgl2 else self.GL_FAILED)
 
     def dropGone(self) -> None:
         """Drops the sessions whose page sent nothing for longer than the idle limit; the caller holds ``lock``."""
@@ -119,8 +135,10 @@ class TomoVisSessions:
             raise ValueError(f"unknown session kind '{kind}'")
 
         sid    = secrets.token_hex(16)
-        window = TomoVisWindow(self.logger, has3d=webgl2) if kind == "window" else None
-        if window is not None:
+        window = None
+        if kind == "window":
+            self.printOpenGlCheck(webgl2)
+            window = TomoVisWindow(self.logger, has3d=webgl2)
             window.drain()
         entry = TomoVisSessionEntry(sid, kind, window)
 

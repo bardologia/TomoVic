@@ -3,6 +3,9 @@ import path from "node:path";
 import { TomoVisHarness as H, TomoVisCheckRun as R } from "./harness.mjs";
 
 class FinalShellChecks {
+  static OPENGL_OK     = "TomoVis: OpenGL context OK, version=(2, 0), profile=0";
+  static OPENGL_FAILED = "TomoVis: QOpenGLContext.create() failed";
+
   constructor(options) {
     this.options = options;
     this.run     = new R("final-shell");
@@ -19,6 +22,11 @@ class FinalShellChecks {
     await this.page.setViewportSize({ width, height });
     await this.page.goto("about:blank");
     await H.openTomoVis(this.page);
+  }
+
+  async serverLog() {
+    const answer = await this.page.evaluate(() => fetch("/api/server-log?limit=400").then((r) => r.json()));
+    return answer.lines.map((line) => line.message);
   }
 
   async sessionsSurvive() {
@@ -53,6 +61,24 @@ class FinalShellChecks {
     });
   }
 
+  async openGlPrint() {
+    await this.run.check("C-02", "each window session prints the startup OpenGL check line to the console log", async () => {
+      const start = (await this.serverLog()).length;
+      await this.fresh();
+      const withGl = (await this.serverLog()).slice(start).filter((line) => line.includes("OpenGL") || line.includes("QOpenGLContext"));
+
+      const bare = await H.launch({ port: this.options.port, gl: this.options.gl, webgl: false });
+      await H.openTomoVis(bare.page);
+      this.errors.push(...bare.errors);
+      await bare.browser.close();
+      const all     = await this.serverLog();
+      const without = all.slice(all.lastIndexOf(withGl[withGl.length - 1]) + 1).filter((line) => line.includes("OpenGL") || line.includes("QOpenGLContext"));
+
+      R.equal([withGl, without], [[FinalShellChecks.OPENGL_OK], [FinalShellChecks.OPENGL_FAILED]], "OpenGL check lines");
+      return `${withGl[0]} | ${without[0]}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -61,6 +87,7 @@ class FinalShellChecks {
     await H.openTomoVis(this.page);
 
     if (this.wanted("sessions")) await this.sessionsSurvive();
+    if (this.wanted("opengl")) await this.openGlPrint();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
