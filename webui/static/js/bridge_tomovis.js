@@ -146,8 +146,8 @@ class TomoVisBridge {
     if (state.bridge_error) return { text: state.bridge_error, actions: [] };
     if (!dataset) return null;
     if (dataset.state === "preparing") return TomoVisBridge.preparing(dataset);
+    if (dataset.state === "error") return { text: dataset.error, actions: [] };
     if (!dataset.tomovis.ready && dataset.pieces.tomogram.problem) return { text: `TomoVis cannot open ${dataset.name}: ${dataset.pieces.tomogram.problem}.`, actions: [] };
-    if (!dataset.tomovis.ready && dataset.error) return { text: dataset.error, actions: [] };
 
     const held = state.tomovis.held;
     if (!held) return { text: `${dataset.name} is not open in this window.`, actions: [{ label: "Open in TomoVis", run: () => this.use(dataset) }] };
