@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="/static/css/tomovis_slicer.css" />
 <link rel="stylesheet" href="/static/css/tomovis_plot.css" />
 <link rel="stylesheet" href="/static/css/tomovis_volume.css" />
+<link rel="stylesheet" href="/static/css/bridge_tomovis.css" />
 </head>
 <body>
 
@@ -62,6 +63,7 @@
       </div>
     </div>
   </nav>
+  <div class="nav__dataset" id="nav-dataset"></div>
   <div class="nav__status" id="nav-status" title="Backend connection">
     <thinking-orb state="connecting" size="20"></thinking-orb>
     <span class="dot"></span>
@@ -219,13 +221,17 @@
       <hairline-figure name="voxels" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
 
+    <div class="ds-bar" id="cube-dataset-bar"></div>
+
     <div class="cube-pick">
       <div class="run-strip" id="cube-strip" aria-label="Saved cubes"></div>
       <div class="cube-mctl cube-param" id="cube-param-row" hidden>
         <label for="cube-param-tag" title="Overlay the Gaussian-mixture reconstruction of this cube as a second source">parametrized tomogram</label>
         <select id="cube-param-tag" class="cube-mselect"></select>
+        <span class="ds-inline" id="cube-param-add" hidden></span>
       </div>
       <p class="cube-hint" id="cube-hint"><span class="orb-busy"><thinking-orb state="searching" size="20"></thinking-orb><span>Loading directories&hellip;</span></span></p>
+      <div class="ds-complete" id="cube-complete" hidden></div>
       <div class="cube-progress" id="cube-progress" hidden>
         <thinking-orb class="cube-progress__orb" state="searching" size="64"></thinking-orb>
         <div class="cube-progress__track"><i class="cube-progress__fill" id="cube-progress-fill"></i></div>
@@ -251,6 +257,7 @@
         <button type="button" class="cube-mode" data-view="figures" title="Browse the figures the preprocessing, the parameter extraction and this console already saved under the run">Figures</button>
         <span class="cube-modes__tools">
           <label class="lb-check" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
+          <button type="button" class="btn btn--mini" id="cube-dem-add" hidden>Add DEM</button>
           <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view and locked pixel exactly as shown">Link</button>
           <button type="button" class="btn btn--mini" id="cube-story-toggle" title="Record an ordered sequence of view states and replay or share them">Story</button>
           <select id="cube-cmap" class="cube-mselect" aria-label="Tomogram colormap">
@@ -275,6 +282,7 @@
         </div>
         <ol class="cube-story__list" id="cube-story-list"></ol>
       </div>
+      <div class="ds-missing" id="cube-missing" hidden></div>
 
       <div class="cube-view" data-view="explorer">
       <div class="cube-deck" id="cube-deck" data-mode="map">
@@ -490,7 +498,9 @@
             </div>
             <label class="lb-check" id="cube-cloud-cut-sweep-wrap" title="Animate the cutting plane back and forth through the volume"><input type="checkbox" id="cube-cloud-cut-sweep" /> sweep</label>
             <label class="lb-check" id="cube-cloud-dem-wrap" title="Drape the cloud on the terrain: point height = DEM + elevation"><input type="checkbox" id="cube-cloud-dem" /> DEM terrain</label>
+            <button type="button" class="btn btn--mini" id="cube-cloud-dem-add" hidden>Add DEM</button>
             <label class="lb-check" id="cube-cloud-scale-wrap" title="Metres on all three axes &mdash; no height exaggeration"><input type="checkbox" id="cube-cloud-scale" /> in scale (1:1)</label>
+            <button type="button" class="btn btn--mini" id="cube-cloud-scale-add" hidden>Add pixel spacing</button>
             <span class="cube-elev__at" id="cube-cloud-at">Drag to orbit &middot; wheel to zoom &middot; double-click to reset.</span>
           </div>
           <div class="cube-cloud__stage">
@@ -818,6 +828,8 @@
       <hairline-figure name="slices" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
 
+    <div class="ds-bar" id="sc-dataset-bar"></div>
+
     <div class="cube-pick">
       <div class="run-strip" id="sc-strip" aria-label="Saved cubes"></div>
       <p class="cube-hint" id="sc-hint"><span class="orb-busy"><thinking-orb state="searching" size="20"></thinking-orb><span>Loading directories&hellip;</span></span></p>
@@ -912,6 +924,7 @@
 
   <!-- TOMOVIS -->
   <section class="page page--tomovis" data-page="tomovis">
+    <div class="tvb-caption" id="tvb-caption" hidden></div>
     <div class="tv-window" id="tv-window">
       <header class="tv-titlebar" id="tv-titlebar">
         <span class="tv-titlebar__title">TomoVis</span>
@@ -950,6 +963,7 @@
       </p>
       <hairline-figure name="voxels" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
+    <div class="ds-bar" id="tvs-dataset-bar"></div>
     <div class="tv-scripts" id="tv-scripts">
       <section class="tv-script" id="tv-script-slicer" aria-label="SlicerMatplotlib"></section>
       <section class="tv-script" id="tv-script-volume" aria-label="VolumeRendering"></section>
@@ -1060,6 +1074,8 @@
 <script src="/static/js/console.js"></script>
 <script src="/static/js/results.js"></script>
 <script src="/static/js/run_strip.js"></script>
+<script src="/static/js/dataset_bridge.js"></script>
+<script src="/static/js/bridge_tomovis.js"></script>
 <script src="/static/js/tomogram.js"></script>
 <script src="/static/js/volume.js"></script>
 <script src="/static/js/globe_tour.js"></script>

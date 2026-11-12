@@ -29,6 +29,47 @@ The server runs the copied slots in the original order with the original numpy c
 
 The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
 
+## Dataset bridge
+
+TomoVis and the TomoVic tools share one current dataset per console. The bridge lives in `webui/bridge/`
+and its routes in `webui/routers/workspace_router.py` (`/api/workspace`). Nothing in this package changes
+for it:
+
+- **Imports reach the TomoVic tools.** The router hands every window event to `TomoVisImportWatch`
+  (`bridge/import_watch.py`): `before(window)` ahead of `window.handle`, `observe(...)` right after
+  `window.drain()`, under the page's lock, and not at all when the event was refused. The watch remembers
+  the open-mode file request of each import (`FuSAR Tomo (*.hd5)`, `UAVSAR Tomo (*.h5)`, `Numpy (*.npy)`,
+  `RAT file (*.rat)`, `Visualizer (*.hd5)`). When a `dialog_result` answers it, the window holds a new cube
+  and no `Import error` or `Open error` box came out, the import succeeded, and the bridge registers the
+  file as a run folder in the workspace in the same request. A registration error never changes the
+  TomoVis answer; it is logged with its traceback and shown as `bridge_error`.
+- **TomoVic datasets reach TomoVis through File > Import > hd5.** For every dataset the bridge writes a
+  TomoVis link file: a FuSAR Tomo hd5 of a few kilobytes whose one dataset `tomogram` is stored
+  externally in the dataset's `.npy` (HDF5 external storage at the npy header offset, nothing copied). The
+  height range is written as the dataset attributes `elevation_limits` and `range`, the pixel spacing as
+  the root attributes `ps_az` and `ps_rg` (1.0 when unknown). The page sends `trigger openFUSAR`, then
+  `dialog_result` with the link's path, so the window, Play stop, D-3 and every carry-over behave as after
+  a manual import. A dataset made from a session therefore reopens as an hd5 import of its cube, heights
+  and spacing: the session's channel choice, colour maps, ROI, plots and other metadata are not restored.
+- **Closed sessions release their window at once.** `TomoVisSessions.release` drops the window, the
+  figures and the script data of a closed or LRU-dropped session and runs the cyclic garbage collector,
+  because the stand-in signals form reference cycles that otherwise keep the cube in memory.
+
+| Route | Request | Answer |
+|---|---|---|
+| GET `/api/workspace/current?sid=` | `sid` of a TomoVis window, optional | `{ok, workspace, serial, set_by, current: Dataset \| null, bridge_error}`, plus `tomovis: {held, open}` with a sid |
+| GET `/api/workspace/datasets?base=` | runs root of the Results tab, may be empty | `{ok, current_id, datasets: [Dataset + {under_base, strip}]}`, newest opened first |
+| GET `/api/workspace/dataset?id=` | dataset id | `{ok, dataset}`; an unregistered run under the runs roots has `registered: false`; 404 otherwise |
+| POST `/api/workspace/current` | `{id: str \| null}` | `{ok, serial, set_by: "tomovic", current}`; registers a run on first use; 400 outside the runs roots |
+| POST `/api/workspace/add` | `{id, piece, ...fields}` | `{ok, dataset}`; 400 `{ok: false, error, piece}`, 404 unknown id, 409 while preparing or loading |
+
+A dataset id is the absolute path of a run directory. `open` is true when the current dataset's link is
+ready, a TomoVic page set it, and the window holds another dataset, none, or this one at an older
+`tomovis_revision`. The workspace folder (`--workspace PATH`, default `<repo root>/workspace/port_<port>`) holds one
+run folder per import under `imports/`, the records and links of TomoVic runs under `linked/`, and
+`current.json`; run folders are never written. Every Piece of the Dataset payload also carries `note`,
+the reason a run lacks a piece that only preprocessing writes.
+
 ## Behaviour decisions
 
 - **D-1.** RGB views get per-channel levels through pyqtgraph's `rgba` level mode, one `(lo, hi)` pair

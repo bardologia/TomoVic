@@ -8,11 +8,14 @@ session only when its page has sent no request and no heartbeat for
 closing (a crashed or killed tab). An open page sends a heartbeat every
 minute, also while it is hidden. Every request on one entry holds the
 entry's own lock, so the events of one page run strictly in order while
-other pages proceed.
+other pages proceed. A closed or dropped session releases its window at once
+instead of waiting for the cyclic garbage collector, because a window's
+signal connections form reference cycles.
 """
 
 from __future__ import annotations
 
+import gc
 import secrets
 import threading
 import time
@@ -108,14 +111,18 @@ class TomoVisSessions:
 
         TomoVisConsole(self.logger).print(self.GL_OK if webgl2 else self.GL_FAILED)
 
-    def dropGone(self) -> None:
-        """Drops the sessions whose page sent nothing for longer than the idle limit; the caller holds ``lock``."""
+    def dropGone(self) -> list[TomoVisSessionEntry]:
+        """Removes the sessions whose page sent nothing for longer than the idle limit; the caller holds ``lock``.
+
+        Returns:
+            The removed entries, which the caller releases once it has let go of ``lock``.
+        """
 
         now  = time.monotonic()
         gone = [sid for sid, entry in self.entries.items() if now - entry.seen > self.idle_limit]
         for sid in gone:
-            del self.entries[sid]
             self.logger.info(f"TomoVis: closed the page session {sid[:8]}, whose page sent nothing for {self.idle_limit:.0f} s")
+        return [self.entries.pop(sid) for sid in gone]
 
     def create(self, kind: str, webgl2: bool) -> TomoVisSessionEntry:
         """Opens a session after dropping the sessions whose page is gone.
@@ -143,8 +150,11 @@ class TomoVisSessions:
         entry = TomoVisSessionEntry(sid, kind, window)
 
         with self.lock:
-            self.dropGone()
+            dropped           = self.dropGone()
             self.entries[sid] = entry
+
+        for old in dropped:
+            self.release(old)
         return entry
 
     def get(self, sid: str) -> TomoVisSessionEntry:
@@ -160,7 +170,25 @@ class TomoVisSessions:
             return entry
 
     def close(self, sid: str) -> None:
-        """Drops a session; an unknown id is ignored, as a page may close twice."""
+        """Drops a session and releases it; an unknown id is ignored, as a page may close twice."""
 
         with self.lock:
-            self.entries.pop(sid, None)
+            entry = self.entries.pop(sid, None)
+        if entry is not None:
+            self.release(entry)
+
+    def release(self, entry: TomoVisSessionEntry) -> None:
+        """Frees a session that left the store: its window, figures and script data, then collects the cycles they formed.
+
+        Runs outside the store lock. It waits for a request still running on
+        the entry, so that request finishes with the window it started with.
+
+        Args:
+            entry : Entry already removed from ``entries``.
+        """
+
+        with entry.lock:
+            entry.window = None
+            entry.figures.clear()
+            entry.scripts.clear()
+        gc.collect()

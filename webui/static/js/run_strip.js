@@ -75,10 +75,10 @@ class RunStrip {
     return `${entry.group}/${entry.run} ${entry.stamp || ""}`.toLowerCase().includes(this.filter);
   }
 
-  _buildTree() {
+  _buildTree(entries = this.entries) {
     const root = { name: "", rel: "", dirs: new Map(), entries: [] };
 
-    this.entries.forEach((entry) => {
+    entries.forEach((entry) => {
       const parts = entry.group === "." ? [RunStrip.ROOT_LABEL] : entry.group.split("/");
       let   node  = root;
       let   rel   = "";
@@ -189,19 +189,23 @@ class RunStrip {
     this.total.textContent = this.filter ? `${shown} / ${this.entries.length} runs` : `${this.entries.length} runs`;
   }
 
+  reveal(entry) {
+    if (entry.group === ".") { this.openGroups.add("."); return; }
+    const parts = entry.group.split("/");
+    let   rel   = "";
+    parts.forEach((part) => {
+      rel = rel ? `${rel}/${part}` : part;
+      this.openGroups.add(rel);
+    });
+  }
+
   _seed() {
     this.entries.forEach((entry) => {
-      if (!this._stateFor(entry)) return;
-      if (entry.group === ".") { this.openGroups.add("."); return; }
-      const parts = entry.group.split("/");
-      let   rel   = "";
-      parts.forEach((part) => {
-        rel = rel ? `${rel}/${part}` : part;
-        this.openGroups.add(rel);
-      });
+      if (this._stateFor(entry)) this.reveal(entry);
     });
 
-    let node = this._buildTree();
+    const own  = this.entries.filter((entry) => !entry.shared);
+    let   node = this._buildTree(own.length ? own : this.entries);
     while (node.dirs.size === 1 && !node.entries.length) {
       node = node.dirs.values().next().value;
       this.openGroups.add(node.rel);

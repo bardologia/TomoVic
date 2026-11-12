@@ -669,7 +669,7 @@ class VolumeChecks {
   async logRoute() {
     await this.run.check("F-153", "3D prints reach the console log with the TomoVis prefix", async () => {
       await this.page.waitForTimeout(500);
-      const text = fs.readFileSync(path.join(REPO, "logs/tomovis_port/volume/console_8805.log"), "utf-8");
+      const text = fs.readFileSync(this.options.consoleLog, "utf-8");
       for (const line of ["TomoVis: Projection method: iso", "TomoVis: Cameras reset", "TomoVis: Selected channel: 1"]) R.assert(text.includes(line), `console log lacks ${line}`);
       return "Projection, reset and channel prints found in the console log";
     });

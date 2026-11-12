@@ -675,6 +675,24 @@ class CubeExplorer:
         self.globe_blobs = LruCache(self.GLOBE_CACHE_ENTRIES)
         self.status      = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
 
+    def forget(self, run_dir: str) -> None:
+        """Drops everything held in memory for one run, so its next load reads the files again.
+
+        Discards the cached cube states and globe blobs of the run and, when it
+        is the loaded cube, unloads it and returns the status to idle.
+
+        Args:
+            run_dir : Run directory path, the cube id.
+        """
+        prefix = f"{run_dir}|"
+        self.cube_cache.discard(lambda key: key.startswith(prefix))
+        self.globe_blobs.discard(lambda key: key.startswith(prefix))
+
+        with self.lock:
+            if self.loaded is not None and self.loaded["id"] == run_dir:
+                self.loaded = None
+                self.status = {"state": "idle", "id": None, "progress": 0.0, "stage": "", "error": ""}
+
     def list_cubes(self, base: str) -> dict:
         """Lists the preprocessing runs available under a runs root.
 
@@ -2851,6 +2869,14 @@ class SliceCollector:
         self.logger      = logger
         self.render_lock = threading.Lock()
         self.contexts    = LruCache(self.CACHE_CAP)
+
+    def forget(self, run_dir: str) -> None:
+        """Drops the opened context of one run, so its next use reads the files again.
+
+        Args:
+            run_dir : Run directory path, the cube id.
+        """
+        self.contexts.discard(lambda key: key == run_dir)
 
     def info(self, cube_id: str) -> dict:
         """Describes one collectable cube.

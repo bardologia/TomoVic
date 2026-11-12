@@ -65,6 +65,22 @@ class LruCache:
             while len(self.entries) > self.capacity:
                 self.entries.popitem(last=False)
 
+    def discard(self, predicate) -> int:
+        """Drops every entry whose key satisfies ``predicate``.
+
+        Args:
+            predicate : Callable taking a key and returning True for the keys to drop.
+
+        Returns:
+            The number of entries dropped.
+        """
+        with self.lock:
+            doomed = [key for key in self.entries if predicate(key)]
+            for key in doomed:
+                del self.entries[key]
+
+            return len(doomed)
+
     def clear(self) -> None:
         """Drops every entry."""
         with self.lock:

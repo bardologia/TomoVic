@@ -119,6 +119,10 @@ class App {
   }
 
   _initComponents() {
+    this.datasetBridge   = new window.DatasetBridge();
+    window.datasetBridge = this.datasetBridge;
+    this.datasetBridge.mountIndicator(document.getElementById("nav-dataset"), { variant: "nav", page: null });
+
     this.runConsole = new window.RunConsole({
       list: document.getElementById("job-list"),
       tiles: document.getElementById("console-tiles"),
@@ -172,6 +176,13 @@ class App {
       progressLabel : document.getElementById("cube-progress-label"),
       paramRow      : document.getElementById("cube-param-row"),
       paramSel      : document.getElementById("cube-param-tag"),
+      paramAdd      : document.getElementById("cube-param-add"),
+      datasetBar    : document.getElementById("cube-dataset-bar"),
+      complete      : document.getElementById("cube-complete"),
+      missing       : document.getElementById("cube-missing"),
+      demAdd        : document.getElementById("cube-dem-add"),
+      cloudDemAdd   : document.getElementById("cube-cloud-dem-add"),
+      cloudScaleAdd : document.getElementById("cube-cloud-scale-add"),
       slots         : document.getElementById("cube-slots"),
       slotsBody     : document.getElementById("cube-slots-body"),
       srcGroups     : [...document.querySelectorAll('[data-page="cube"] .cube-srcsel')],
@@ -347,6 +358,7 @@ class App {
     window.tomogramView = this.tomogramView;
 
     this.sliceCollectorView = new window.SliceCollectorView({
+      datasetBar  : document.getElementById("sc-dataset-bar"),
       strip       : document.getElementById("sc-strip"),
       hint        : document.getElementById("sc-hint"),
       stage       : document.getElementById("sc-stage"),
@@ -414,6 +426,7 @@ class App {
   }
 
   _onRoute(route, param) {
+    this.datasetBridge.routed(route);
     if (route === "home") {
       requestAnimationFrame(() => this.scenes.forEach((s) => s.resize && s.resize()));
     }
@@ -429,6 +442,7 @@ class App {
     if (route === "cube") this.tomogramView.enter(param);
     else this.tomogramView.leave();
     if (route === "slices") this.sliceCollectorView.enter();
+    else this.sliceCollectorView.leave();
     if (route === "console") this.runConsole.onShow();
     if (route === "tomovis") this.tomovisPage.enter();
     else this.tomovisPage.leave();

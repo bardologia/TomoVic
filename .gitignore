@@ -13,3 +13,4 @@ package-lock.json
 .claude/
 webui/tools/visual/.ffmpeg/
 !webui/tools/visual/package-lock.json
+/workspace/

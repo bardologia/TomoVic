@@ -24,13 +24,17 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from request_router         import RequestRouter
-from routers.tomovis_router import TomoVisRouter
-from tests.webui.conftest   import REPO_ROOT
-from tomovis.envelope       import TomoVisEnvelope
-from tomovis.session_store  import TomoVisSessions
-from web_logger             import WebLogger
-from web_ui_server          import _Handler
+from bridge.dataset_bridge    import DatasetBridge
+from bridge.dataset_workspace import DatasetWorkspace
+from bridge.import_watch      import TomoVisImportWatch
+from cube_explorer            import CubeExplorer, SliceCollector
+from request_router           import RequestRouter
+from routers.tomovis_router   import TomoVisRouter
+from tests.webui.conftest     import REPO_ROOT
+from tomovis.envelope         import TomoVisEnvelope
+from tomovis.session_store    import TomoVisSessions
+from web_logger               import WebLogger
+from web_ui_server            import _Handler
 
 INPUTS = REPO_ROOT / "tests" / "webui" / "fixtures" / "tomovis" / "inputs"
 
@@ -91,13 +95,16 @@ class TomoVisClient:
 
 
 @pytest.fixture
-def server():
-    """A TomoVis-only console on a free port, shut down after the test."""
+def server(tmp_path):
+    """A TomoVis-only console on a free port, its import watch over a bridge in a temporary workspace, shut down after the test."""
 
     logger   = WebLogger("tomovis-test")
     sessions = TomoVisSessions(logger)
+    cubes    = CubeExplorer(logger)
+    bridge   = DatasetBridge(DatasetWorkspace(tmp_path / "workspace", cubes.roots, logger), cubes, SliceCollector(cubes, logger), logger)
     httpd    = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    httpd.router = RequestRouter(logger, [TomoVisRouter(sessions, logger)])
+    bridge.start()
+    httpd.router = RequestRouter(logger, [TomoVisRouter(sessions, TomoVisImportWatch(bridge, logger), logger)])
     worker   = threading.Thread(target=httpd.serve_forever, daemon=True)
     worker.start()
     try:

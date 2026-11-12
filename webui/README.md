@@ -66,10 +66,48 @@ Results (Results, Cube, Slices, TomoVis, TomoVis scripts).
 | Configuration | `#/configuration` | `/api/configs` | Every configuration dataclass, field, type and default, parsed live from `configuration/`. |
 | Console | `#/console` | `/api/jobs`, `/api/stream` | Real-time stdout of launched jobs with stop control, plus per-unit logs and a progress strip for fan-out jobs. The page opens one server-sent-events channel (`GET /api/stream?channel=<id>`) and subscribes every job tile and every selected sub-run to it through `POST /api/stream/<channel>/subscribe` and `/unsubscribe`, so any number of open tiles costs the browser a single connection out of its six per origin. A dropped channel reconnects and each job stream replays from its last event id (a restarted server, recognised by the `boot` token in the channel's `hello` frame, replays everything); while it is down, a tile takes its status from the polled job list, and a tile whose job the console no longer knows turns `untracked`. Terminals are sized on an off-screen gauge before they open and tiles are fitted one per animation frame. Once a job has ended its tile shows Retry, which reopens the launch page with the overrides, interpreter and detach switch the job was launched with; each job record keeps that request under `request`. |
 | Results | `#/results` | `/api/results/*`, `/api/fs/*` | Browse any run or dataset directory: rendered markdown reports, figure galleries with compare pinning, configs, and inline log and text files. |
-| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, polyline transects with saved lines, a 3D scatterer point cloud, a WebGL2 ray-marched volume with transfer function and clip plane, the DEM grid, the scene on a Cesium globe with flight tracks, beam segment, preset camera moves and a choreographed walkthrough that drives the section cut in step with the camera, either renderable offline frame by frame into a 60 fps MP4 under the run's `figures/globe_tours` (WebCodecs H.264 or VP9, muxed in the browser, every frame waiting for its imagery tiles), selectable colormaps, paper-style figure export and PNG/CSV downloads, a Passes view walking the per-pass SLC amplitude and interferogram phase, a Pauli view of the polarimetric primary that Extract Polarimetry writes (composite, single-component and dominant maps at a chosen multilook window, with a scene balance table, a per-pixel readout and the same maps draped north-up on the globe), a Figures view over the figures saved under the run's `images`, `figures` and `params` trees, with the parametrized tomogram from `params/<tag>` runs as a selectable source. Link copies a `#/cube/<state>` URL that reopens the cube, view, source and locked pixel, and Story records an ordered list of such states to replay, share and snapshot. A run is any directory holding `data/dataset.json`. A load reads the tomogram, the primary SLC, the DEM and the chosen parameter block whole into memory through a process-wide read pool (`NpyReader`, up to 32 threads) that splits each file into 16 MB `pread` chunks, and books the wall time of every stage; the progress bar follows the bytes read against the byte plan of the load and names the files still in flight with their megabytes landed; after five silent seconds it also prints how long the load has been silent and the innermost frames of the load thread, and `kill -USR1 <pid>` dumps every console thread's stack to stderr. The ready line in the console log lists the stage times, the ready payload carries them under `timings`, and the tab shows the total next to the slowest stage. The last eight loaded cubes stay in memory (`CubeExplorer.CUBE_CACHE_ENTRIES`, keyed by run and parameter run tag), and their globe point blobs survive a switch, so going back to one is immediate. |
-| Slices | `#/slices` | `/api/slices/*` | Multi-run slice collector: tick any number of cubes, hover the primary SLC map to preview the same cuts from every run side by side, and click the map (or a slice's own button) to put cuts in a basket that persists in the browser. The basket renders into one `slice_collections/<name>/` folder with a `collection.json` manifest, and can be mailed as zip volumes through the report mailer (`REPORT_MAIL_PASSWORD`). |
-| TomoVis | `#/tomovis` | `/api/tomovis/*` | The DLR TomoVis desktop viewer inside the console, with its window kept as it was apart from TomoVic's colours and fonts: File (Open Ctrl+O, Save Ctrl+S, Import hd5, rat, h5, npy) and Data > Channel (RGB Ctrl+F, Red, Green, Blue) menus, the Slicer, Plot, Profile and 3D tabs and the status line. The copied TomoVis window runs on the server, one per open page, and the page sends it the same widget operations a user performed in Qt; files are opened and saved on the console host through a TomoVis file chooser. The 3D tab exists only when the browser can create a WebGL2 context. Package and API: `webui/tomovis/README.md`. |
-| TomoVis scripts | `#/tomovis_scripts` | `/api/tomovis/script/*` | The two standalone TomoVis scripts: SlicerMatplotlib (a server matplotlib figure of one range slice, `j` and `k` step through the slices) and VolumeRendering (the same hd5 file rendered as a volume, keys `1 2 3 4 0 [ ]`), each reading a file chosen on the console host. |
+| Cube | `#/cube` | `/api/cubes/*` | Tomogram explorer over preprocessing runs: live cuts with profiles, axis sweeps, polyline transects with saved lines, a 3D scatterer point cloud, a WebGL2 ray-marched volume with transfer function and clip plane, the DEM grid, the scene on a Cesium globe with flight tracks, beam segment, preset camera moves and a choreographed walkthrough that drives the section cut in step with the camera, either renderable offline frame by frame into a 60 fps MP4 under the run's `figures/globe_tours` (WebCodecs H.264 or VP9, muxed in the browser, every frame waiting for its imagery tiles), selectable colormaps, paper-style figure export and PNG/CSV downloads, a Passes view walking the per-pass SLC amplitude and interferogram phase, a Pauli view of the polarimetric primary that Extract Polarimetry writes (composite, single-component and dominant maps at a chosen multilook window, with a scene balance table, a per-pixel readout and the same maps draped north-up on the globe), a Figures view over the figures saved under the run's `images`, `figures` and `params` trees, with the parametrized tomogram from `params/<tag>` runs as a selectable source. Link copies a `#/cube/<state>` URL that reopens the cube, view, source and locked pixel, and Story records an ordered list of such states to replay, share and snapshot. A run is any directory holding `data/dataset.json`. A load reads the tomogram, the primary SLC, the DEM and the chosen parameter block whole into memory through a process-wide read pool (`NpyReader`, up to 32 threads) that splits each file into 16 MB `pread` chunks, and books the wall time of every stage; the progress bar follows the bytes read against the byte plan of the load and names the files still in flight with their megabytes landed; after five silent seconds it also prints how long the load has been silent and the innermost frames of the load thread, and `kill -USR1 <pid>` dumps every console thread's stack to stderr. The ready line in the console log lists the stage times, the ready payload carries them under `timings`, and the tab shows the total next to the slowest stage. The last eight loaded cubes stay in memory (`CubeExplorer.CUBE_CACHE_ENTRIES`, keyed by run and parameter run tag), and their globe point blobs survive a switch, so going back to one is immediate. The tab shows the current dataset it shares with Slices and TomoVis, loads it on entry, makes a cube picked in the strip current, and lists the files imported in TomoVis under `workspace`; a dataset that lacks a piece a view needs gets a panel to add it there. |
+| Slices | `#/slices` | `/api/slices/*` | Multi-run slice collector: tick any number of cubes, hover the primary SLC map to preview the same cuts from every run side by side, and click the map (or a slice's own button) to put cuts in a basket that persists in the browser. The basket renders into one `slice_collections/<name>/` folder with a `collection.json` manifest, and can be mailed as zip volumes through the report mailer (`REPORT_MAIL_PASSWORD`). On entry it ticks the current dataset when that changed since the tab last saw it, and a TomoVis import that still lacks a piece shows Complete in its row instead of being ticked. |
+| TomoVis | `#/tomovis` | `/api/tomovis/*` | The DLR TomoVis desktop viewer inside the console, with its window kept as it was apart from TomoVic's colours and fonts: File (Open Ctrl+O, Save Ctrl+S, Import hd5, rat, h5, npy) and Data > Channel (RGB Ctrl+F, Red, Green, Blue) menus, the Slicer, Plot, Profile and 3D tabs and the status line. The copied TomoVis window runs on the server, one per open page, and the page sends it the same widget operations a user performed in Qt; files are opened and saved on the console host through a TomoVis file chooser. The 3D tab exists only when the browser can create a WebGL2 context. A file imported here becomes the current dataset of every TomoVic tab, and a dataset a TomoVic tab made current opens here through TomoVis's own hd5 import when the page is shown. Package and API: `webui/tomovis/README.md`. |
+| TomoVis scripts | `#/tomovis_scripts` | `/api/tomovis/script/*` | The two standalone TomoVis scripts: SlicerMatplotlib (a server matplotlib figure of one range slice, `j` and `k` step through the slices) and VolumeRendering (the same hd5 file rendered as a volume, keys `1 2 3 4 0 [ ]`), each reading a file chosen on the console host. When a TomoVic tab made a dataset current, both path fields are filled with its TomoVis link, and nothing is loaded until Load is pressed. |
+
+## Datasets shared by TomoVis and the TomoVic tools
+
+TomoVis and the TomoVic tabs work on one current dataset per console. A dataset is a
+run directory, and its id is that directory's absolute path, the same id the Cube and
+Slices tabs use. The nav drawer, the Cube, Slices and TomoVis scripts tabs and a caption
+above the TomoVis window show it, with links to open it in the other tools and a
+Details card listing its pieces, which tools can use it and the recent datasets.
+
+A file imported in TomoVis (npy, hd5, h5, rat or a TomoVis session) becomes current in
+the same request as the import. The console makes it a light run directory in the
+workspace, so every TomoVic tool reads it unchanged: `data/dataset.json`, a link to the
+imported `.npy` (hd5, h5, rat and session files are converted once to
+`data/tomovis_cube.npy`), a combined channel for multi-channel cubes and a stand-in
+primary image, the top view of the tomogram. A dataset made current from a TomoVic
+tab (a cube picked in the Cube strip, Use or Open in the card) opens in TomoVis the next
+time its page is shown: the page runs TomoVis's own File > Import > hd5 on a small link
+file whose one dataset is stored in the run's tomogram `.npy`, so nothing is copied. A
+dataset that came from a TomoVis session comes back that way like an hd5 import: the cube
+with its height range and pixel spacing, but none of the session's view settings (channel
+choice, colour maps, ROI, plots); open the session file again in TomoVis for those.
+
+When a dataset lacks a piece a tool needs, the tool says so next to its controls and
+offers to add it: the height range and the pixel spacing as two numbers, the channel of
+a multi-channel cube, a primary image, a DEM, a pass stack or a polarimetric primary as
+a picked `.npy` file, the acquisition geometry copied from a TomoVic run of the same
+footprint, and a parameter run as a picked folder or through Fit with Extract Params.
+Picked files are linked, not copied; parameter runs are copied. TomoVic runs are read
+only: their missing pieces point to the entry script that writes them.
+
+Each console keeps its own current dataset, so each has its own workspace:
+`<repo root>/workspace/port_<port>/` (`socket_<name>/` on a Unix socket; all gitignored),
+found again when the console restarts on the same address. `serve.py --workspace PATH`
+moves it. One console uses a workspace at a time: a second console started on the same
+folder stops at once and asks for another `--workspace`. It holds `imports/` (one run directory per imported file), `linked/` (the TomoVis
+link of each TomoVic run that became current, since run folders are never written),
+`current.json` and a `README.txt`. Deleting a folder there removes that dataset from the
+lists. Package and API: `webui/tomovis/README.md`, section "Dataset bridge".
 
 ## Saving figures
 
@@ -192,14 +230,18 @@ tests under `tests/webui/`: `repomap_data.json` with `repomap_library.py` and it
 checker `repomap_derive.py`, and `config_descriptions.json`.
 
 **Analysis surfaces.** `results_browser.py`, `dataset_browser.py`, and
-`cube_explorer.py`, which also carries the slice collector.
+`cube_explorer.py`, which also carries the slice collector. `bridge/` holds the dataset
+bridge shared by TomoVis and the TomoVic tabs (workspace records, the current dataset,
+TomoVis link files, the preparation of imports, the pieces added to them and the TomoVis
+import watch), served by `routers/workspace_router.py`.
 
 **Frontend.** `static/index.html`, `static/css/styles.css`, the four TomoVis stylesheets
 (`tomovis.css` for the page frame and its Qt-like widgets, `tomovis_slicer.css`,
-`tomovis_plot.css`, `tomovis_volume.css`), the vendored
+`tomovis_plot.css`, `tomovis_volume.css`) with `bridge_tomovis.css` for the TomoVis
+page's dataset caption, the vendored
 `static/vendor/marked.min.js`, `static/vendor/mp4-muxer.js`,
 `static/vendor/thinking-orbs-engine.js`, `static/vendor/hairline-kernel.js` and
-`static/vendor/hairline-figures.js`, and 51 modules under `static/js/`. `app.js` and
+`static/vendor/hairline-figures.js`, and 53 modules under `static/js/`. `app.js` and
 `router.js` wire the views; one module per tab (`home`, `repomap`, `scripts`, `launch`
 with its widget modules (`python_literal`, `form_widgets`, `config_form`) and
 `launch_pickers`, `saved_runs`, `configs`, `console`, `results`, `tomogram`,
@@ -212,7 +254,10 @@ page), the pyqtgraph ports (`tomovis_pg_view`, `tomovis_pg_histogram`, `tomovis_
 `tomovis_pg_imageview`, `tomovis_pg_export`), the matplotlib figure client
 (`tomovis_mpl`), the vispy port (`tomovis_vispy`), one module per TomoVis tab
 (`tomovis_slicer`, `tomovis_plot`, `tomovis_profile`, `tomovis_volume`) and one per
-standalone script (`tomovis_script_slicer`, `tomovis_script_volume`); the rest are shared helpers (`api`, `stream_hub` with the page's
+standalone script (`tomovis_script_slicer`, `tomovis_script_volume`); the dataset bridge
+client `dataset_bridge` (the current dataset every tab shares, with its indicator,
+Details card, completer and file picker) and `bridge_tomovis` (the TomoVis and TomoVis
+scripts pages' side of it); the rest are shared helpers (`api`, `stream_hub` with the page's
 single live-output channel, `shared_charts`, `results_sources`, `run_strip`,
 `canvas_base`, `figure_export`, `figure_saver`, `diagram`, `gauges`, `globe` with
 `globe_tour`, `volume`, `process_anim`, `thinking_orb`, `hairline_figure` with

@@ -77,11 +77,102 @@ class SliceCollectorView {
     });
 
     this._renderBasket();
+
+    this.bridge      = window.datasetBridge;
+    this.datasets    = new Map();
+    this.active      = false;
+    this.seenSerial  = null;
+    this.rootError   = "";
+    this.revealEntry = null;
+    this.mapTitle    = refs.mapWrap.closest(".sc-map").querySelector(".cube-panel-title");
+
+    this.indicator = this.bridge.mountIndicator(refs.datasetBar, { variant: "bar", page: "slices" });
+    this.bridge.on("current", ({ state }) => this._onCurrent(state));
+    this.bridge.on("dataset", ({ dataset }) => this._onDataset(dataset));
   }
 
   enter() {
+    this.active = true;
     this._refresh();
     this._loadMailSettings();
+  }
+
+  leave() {
+    this.active = false;
+  }
+
+  _onCurrent(state) {
+    if (!this.active) return;
+    if (state.serial !== this.seenSerial) this._refresh();
+    else this._syncNotice();
+  }
+
+  _onDataset(dataset) {
+    if (!this.datasets.has(dataset.id)) return;
+
+    this.datasets.set(dataset.id, dataset);
+    this.infos.delete(dataset.id);
+    if (!this.active) return;
+
+    if (!this._complete(dataset.id)) this.selected = this.selected.filter((id) => id !== dataset.id);
+    this._renderStrip();
+    this._syncNotice();
+    this._selectionChanged();
+  }
+
+  _complete(id) {
+    const dataset = this.datasets.get(id);
+    return !dataset || dataset.tools.slices.ready;
+  }
+
+  _tickCurrent() {
+    const state = this.bridge.state;
+    if (!state || state.serial === this.seenSerial) return;
+
+    this.seenSerial = state.serial;
+    const current = state.current;
+    const entry   = current ? this.cubes.find((cube) => cube.id === current.id) : null;
+    if (!entry) return;
+
+    this.revealEntry = entry;
+    if (current.tools.slices.ready && !this.selected.includes(current.id)) this.selected.push(current.id);
+  }
+
+  _syncNotice() {
+    const state   = this.bridge.state;
+    const current = state ? state.current : null;
+    const dataset = current ? this.datasets.get(current.id) : null;
+    if (!dataset || dataset.state !== "ready" || this._complete(dataset.id) || !dataset.tools.slices.actionable) {
+      this.indicator.setNotice(null);
+      return;
+    }
+    this.indicator.setNotice({ text: DatasetWords.title("slices", dataset), actions: [{ label: "Complete", run: () => this._openCompleter(dataset.id) }] });
+  }
+
+  _completeButton() {
+    const tag = document.createElement("span");
+    tag.className   = "btn btn--mini ds-strip-complete";
+    tag.textContent = "Complete";
+    return tag;
+  }
+
+  _broken(id) {
+    const dataset = this.datasets.get(id);
+    return !!dataset && dataset.state === "error";
+  }
+
+  _extras(cube) {
+    return this._complete(cube.id) || this._broken(cube.id) ? [] : [this._completeButton()];
+  }
+
+  _openCompleter(id) {
+    const dataset = this.datasets.get(id);
+    this.bridge.complete(id, dataset.tools.slices.missing, {
+      title  : DatasetWords.title("slices", dataset),
+      onDone : (done) => {
+        if (done.tools.slices.ready && !this.selected.includes(id)) this._togglePick(id);
+      },
+    });
   }
 
   figureTag() {
@@ -102,15 +193,21 @@ class SliceCollectorView {
     this.refs.hint.hidden = false;
     this.refs.hint.innerHTML = ThinkingOrb.busy("searching", "Loading saved cubes…");
 
-    const data = await Api.get(`/api/cubes?base=${encodeURIComponent(ResultsSources.runs())}`);
-    this.cubes = (data && data.cubes) || [];
+    const base           = ResultsSources.runs();
+    const [data, shared] = await Promise.all([Api.get(`/api/cubes?base=${encodeURIComponent(base)}`), this.bridge.stripEntries(base)]);
+
+    this.cubes     = [...((data && data.cubes) || []), ...shared.entries];
+    this.datasets  = new Map(shared.datasets.map((dataset) => [dataset.id, dataset]));
+    this.rootError = [data && data.error, shared.error].filter(Boolean).join(" · ");
     this.infos.clear();
-    this.selected = this.selected.filter((id) => this.cubes.some((c) => c.id === id));
+    this.selected = this.selected.filter((id) => this.cubes.some((c) => c.id === id) && this._complete(id));
+    this._tickCurrent();
     this._renderStrip();
+    this._syncNotice();
     this._renderBasket();
 
     if (!this.cubes.length) {
-      this.refs.hint.textContent = (data && data.error) || "No preprocessing runs found under this base.";
+      this.refs.hint.textContent = this.rootError || "No preprocessing runs found under this base.";
       this.refs.stage.hidden = true;
       return;
     }
@@ -137,10 +234,19 @@ class SliceCollectorView {
       this.runStrip = new RunStrip(this.refs.strip, {
         multi    : true,
         stateFor : (cube) => this.selected.includes(cube.id),
-        onPick   : (cube) => this._togglePick(cube.id),
+        onPick   : (cube) => this._onPick(cube.id),
+        extras   : (cube) => this._extras(cube),
       });
     }
+    if (this.revealEntry) this.runStrip.reveal(this.revealEntry);
+    this.revealEntry = null;
     this.runStrip.render(this.cubes);
+  }
+
+  _onPick(id) {
+    if (this._broken(id)) Toast.show(this.datasets.get(id).error, "error");
+    else if (this._complete(id)) this._togglePick(id);
+    else this._openCompleter(id);
   }
 
   async _togglePick(id) {
@@ -180,13 +286,14 @@ class SliceCollectorView {
     const n = this.selected.length;
     this.refs.hint.hidden = false;
 
+    const lead = this.rootError ? `${this.rootError} · ` : "";
     if (!n) {
-      this.refs.hint.textContent = "Click runs to select them · every selected run is cut at the same point.";
+      this.refs.hint.textContent = `${lead}Click runs to select them · every selected run is cut at the same point.`;
       return;
     }
 
     const extents = new Set(infos.map((i) => `${i.n_az}x${i.n_rg}`));
-    let text = `${n} run${n === 1 ? "" : "s"} selected · click rows to add or remove them.`;
+    let text = `${lead}${n} run${n === 1 ? "" : "s"} selected · click rows to add or remove them.`;
     if (extents.size > 1) text += " Runs differ in extent, so a cut beyond a smaller run is clamped to its edge.";
     this.refs.hint.textContent = text;
   }
@@ -227,6 +334,11 @@ class SliceCollectorView {
   _setMapRun(id) {
     const info = this.infos.get(id);
     if (!info) return;
+
+    const dataset = this.datasets.get(id);
+    const standin = !!(dataset && dataset.pieces.primary.present && dataset.pieces.primary.value.kind === "stand-in");
+    this.mapTitle.textContent = standin ? DatasetWords.STANDIN_TITLE : DatasetWords.PRIMARY_TITLE;
+    this.refs.mapImg.alt      = this.mapTitle.textContent;
 
     this.mapId = id;
     this.mapOk = false;

@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from gpu_activity            import GpuActivityLog
-from host_history            import HostHistoryLog
-from request_router          import RequestRouter
-from routers.library_routers import ContentLibraryRouter
-from system_monitor          import ActiveUsers, SystemHistory, SystemMonitor
-from web_ui_server           import WebUIServer
+from bridge.dataset_workspace import WorkspaceBusyError
+from gpu_activity             import GpuActivityLog
+from host_history             import HostHistoryLog
+from request_router           import RequestRouter
+from routers.library_routers  import ContentLibraryRouter
+from system_monitor           import ActiveUsers, SystemHistory, SystemMonitor
+from web_ui_server            import WebUIServer
 
 from tests.webui.conftest import FakeHandler
 
@@ -85,6 +86,30 @@ def test_the_script_catalog_lists_every_console_entry(server):
     assert {entry["key"] for entry in payload["scripts"]} == {"pre_process", "extract_params", "extract_polarimetry", "analyze_preprocessing", "analyze_param_extraction", "compare_preprocessing_trials"}
 
 
+def test_the_workspace_section_is_claimed_once(server):
+    """/api/workspace belongs to exactly one router, and the default workspace is <repo root>/workspace/port_<port>."""
+    claimed = [section for sub in server.router.routers for section in sub.sections]
+
+    assert claimed.count("/api/workspace") == 1
+    assert server.workspace.root == (server.paths.repo_root / "workspace" / "port_0").resolve()
+
+
+def test_building_a_server_writes_no_workspace(server, tmp_path):
+    """A server built with --workspace uses that folder and creates nothing in it until a dataset is registered."""
+    built = WebUIServer(host="127.0.0.1", port=0, workspace=tmp_path / "ws")
+
+    assert built.workspace.root == (tmp_path / "ws").resolve()
+    assert not (tmp_path / "ws").exists()
+
+
+def test_the_workspace_answers_before_the_bridge_started(server):
+    """GET /api/workspace/current answers 200 with no current dataset on a freshly built server."""
+    status, payload = _get(server, "/api/workspace/current")
+
+    assert status == 200
+    assert payload["ok"] and "current" in payload
+
+
 def test_an_unknown_endpoint_is_still_a_404(server):
     """An unrouted API path is a 404."""
     assert _get(server, "/api/does-not-exist")[0] == 404
@@ -94,3 +119,17 @@ def test_the_router_is_a_request_router(server):
     """The server exposes a RequestRouter and a real repository root."""
     assert isinstance(server.router, RequestRouter)
     assert server.paths.repo_root.is_dir()
+
+
+def test_a_second_console_on_one_workspace_is_refused(server, tmp_path):
+    """Claiming a workspace another console holds raises WorkspaceBusyError naming the folder; another folder is free."""
+    first  = WebUIServer(host="127.0.0.1", port=0, workspace=tmp_path / "ws")
+    second = WebUIServer(host="127.0.0.1", port=0, workspace=tmp_path / "ws")
+    other  = WebUIServer(host="127.0.0.1", port=0, workspace=tmp_path / "other")
+    first.workspace.claim()
+
+    with pytest.raises(WorkspaceBusyError) as busy:
+        second.workspace.claim()
+    other.workspace.claim()
+
+    assert str(busy.value) == f"another TomoVic console uses the workspace {(tmp_path / 'ws').resolve()}; stop it, or start this console with --workspace <another folder>"
