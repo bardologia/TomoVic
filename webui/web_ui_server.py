@@ -225,12 +225,17 @@ class WebUIServer:
     def serve(self) -> None:
         """Serves the console until interrupted, then stops the background workers.
 
-        Starts the contention monitor, the progress watcher and the dataset
-        bridge, runs the HTTP server on a worker thread, and blocks in the
-        detacher wait loop until a keyboard interrupt or detach request arrives.
-        A Unix socket is removed again when the server stops.
+        Locks the dataset bridge workspace for this console, starts the
+        contention monitor, the progress watcher and the dataset bridge, runs
+        the HTTP server on a worker thread, and blocks in the detacher wait loop
+        until a keyboard interrupt or detach request arrives. A Unix socket is
+        removed again when the server stops.
+
+        Raises:
+            WorkspaceBusyError : If another console uses the same workspace.
         """
 
+        self.workspace.claim()
         server        = self._bind_unix_socket() if self.unix_socket else _Server((self.host, self.port), _Handler)
         server.router = self.router
 

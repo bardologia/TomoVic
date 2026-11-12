@@ -10,6 +10,7 @@ dataset is registered or the current dataset is first set.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +28,10 @@ from tools.sar.track_parameters import TrackParameters
 from web_logger                 import WebLogger
 
 
+class WorkspaceBusyError(RuntimeError):
+    """Raised when a console starts on a workspace another console already uses."""
+
+
 class DatasetWorkspace:
     """Owns the workspace folder and the in-memory index of its dataset records.
 
@@ -38,6 +43,7 @@ class DatasetWorkspace:
         link        : TomoVis link writer.
         inspector   : Read-only run inspector.
         records     : Dataset id to its record.
+        claimed     : File descriptor holding the console's lock on the workspace folder, None until ``claim``.
         KINDS       : Import kinds.
         SAFE        : Characters replaced by ``_`` in folder names.
         TRACK_LABEL : Track label of a spacing-only track parameters file.
@@ -77,6 +83,7 @@ class DatasetWorkspace:
         self.link      = TomoVisLink(self.writer)
         self.inspector = RunInspector()
         self.records   = {}
+        self.claimed   = None
 
     @property
     def imports_dir(self) -> Path:
@@ -109,6 +116,27 @@ class DatasetWorkspace:
         readme = self.root / "README.txt"
         if not readme.is_file():
             self.writer.text(readme, self.README_TEXT)
+
+    def claim(self) -> None:
+        """Locks the workspace folder for this console until the process ends, creating the folder when missing.
+
+        Each console keeps its own index of the records and its own current
+        dataset, so two consoles on one workspace would overwrite each other's
+        records and current.json. The lock is an exclusive ``flock`` on the
+        folder itself.
+
+        Raises:
+            WorkspaceBusyError : If another console holds the workspace.
+        """
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        handle = os.open(self.root, os.O_RDONLY)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(handle)
+            raise WorkspaceBusyError(f"another TomoVic console uses the workspace {self.root}; stop it, or start this console with --workspace <another folder>") from None
+        self.claimed = handle
 
     def scan(self) -> list[DatasetRecord]:
         """Reads every record in the workspace into the index, leaving out folders that lost their dataset.

@@ -98,7 +98,9 @@ Picked files are linked, not copied; parameter runs are copied. TomoVic runs are
 only: their missing pieces point to the entry script that writes them.
 
 The workspace is `<repo root>/workspace/` (gitignored); `serve.py --workspace PATH` moves
-it. It holds `imports/` (one run directory per imported file), `linked/` (the TomoVis
+it. One console uses a workspace at a time: a second console started on the same folder
+stops at once and asks for another `--workspace`, since each console keeps its own
+current dataset. It holds `imports/` (one run directory per imported file), `linked/` (the TomoVis
 link of each TomoVic run that became current, since run folders are never written),
 `current.json` and a `README.txt`. Deleting a folder there removes that dataset from the
 lists. Package and API: `webui/tomovis/README.md`, section "Dataset bridge".

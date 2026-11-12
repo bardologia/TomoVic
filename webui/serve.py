@@ -43,7 +43,7 @@ class ServeEntry:
         self.parser.add_argument("--port", type=int, default=None, help=f"TCP port to listen on, default {self.DEFAULT_PORT}")
         self.parser.add_argument("--unix-socket", type=Path, default=None, help="listen on this Unix socket, created with mode 0600, instead of a TCP port; excludes --host and --port")
         self.parser.add_argument("--root", type=Path, default=None, help="project root the console operates on (jobs, logs, runs); defaults to the repository holding this file")
-        self.parser.add_argument("--workspace", type=Path, default=None, metavar="PATH", help="folder where TomoVis imports become runs the TomoVic tools read; default <repo root>/workspace")
+        self.parser.add_argument("--workspace", type=Path, default=None, metavar="PATH", help="folder where TomoVis imports become runs the TomoVic tools read, used by one console at a time; default <repo root>/workspace")
 
     def _loopback(self, host: str) -> bool:
         """Returns whether `host` resolves to a loopback address, reachable from this machine only."""
