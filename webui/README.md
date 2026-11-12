@@ -87,7 +87,10 @@ imported `.npy` (hd5, h5, rat and session files are converted once to
 primary image, the top view of the tomogram. A dataset made current from a TomoVic
 tab (a cube picked in the Cube strip, Use or Open in the card) opens in TomoVis the next
 time its page is shown: the page runs TomoVis's own File > Import > hd5 on a small link
-file whose one dataset is stored in the run's tomogram `.npy`, so nothing is copied.
+file whose one dataset is stored in the run's tomogram `.npy`, so nothing is copied. A
+dataset that came from a TomoVis session comes back that way like an hd5 import: the cube
+with its height range and pixel spacing, but none of the session's view settings (channel
+choice, colour maps, ROI, plots); open the session file again in TomoVis for those.
 
 When a dataset lacks a piece a tool needs, the tool says so next to its controls and
 offers to add it: the height range and the pixel spacing as two numbers, the channel of

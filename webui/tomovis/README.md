@@ -49,7 +49,8 @@ for it:
   height range is written as the dataset attributes `elevation_limits` and `range`, the pixel spacing as
   the root attributes `ps_az` and `ps_rg` (1.0 when unknown). The page sends `trigger openFUSAR`, then
   `dialog_result` with the link's path, so the window, Play stop, D-3 and every carry-over behave as after
-  a manual import.
+  a manual import. A dataset made from a session therefore reopens as an hd5 import of its cube, heights
+  and spacing: the session's channel choice, colour maps, ROI, plots and other metadata are not restored.
 - **Closed sessions release their window at once.** `TomoVisSessions.release` drops the window, the
   figures and the script data of a closed or LRU-dropped session and runs the cyclic garbage collector,
   because the stand-in signals form reference cycles that otherwise keep the cube in memory.
