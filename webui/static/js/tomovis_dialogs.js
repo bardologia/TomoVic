@@ -290,33 +290,13 @@ class TomoVisFileDialog {
     return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear() % 100).padStart(2, "0")} ${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${hours < 12 ? "AM" : "PM"}`;
   }
 
-  static context = null;
-
-  static elideMiddle(text, width, context) {
-    if (context.measureText(text).width <= width) return text;
-    const cut = (keep) => `${text.slice(0, Math.ceil(keep / 2))}\u2026${text.slice(text.length - Math.floor(keep / 2))}`;
-    let low  = 0;
-    let high = text.length;
-    while (low < high) {
-      const keep = Math.ceil((low + high) / 2);
-      if (context.measureText(cut(keep)).width <= width) low = keep;
-      else high = keep - 1;
-    }
-    return cut(low);
-  }
-
   static elide(nodes) {
-    const over = nodes.filter((node) => node.scrollWidth > node.clientWidth);
-    if (!over.length) return;
-    if (!TomoVisFileDialog.context) TomoVisFileDialog.context = document.createElement("canvas").getContext("2d");
-    const context = TomoVisFileDialog.context;
-    const widths  = over.map((node) => {
+    const widths = nodes.map((node) => {
       const style = getComputedStyle(node);
-      return { font: style.font, width: node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+      return node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     });
-    over.forEach((node, i) => {
-      context.font     = widths[i].font;
-      node.textContent = TomoVisFileDialog.elideMiddle(node.textContent, widths[i].width, context);
+    nodes.forEach((node, i) => {
+      node.textContent = QtFontMetrics.elidedMiddle(node.textContent, widths[i], QtFontMetrics.APP);
     });
   }
 
@@ -635,7 +615,6 @@ class TomoVisFileDialog {
     input.type       = "text";
     input.spellcheck = false;
     input.value      = entry.name;
-    label.style.flex = "1 1 auto";
     label.replaceChildren(input);
     this.editor = input;
     let done = false;
@@ -643,7 +622,6 @@ class TomoVisFileDialog {
       if (done) return;
       done = true;
       this.editor = null;
-      label.style.flex  = "";
       label.textContent = entry.name;
       if (commit) this.rename(entry.name, input.value);
       else this.listWrap.focus({ preventScroll: true });

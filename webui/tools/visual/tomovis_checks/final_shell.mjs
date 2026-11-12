@@ -320,7 +320,7 @@ class FinalShellChecks {
       R.equal(parts.labels, ["Look in:", "File name:", "Files of type:"], "labels");
       R.assert(parts.rows.length > 0 && parts.rows.every((r) => r[2] === "npy File"), `npy rows: ${JSON.stringify(parts.rows)}`);
       R.equal(typed.rows.map((r) => [r[0], r[1], r[2]]), FinalShellChecks.TYPES, "Name, Size and Type columns against Qt");
-      R.assert(typed.rows.every((r) => /^\d{1,2}\/\d{1,2}\/\d{2} \d{1,2}:\d{2} (AM|PM)$/.test(r[3])), `Date Modified not in Qt's M/d/yy h:mm AP: ${typed.rows.map((r) => r[3]).join(", ")}`);
+      R.assert(typed.rows.every((r) => /^\d{1,2}\/\d{1,2}\/(\d{2} \d{1,2}|\u2026)?:?\d{2} (AM|PM)$/.test(r[3])), `Date Modified not in Qt's M/d/yy h:mm AP, elided in the middle where Qt elides it: ${typed.rows.map((r) => r[3]).join(", ")}`);
       return `geometry equal to Qt's; ${typed.rows.length} typed rows equal; dates like ${typed.rows[0][3]}`;
     });
   }

@@ -83,6 +83,27 @@ class FinalFinishChecks {
     });
   }
 
+  async elidedCells() {
+    await this.run.check("CR-02", "text is measured only through QtFontMetrics; the file dialog elides with Qt's ElideMiddle rule, so the Size column and Look in show the original's texts", async () => {
+      await this.fresh();
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, this.inputs);
+      const seen = await this.T(() => ({ names: [...document.querySelectorAll(".tv-filedialog__entryname")].map((c) => c.textContent), sizes: [...document.querySelectorAll(".tv-filedialog__cell--size")].map((c) => c.textContent), look: document.querySelector(".tv-filedialog__lookin .tv-combo__text").textContent }));
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      const contexts = ["js/tomovis_dialogs.js", "js/tomovis_widgets.js"].map((file) => (this.source(file).match(/createElement\("canvas"\)\.getContext/g) || []).length);
+      const reaches  = (this.source("js/tomovis_widgets.js").match(/QtFontMetrics\.context\.(font|measureText)/g) || []).length;
+      R.equal(seen.names, ["npy_channels_2.npy", "npy_channels_3.npy", "npy_channels_4.npy", "npy_complex_nan_inf.npy", "npy_covariance_5d.npy", "npy_float64.npy", "npy_one_range_line.npy", "npy_real.npy"], "Name column as the original draws it");
+      R.equal(seen.sizes, ["30.13 KiB", "45.13 KiB", "60.13 KiB", "30.13 KiB", "108\u2026KiB", "7.63 KiB", "368\u2026tes", "48.13 KiB"], "Size column as the original draws it");
+      R.assert(seen.look.includes("\u2026") && seen.look.endsWith("movis/inputs"), `Look in text not elided in the middle: ${seen.look}`);
+      R.equal([...contexts, reaches], [0, 1, 2], "measuring contexts in the dialog and widget modules, and uses of QtFontMetrics.context outside cssMeasure");
+      return `${seen.sizes.join(", ")}; Look in ${seen.look}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -93,6 +114,7 @@ class FinalFinishChecks {
 
     if (this.wanted("hints")) await this.widthHints();
     if (this.wanted("popup")) await this.sharedPopup();
+    if (this.wanted("elide")) await this.elidedCells();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

@@ -67,8 +67,12 @@ class QtFontMetrics {
   }
 
   static measure(text, font, px = font.px) {
+    return QtFontMetrics.cssMeasure(text, QtFontMetrics.css(font, px));
+  }
+
+  static cssMeasure(text, css) {
     if (!QtFontMetrics.context) QtFontMetrics.context = document.createElement("canvas").getContext("2d");
-    QtFontMetrics.context.font = QtFontMetrics.css(font, px);
+    QtFontMetrics.context.font = css;
     return QtFontMetrics.context.measureText(text);
   }
 
@@ -89,6 +93,23 @@ class QtFontMetrics {
 
   static widest(texts, font) {
     return Math.max(0, ...texts.map((text) => QtFontMetrics.horizontalAdvance(text, font)));
+  }
+
+  static elidedMiddle(text, width, font) {
+    if (QtFontMetrics.advance(text, font) <= width) return text;
+    const chars     = [...text];
+    const available = width - QtFontMetrics.advance("\u2026", font);
+    let left      = 0;
+    let right     = chars.length;
+    let nextLeft  = 0;
+    let nextRight = chars.length;
+    do {
+      left       = nextLeft;
+      right      = nextRight;
+      nextLeft  += 1;
+      nextRight -= 1;
+    } while (nextLeft < chars.length && nextRight > 0 && QtFontMetrics.advance(chars.slice(0, nextLeft).join(""), font) + QtFontMetrics.advance(chars.slice(nextRight).join(""), font) < available);
+    return `${chars.slice(0, left).join("")}\u2026${chars.slice(right).join("")}`;
   }
 
   static labelWidth(text, font) {
@@ -1603,9 +1624,7 @@ class QtLineEditView extends QtWidgetView {
     const style  = getComputedStyle(input);
     const inner  = width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     const font   = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    if (!QtFontMetrics.context) QtFontMetrics.context = document.createElement("canvas").getContext("2d");
-    QtFontMetrics.context.font = font;
-    const cursorX = QtFontMetrics.context.measureText(input.value.slice(0, input.selectionEnd)).width;
+    const cursorX = QtFontMetrics.cssMeasure(input.value.slice(0, input.selectionEnd), font).width;
     if (cursorX - input.scrollLeft >= inner) input.scrollLeft = Math.ceil(cursorX - inner + 1);
     else if (cursorX < input.scrollLeft) input.scrollLeft = Math.floor(cursorX);
   }
