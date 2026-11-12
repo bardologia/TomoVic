@@ -783,7 +783,7 @@ class QtCheckBoxView extends QtWidgetView {
 }
 
 class QtSliderView extends QtWidgetView {
-  static HANDLE        = 14;
+  static HANDLE        = 15;
   static REPEAT_DELAY  = 500;
   static REPEAT_PERIOD = 50;
 
@@ -1329,6 +1329,7 @@ class QtDoubleSpinBoxView extends QtSpinBoxView {
 class QtComboBoxView extends QtWidgetView {
   static VISIBLE_ROWS = 10;
   static SEARCH_MS    = 400;
+  static CHROME       = 30;
 
   build() {
     const root = TomoVisInput.el("span", "tv-combo");
@@ -1378,6 +1379,12 @@ class QtComboBoxView extends QtWidgetView {
     if (this.sized === this.items) return;
     this.sized = this.items;
     this.sizer.replaceChildren(...this.items.map((text) => TomoVisInput.el("span", "", text)));
+    if (this.options.qtFont) this.label.parentElement.style.setProperty("--tv-combo-hint", `${this.sizeHint(this.options.qtFont)}px`);
+  }
+
+  sizeHint(font) {
+    const widths = this.items.map((text) => QtFontMetrics.horizontalAdvance(text, font));
+    return Math.max(0, ...widths) + QtComboBoxView.CHROME;
   }
 
   get currentText() {
@@ -1447,7 +1454,7 @@ class QtComboBoxView extends QtWidgetView {
   openPopup() {
     if (this.popup || !this.enabled) return;
     const layer = this.kit.layer;
-    const list  = TomoVisInput.el("div", "tv-combo__popup");
+    const list  = TomoVisInput.el("div", "tv-combo__popup tv-qt-scroll");
     list.setAttribute("role", "listbox");
     this.rows = this.items.map((text, i) => {
       const row = TomoVisInput.el("div", "tv-combo__option", text);
@@ -1460,12 +1467,14 @@ class QtComboBoxView extends QtWidgetView {
       list.append(row);
       return row;
     });
+    if (this.options.qtFont) list.classList.add("tv-combo__popup--qt");
     layer.append(list);
 
     const rect = this.el.getBoundingClientRect();
     list.style.minWidth = `${rect.width}px`;
     const rowHeight = this.rows.length ? this.rows[0].getBoundingClientRect().height : 20;
-    list.style.maxHeight = `${rowHeight * QtComboBoxView.VISIBLE_ROWS + 4}px`;
+    const frame     = list.offsetHeight - list.clientHeight;
+    list.style.maxHeight = `${rowHeight * QtComboBoxView.VISIBLE_ROWS + frame}px`;
     TomoVisInput.place(layer, list, rect.left, rect.bottom, { flipBottom: rect.top });
 
     this.popup = list;

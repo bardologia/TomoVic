@@ -46,19 +46,24 @@ class TomoVisSlicerTab {
     this.slider  = kit.bound("slider", "tab1Slider", { minWidth: 400 });
     this.spinBox = kit.bound("spin", "tab1SpinBox", { maxWidth: 180 });
     this.play    = kit.bound("button", "tab1PlayButton", { icon: "/static/img/tomovis/play.png", ariaLabel: "Play" });
-    this.combo   = kit.bound("combo", "tab1ComboBox", { items: this.ctx.tables.colortables.names });
+    this.combo   = kit.bound("combo", "tab1ComboBox", { items: this.ctx.tables.colortables.names, qtFont: QtFontMetrics.APP });
     this.slider.el.classList.add("tv-slicer__slider");
     this.play.el.classList.add("tv-slicer__play");
 
-    const row1 = el("div", "tv-row tv-slicer__row");
-    row1.append(el("span", "tv-label", "Slices (Automatic):"), this.chkBox.el, this.slider.el, this.spinBox.el, this.play.el, el("span", "tv-label", "Colormap"), this.combo.el, el("span", "tv-stretch"));
+    const label = (text) => {
+      const node = el("span", "tv-label tv-slicer__label", text);
+      node.style.width = `${QtFontMetrics.labelWidth(text, QtFontMetrics.WINDOW)}px`;
+      return node;
+    };
+    const row1 = el("div", "tv-row tv-slicer__row tv-slicer__slices");
+    row1.append(label("Slices (Automatic):"), this.chkBox.el, this.slider.el, this.spinBox.el, this.play.el, label("Colormap"), this.combo.el, el("span", "tv-stretch"));
 
     const row2 = el("div", "tv-row tv-slicer__row tv-slicer__roi");
-    row2.append(el("span", "tv-label", "ROI (Manual):"));
-    this.fields = TomoVisSlicerTab.FIELDS.map(([label, name]) => {
+    row2.append(label("ROI (Manual):"));
+    this.fields = TomoVisSlicerTab.FIELDS.map(([text, name]) => {
       const view = kit.bound("line", name, { validator: TomoVisSlicerTab.VALIDATOR, maxWidth: 90 });
       view.el.classList.add("tv-slicer__field");
-      row2.append(el("span", "tv-label", label), view.el);
+      row2.append(label(text), view.el);
       return view;
     });
     this.setButton  = kit.bound("button", "tab1SetButton", { text: "Set", maxWidth: 100 });

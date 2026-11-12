@@ -219,10 +219,12 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   outline: none;
   user-select: none;
 }
+.tv-check:not(:has(.tv-check__text)) { height: 15px; align-items: flex-start; }
 .tv-check__box {
   position: relative;
-  width: 16px;
-  height: 16px;
+  flex: none;
+  width: 14px;
+  height: 14px;
   border: 2px solid var(--line-strong);
   border-radius: var(--r-input);
   background: var(--bg-1);
@@ -232,10 +234,10 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-check.is-checked .tv-check__box::after {
   content: "";
   position: absolute;
-  left: 3.5px;
-  top: 0px;
+  left: 2.5px;
+  top: -0.5px;
   width: 4px;
-  height: 8px;
+  height: 7px;
   border: solid var(--on-accent);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
@@ -249,7 +251,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   display: inline-block;
   flex: 0 0 auto;
   width: 130px;
-  height: 22px;
+  height: 15px;
   outline: none;
   touch-action: none;
   user-select: none;
@@ -258,9 +260,8 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   position: absolute;
   left: 0;
   right: 0;
-  top: 50%;
-  height: 4px;
-  margin-top: -2px;
+  top: 5px;
+  height: 5px;
   border-radius: 2px;
   background: var(--line);
 }
@@ -275,12 +276,11 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-slider.is-disabled .tv-slider__fill { background: transparent; }
 .tv-slider__handle {
   position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 18px;
-  margin-top: -9px;
+  top: 1px;
+  width: 15px;
+  height: 13px;
   border: 2px solid var(--line-strong);
-  border-radius: var(--r-input);
+  border-radius: 3px;
   background: var(--ink-dim);
   transition: background 0.12s var(--ease);
 }
@@ -401,7 +401,6 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   box-shadow: 0 14px 34px var(--tv-shadow);
   font-family: var(--sans);
   font-size: var(--tv-label);
-  scrollbar-color: var(--tv-scrollbar) transparent;
 }
 .tv-combo__option {
   padding: 3px 12px 3px 9px;
@@ -409,6 +408,22 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   color: var(--ink);
 }
 .tv-combo__option.is-hot { background: var(--accent); color: var(--on-accent); }
+.tv-combo__popup--qt { padding: 0; border-width: 1px; font-size: 17px; }
+.tv-combo__popup--qt .tv-combo__option { display: flex; align-items: center; height: 24px; padding: 0 12px 0 4px; }
+.tv-qt-scroll { scrollbar-color: auto; }
+.tv-qt-scroll::-webkit-scrollbar { width: 14px; height: 14px; }
+.tv-qt-scroll::-webkit-scrollbar-track { background: var(--bg-1); }
+.tv-qt-scroll::-webkit-scrollbar-track:vertical { border-left: 1px solid var(--line); }
+.tv-qt-scroll::-webkit-scrollbar-track:horizontal { border-top: 1px solid var(--line); }
+.tv-qt-scroll::-webkit-scrollbar-thumb { min-height: 20px; min-width: 20px; border: 1px solid var(--line-strong); border-radius: 2px; background: var(--tv-scrollbar); }
+.tv-qt-scroll::-webkit-scrollbar-corner { background: var(--bg-1); }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button { display: block; width: 14px; height: 14px; background-color: var(--bg-1); background-repeat: no-repeat; }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:vertical { border-left: 1px solid var(--line); background-size: 4px 4px, 4px 4px; background-position: calc(50% - 2px) 50%, calc(50% + 2px) 50%; }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:horizontal { border-top: 1px solid var(--line); background-size: 4px 4px, 4px 4px; background-position: 50% calc(50% - 2px), 50% calc(50% + 2px); }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:vertical:decrement { background-image: linear-gradient(to bottom right, transparent 50%, var(--ink-dim) 50%), linear-gradient(to bottom left, transparent 50%, var(--ink-dim) 50%); }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:vertical:increment { background-image: linear-gradient(to top right, transparent 50%, var(--ink-dim) 50%), linear-gradient(to top left, transparent 50%, var(--ink-dim) 50%); }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement { background-image: linear-gradient(to bottom right, transparent 50%, var(--ink-dim) 50%), linear-gradient(to top right, transparent 50%, var(--ink-dim) 50%); }
+.tv-qt-scroll::-webkit-scrollbar-button:single-button:horizontal:increment { background-image: linear-gradient(to bottom left, transparent 50%, var(--ink-dim) 50%), linear-gradient(to top left, transparent 50%, var(--ink-dim) 50%); }
 
 .tv-line {
   flex: 0 1 auto;
