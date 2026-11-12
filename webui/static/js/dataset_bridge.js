@@ -155,6 +155,7 @@ class DatasetFilePicker extends DatasetLayer {
     this.parent   = null;
     this.selected = null;
     this.resolve  = null;
+    this.listSeq  = 0;
 
     this.root.innerHTML = `
       <div class="ds-picker__box">
@@ -227,8 +228,10 @@ class DatasetFilePicker extends DatasetLayer {
   }
 
   async _list(path, fallback = false) {
+    const seq     = ++this.listSeq;
     const pattern = this.mode === "file" ? "&pattern=*.npy" : "";
     const listing = await Api.get(`/api/tomovis/fs?path=${encodeURIComponent(path)}${pattern}`);
+    if (seq !== this.listSeq) return;
 
     if (listing.error || listing.ok === false) {
       if (fallback && path) {
