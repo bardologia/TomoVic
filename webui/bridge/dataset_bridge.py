@@ -270,9 +270,9 @@ class DatasetBridge:
         return ""
 
     def record_of(self, dataset_id: str) -> DatasetRecord | None:
-        """Returns the record of an id as a page sends it (resolved first), None when unregistered."""
+        """Returns the record of an absolute id as a page sends it (resolved first), None when unregistered or relative."""
 
-        return self.workspace.record(str(Path(dataset_id).resolve())) if dataset_id else None
+        return self.workspace.record(str(Path(dataset_id).resolve())) if dataset_id and Path(dataset_id).is_absolute() else None
 
     def dataset_payload(self, dataset_id: str) -> dict:
         """Answers GET /api/workspace/dataset, never writing.

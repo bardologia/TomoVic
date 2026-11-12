@@ -226,3 +226,21 @@ def test_a_folder_deleted_while_the_console_runs_leaves_the_lists(tmp_path):
         harness.bridge.use(gone.id)
     assert refusal.value.status == 400
     assert not Path(gone.id).exists()
+
+
+def test_a_relative_id_of_a_registered_run_is_refused(tmp_path, monkeypatch):
+    """A relative id never resolves against the console's working folder, even when it names a registered run."""
+
+    harness = BridgeHarness(tmp_path)
+    run_dir = make_preproc_run(tmp_path / "runs")
+    harness.open_runs_root(tmp_path / "runs")
+    harness.bridge.use(str(run_dir))
+    monkeypatch.chdir(tmp_path / "runs")
+
+    with pytest.raises(BridgeRefusal) as refusal:
+        harness.bridge.use(run_dir.name)
+    assert refusal.value.status == 400 and str(refusal.value) == f"{run_dir.name} is outside the runs folders the console has opened."
+
+    with pytest.raises(BridgeRefusal) as unknown:
+        harness.bridge.dataset_payload(run_dir.name)
+    assert unknown.value.status == 404
