@@ -51,10 +51,11 @@ class TomoVisModal {
 
   center() {
     const layerRect = this.layer.getBoundingClientRect();
+    const view      = TomoVisInput.viewport();
     const left      = Math.max(layerRect.left, 0);
     const top       = Math.max(layerRect.top, 0);
-    const right     = Math.min(layerRect.right, window.innerWidth);
-    const bottom    = Math.min(layerRect.bottom, window.innerHeight);
+    const right     = Math.min(layerRect.right, view.width);
+    const bottom    = Math.min(layerRect.bottom, view.height);
     const rect      = this.el.getBoundingClientRect();
     const x         = left + Math.max(0, (right - left - rect.width) / 2);
     const y         = top + Math.max(0, (bottom - top - rect.height) / 2);

@@ -24,7 +24,7 @@
 }
 
 .page--tomovis {
-  --tv-pad-x: clamp(0px, calc((100vw - 1100px) / 2), 18px);
+  --tv-pad-x: clamp(0px, calc((100% - 1100px) / 2), 18px);
   --tv-pad-y: clamp(0px, calc((100dvh - 880px) / 2), 18px);
   position: relative;
   z-index: 2;
@@ -34,7 +34,7 @@
 }
 .page--tomovis.is-active { display: flex; flex-direction: column; }
 body.is-tomovis-page .footer { display: none; }
-body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2), 12px); }
+body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12px); }
 @media (max-width: 900px) {
   .page--tomovis { padding-top: calc(66px + var(--tv-pad-y)); }
   .page--tomovis .tv-window { height: calc(100dvh - 66px - 2 * var(--tv-pad-y)); }
@@ -45,7 +45,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2), 1
   display: grid;
   grid-template-rows: var(--tv-menubar-h) auto minmax(0, 1fr) var(--tv-status-h);
   grid-template-columns: minmax(0, 1fr);
-  min-width: 1100px;
+  min-width: calc(1100px - (100vw - 100%));
   min-height: 880px;
   height: calc(100dvh - 2 * var(--tv-pad-y));
   background: var(--frost-panel);
@@ -569,7 +569,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2), 1
   display: flex;
   flex-direction: column;
   min-width: 300px;
-  max-width: calc(100vw - 40px);
+  max-width: calc(100% - 40px);
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--frost);
   backdrop-filter: var(--frost);

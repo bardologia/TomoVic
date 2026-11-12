@@ -31,14 +31,20 @@ class TomoVisInput {
     return String(text).replace(/&&/g, "\u0000").replace(/&/g, "").replace(/\u0000/g, "&");
   }
 
+  static viewport() {
+    const root = document.documentElement;
+    return { width: root.clientWidth, height: root.clientHeight };
+  }
+
   static place(layer, node, clientX, clientY, { flipBottom = null, flipRight = null } = {}) {
     const origin = layer.getBoundingClientRect();
     node.style.left = `${clientX - origin.left}px`;
     node.style.top  = `${clientY - origin.top}px`;
 
     const rect   = node.getBoundingClientRect();
-    const right  = window.innerWidth - 4;
-    const bottom = window.innerHeight - 4;
+    const view   = TomoVisInput.viewport();
+    const right  = view.width - 4;
+    const bottom = view.height - 4;
     let x = clientX;
     let y = clientY;
 

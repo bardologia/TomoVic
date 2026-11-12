@@ -650,8 +650,9 @@ class PgExportDialog {
     if (first) {
       const layer = this.ctx.layer.getBoundingClientRect();
       const rect  = this.el.getBoundingClientRect();
-      this.el.style.left = `${Math.max(0, (Math.min(layer.width, window.innerWidth) - rect.width) / 2)}px`;
-      this.el.style.top  = `${Math.max(0, (Math.min(layer.height, window.innerHeight) - rect.height) / 2 + window.scrollY - layer.top)}px`;
+      const view  = TomoVisInput.viewport();
+      this.el.style.left = `${Math.max(0, (Math.min(layer.width, view.width) - rect.width) / 2)}px`;
+      this.el.style.top  = `${Math.max(0, (Math.min(layer.height, view.height) - rect.height) / 2 + window.scrollY - layer.top)}px`;
     }
     if (!this.scene.overlays.includes(this.overlay)) this.scene.overlays.push(this.overlay);
     this.selectBoxVisible = true;
