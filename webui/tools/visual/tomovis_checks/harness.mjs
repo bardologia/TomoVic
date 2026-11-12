@@ -25,13 +25,15 @@ class TomoVisHarness {
   static agent = "shell";
 
   static args(argv, agent = TomoVisHarness.agent) {
-    const out = { port: 8802, gl: "angle", agent, only: [] };
+    const out = { port: 8802, gl: "angle", agent, only: [], consoleLog: null };
     for (let i = 2; i < argv.length; i += 1) {
       if (argv[i] === "--port") out.port = Number(argv[++i]);
       else if (argv[i] === "--gl") out.gl = argv[++i];
       else if (argv[i] === "--agent") out.agent = argv[++i];
       else if (argv[i] === "--only") out.only.push(argv[++i]);
+      else if (argv[i] === "--console-log") out.consoleLog = path.resolve(argv[++i]);
     }
+    if (!out.consoleLog) out.consoleLog = path.join(SHOTS, "volume", `console_${out.port}.log`);
     TomoVisHarness.agent = out.agent;
     return out;
   }
