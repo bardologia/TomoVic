@@ -1659,6 +1659,7 @@ class TomogramView {
   static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
   static DEM_VIEWS = ["explorer", "azimuth", "range", "transect"];
+  static MISSING_TOOLS = { globe: "cube_globe", passes: "cube_passes", pauli: "cube_pauli" };
 
   constructor(refs) {
     this.strip = refs.strip;
@@ -1841,6 +1842,42 @@ class TomogramView {
     this.jumpCsv = refs.jumpCsv || null;
     if (this.jumpDownload) this.jumpDownload.addEventListener("click", () => this._downloadCuts());
     if (this.jumpCsv) this.jumpCsv.addEventListener("click", () => this._downloadProfilesCsv());
+
+    this.bridge         = window.datasetBridge;
+    this.paramAdd       = refs.paramAdd;
+    this.completeEl     = refs.complete;
+    this.missingEl      = refs.missing;
+    this.demAdd         = refs.demAdd;
+    this.cloudDemAdd    = refs.cloudDemAdd;
+    this.cloudScaleAdd  = refs.cloudScaleAdd;
+    this.active         = false;
+    this.dataset        = null;
+    this.loadedRevision = null;
+    this.completing     = null;
+    this.missingFor     = null;
+    this.resumeView     = null;
+    this.pendingUse     = null;
+    this.stale          = false;
+    this.selectSeq      = 0;
+
+    this.mapTitle   = this.topdown.closest(".cube-map").querySelector(".cube-panel-title");
+    this.replaceBtn = document.createElement("button");
+    this.replaceBtn.type        = "button";
+    this.replaceBtn.className   = "btn btn--mini ds-replace";
+    this.replaceBtn.textContent = "Replace";
+    this.replaceBtn.title       = "Replace with the primary SLC";
+    this.replaceBtn.hidden      = true;
+    this.mapTitle.after(this.replaceBtn);
+
+    this.modeBtns.forEach((btn) => { btn.dataset.baseTitle = btn.title; });
+    this.replaceBtn.addEventListener("click", () => this.bridge.complete(this.selectedId, ["primary"]));
+    this.demAdd.addEventListener("click", () => this.bridge.complete(this.selectedId, ["dem"]));
+    this.cloudDemAdd.addEventListener("click", () => this.bridge.complete(this.selectedId, ["dem"]));
+    this.cloudScaleAdd.addEventListener("click", () => this.bridge.complete(this.selectedId, ["spacing"]));
+
+    this.bridge.mountIndicator(refs.datasetBar, { variant: "bar", page: "cube" });
+    this.bridge.on("current", () => this._onCurrent());
+    this.bridge.on("dataset", ({ dataset }) => this._onDataset(dataset));
   }
 
   fileTag() {
@@ -1894,6 +1931,7 @@ class TomogramView {
   }
 
   leave() {
+    this.active = false;
     this._stopSweeps();
     this._storyStopPlay();
     if (this.cloud) this.cloud.leave();
@@ -1904,16 +1942,65 @@ class TomogramView {
 
   async enter(param = null) {
     const state = this._parseState(param);
+    this.active = true;
     if (state) this.pendingState = state;
 
     if (this.entered) {
       await this._refreshStrip();
-      this._applyPendingState();
+    } else {
+      this.entered = true;
+      await this.refresh();
+    }
+
+    if (state) this._use(state.id);
+    this._applyPendingState();
+    this._resume();
+  }
+
+  _use(id) {
+    this.pendingUse = id;
+    this.bridge.use(id).catch((error) => Toast.show(error.message, "error")).finally(() => {
+      if (this.pendingUse === id) this.pendingUse = null;
+    });
+  }
+
+  _pick(id) {
+    if (this.polling) {
+      Toast.show("A cube is still loading.", "warn");
       return;
     }
-    this.entered = true;
-    await this.refresh();
-    this._applyPendingState();
+    this._use(id);
+    this.select(id);
+  }
+
+  _resume() {
+    if (this.stale && this.selectedId && !this.polling) {
+      this.select(this.selectedId, true);
+      return;
+    }
+    this._followCurrent();
+  }
+
+  _followCurrent() {
+    const current = this.bridge.state ? this.bridge.state.current : null;
+    if (!this.active || !current || this.pendingState || this.pendingUse || this.polling) return;
+    if (current.id !== this.selectedId) this.select(current.id);
+  }
+
+  _onCurrent() {
+    if (this.active) this._followCurrent();
+  }
+
+  _onDataset(dataset) {
+    if (dataset.id !== this.selectedId) return;
+
+    const newer = this.loadedRevision !== null && dataset.revision > this.loadedRevision;
+    if (!newer && this.completing !== dataset.id) return;
+    if (!this.active || this.polling) {
+      this.stale = true;
+      return;
+    }
+    this.select(dataset.id, true);
   }
 
   _parseState(param) {
@@ -2204,31 +2291,39 @@ class TomogramView {
     this._storyRender();
   }
 
+  async _loadCubes() {
+    const base           = ResultsSources.runs();
+    const [data, shared] = await Promise.all([Api.get(`/api/cubes?base=${encodeURIComponent(base)}`), this.bridge.stripEntries(base)]);
+    const errors         = [data.error, shared.error].filter(Boolean);
+    return { cubes: [...(data.cubes || []), ...shared.entries], error: errors.join(" · ") };
+  }
+
   async _refreshStrip() {
-    const data = await Api.get(`/api/cubes?base=${encodeURIComponent(ResultsSources.runs())}`);
-    if (!data || data.error) return;
-    this.cubes = data.cubes || [];
+    const { cubes, error } = await this._loadCubes();
+    this.cubes = cubes;
     this._renderStrip();
+    if (!error) return;
+    this.hint.textContent = error;
+    this.hint.hidden = false;
   }
 
   async refresh() {
     this.hint.hidden = false;
     this.hint.innerHTML = ThinkingOrb.busy("searching", "Loading saved cubes…");
 
-    const data = await Api.get(`/api/cubes?base=${encodeURIComponent(ResultsSources.runs())}`);
+    const { cubes, error } = await this._loadCubes();
 
     this.hint.classList.remove("is-loading");
+    this.cubes = cubes;
+    this._renderStrip();
 
-    if (data.error) {
-      this.hint.textContent = data.error;
+    if (error) {
+      this.hint.textContent = error;
       return;
     }
 
-    this.cubes = data.cubes || [];
-    this._renderStrip();
-
     if (!this.cubes.length) {
-      this.hint.textContent = data.error || "No saved cubes found under the runs directory.";
+      this.hint.textContent = "No saved cubes found under the runs directory.";
       this.hint.hidden = false;
       this._showStage(false);
       return;
@@ -2242,7 +2337,7 @@ class TomogramView {
     if (!this.runStrip) {
       this.runStrip = new RunStrip(this.strip, {
         stateFor : (cube) => cube.id === this.selectedId,
-        onPick   : (cube) => this.select(cube.id),
+        onPick   : (cube) => this._pick(cube.id),
       });
     }
     this.runStrip.render(this.cubes);
@@ -2255,6 +2350,9 @@ class TomogramView {
     }
     if (!force && cubeId === this.selectedId && this.meta) return;
 
+    const seq = ++this.selectSeq;
+    this.resumeView = cubeId === this.selectedId ? this.missingFor : null;
+    this.stale = false;
     this._stopSweeps();
     this.selectedId = cubeId;
     if (this.runStrip) this.runStrip.close((this.cubes.find((c) => c.id === cubeId) || {}).group);
@@ -2287,15 +2385,29 @@ class TomogramView {
     this.slicesEl.classList.remove("is-in");
     this.hint.hidden = true;
     if (this.slotsEl) this.slotsEl.hidden = true;
+    this._hideCompletion();
+    this._hideMissing();
+    this.dataset = null;
+    this.loadedRevision = null;
     this._renderStrip();
 
-    if (!force) await this._syncParamTags();
+    const dataset = await this._prepared(cubeId);
+    if (seq !== this.selectSeq || !dataset) return;
+    this.dataset = dataset;
+    if (!dataset.tools.cube.ready) {
+      this._showCompletion(dataset);
+      return;
+    }
+
+    await this._syncParamTags();
+    if (seq !== this.selectSeq) return;
 
     const body = { id: cubeId };
     const tag = this._paramTag();
     if (tag) body.param_tag = tag;
 
     const res = await Api.post("/api/cubes/load", body);
+    if (seq !== this.selectSeq) return;
     if (!res.ok) {
       this.hint.textContent = res.error || "Cube load failed.";
       this.hint.hidden = false;
@@ -2305,6 +2417,112 @@ class TomogramView {
     this._setProgress(0, "loading");
     this.progress.hidden = false;
     await this._poll();
+
+    if (this.meta && this.selectedId === cubeId) this.loadedRevision = dataset.revision;
+    if (this.stale && this.selectedId === cubeId && this.active) {
+      this.select(cubeId, true);
+      return;
+    }
+    this._followCurrent();
+  }
+
+  _setPreparing(dataset) {
+    this.progressFill.style.width  = `${DatasetWords.percent(dataset)}%`;
+    this.progressLabel.textContent = `Preparing ${dataset.name} for the TomoVic tools: ${dataset.stage || "waiting"}`;
+  }
+
+  async _prepared(cubeId) {
+    let dataset = null;
+    try {
+      dataset = await this.bridge.dataset(cubeId);
+      if (dataset.state === "preparing") {
+        this._setPreparing(dataset);
+        this.progress.hidden = false;
+        dataset = await this.bridge.waitReady(cubeId, (next) => this._setPreparing(next));
+        this.progress.hidden = true;
+      }
+    } catch (error) {
+      this._failLoad(error.message);
+      return null;
+    }
+
+    if (dataset.state === "error") {
+      this._failLoad(dataset.error);
+      return null;
+    }
+    return dataset;
+  }
+
+  _showCompletion(dataset) {
+    this.completing = dataset.id;
+    this.paramRow.hidden = true;
+    this.completeEl.hidden = false;
+    this.bridge.complete(dataset.id, dataset.tools.cube.missing, { host: this.completeEl, title: DatasetWords.title("cube", dataset), dataset });
+  }
+
+  _hideCompletion() {
+    this.completing = null;
+    this.completeEl.hidden = true;
+    this.completeEl.innerHTML = "";
+  }
+
+  _showMissing(view) {
+    const tool = TomogramView.MISSING_TOOLS[view];
+    this._stopSweeps();
+    this.missingFor = view;
+    this.modeBtns.forEach((btn) => btn.classList.toggle("is-active", btn.dataset.view === view));
+    this.viewEls.forEach((el) => { el.hidden = true; });
+    this.missingEl.hidden = false;
+    this.bridge.complete(this.selectedId, this.dataset.tools[tool].missing, { host: this.missingEl, title: DatasetWords.title(tool, this.dataset), dataset: this.dataset });
+  }
+
+  _hideMissing() {
+    this.missingFor = null;
+    this.missingEl.hidden = true;
+    this.missingEl.innerHTML = "";
+  }
+
+  _offers(tool, piece) {
+    return !!(this.meta && this.dataset && !this.dataset.tools[tool].ready && this.dataset.pieces[piece].addable);
+  }
+
+  _syncMissingViews() {
+    Object.entries(TomogramView.MISSING_TOOLS).forEach(([view, key]) => {
+      const btn     = this.modeBtns.find((candidate) => candidate.dataset.view === view);
+      const tool    = this.dataset.tools[key];
+      const missing = btn.hidden && !tool.ready && tool.actionable;
+
+      btn.classList.toggle("is-missing", missing);
+      btn.title = missing ? `Needs ${DatasetWords.labels(this.dataset, tool.missing)}` : btn.dataset.baseTitle;
+      if (missing) btn.hidden = false;
+    });
+  }
+
+  _syncMapTitle() {
+    const primary = this.dataset.pieces.primary;
+    const standin = primary.present && primary.value.kind === "stand-in";
+    const title   = standin ? DatasetWords.STANDIN_TITLE : DatasetWords.PRIMARY_TITLE;
+
+    this.mapTitle.textContent = title;
+    this.topdown.alt          = title;
+    this.replaceBtn.hidden    = !standin;
+  }
+
+  _syncBridgeChrome() {
+    this._syncMissingViews();
+    this._syncMapTitle();
+    this._syncDemToggle();
+    this.cloudDemAdd.hidden   = !this._offers("cube_dem", "dem");
+    this.cloudScaleAdd.hidden = !this._offers("cube_metric", "spacing");
+  }
+
+  _resumeMissingView() {
+    const view = this.resumeView;
+    this.resumeView = null;
+    if (!view) return;
+
+    const btn = this.modeBtns.find((candidate) => candidate.dataset.view === view);
+    if (btn && !btn.hidden) this._setView(view);
   }
 
   async _syncParamTags() {
@@ -2318,11 +2536,35 @@ class TomogramView {
     return this.paramTags.includes(stored) ? stored : "";
   }
 
+  _paramOffer() {
+    if (this.paramTags.length || !this.dataset) return null;
+    const piece = this.dataset.pieces.params;
+    return piece.addable || piece.launch ? piece : null;
+  }
+
+  _renderParamOffer() {
+    const none = document.createElement("option");
+    none.value       = "";
+    none.textContent = "none yet";
+    this.paramSel.appendChild(none);
+    this.paramSel.disabled = true;
+    this.paramAdd.hidden   = false;
+    this.bridge.complete(this.selectedId, ["params"], { host: this.paramAdd, compact: true, dataset: this.dataset });
+  }
+
   _renderParamPicker() {
     if (!this.paramRow || !this.paramSel) return;
 
-    this.paramRow.hidden = !this.paramTags.length;
+    const offer = this._paramOffer();
+    this.paramRow.hidden    = !this.paramTags.length && !offer;
     this.paramSel.innerHTML = "";
+    this.paramSel.disabled  = false;
+    this.paramAdd.hidden    = true;
+    this.paramAdd.innerHTML = "";
+    if (offer) {
+      this._renderParamOffer();
+      return;
+    }
     if (!this.paramTags.length) return;
 
     const none = document.createElement("option");
@@ -2487,12 +2729,15 @@ class TomogramView {
       if (this.view === "figures") this.figures.render();
     }
 
+    this._syncBridgeChrome();
+
     this._follow({ az: Math.floor(meta.n_az / 2), rg: Math.floor(meta.n_rg / 2), fx: 0.5, fy: 0.5 }, true);
     this._consumeFocus();
     this._applyPendingState();
 
     const sweep = this._sweepFor(this.view);
     if (sweep) sweep.play();
+    this._resumeMissingView();
   }
 
   openAt(cubeId, az, rg) {
@@ -2557,6 +2802,16 @@ class TomogramView {
   }
 
   _setView(view) {
+    const btn = this.modeBtns.find((candidate) => candidate.dataset.view === view);
+    if (btn && btn.classList.contains("is-missing")) {
+      this._showMissing(view);
+      return;
+    }
+    if (this.missingFor) {
+      this._hideMissing();
+      this.view = null;
+    }
+
     if (!["explorer", "elevation", "azimuth", "range", "transect", "cloud", "volume", "globe", "figures", "passes", "pauli"].includes(view) || view === this.view) return;
 
     this._stopSweeps();
@@ -2610,19 +2865,21 @@ class TomogramView {
   _syncDemToggle() {
     if (!this.demWrap) return;
     const carried = !!(this.meta && this.meta.dem);
-    this.demWrap.hidden = !carried || !TomogramView.DEM_VIEWS.includes(this.view);
+    const here    = TomogramView.DEM_VIEWS.includes(this.view);
+    this.demWrap.hidden = !carried || !here;
+    this.demAdd.hidden  = !this._offers("cube_dem", "dem") || !here;
   }
 
   _syncGlobeChrome() {
-    const collapsed = this.view === "globe";
-    if (this.pickEl) this.pickEl.hidden = collapsed;
-    this.stage.classList.toggle("is-globe", collapsed);
+    const globe = this.view === "globe";
+    if (this.pickEl) this.pickEl.hidden = globe && !this.stage.hidden;
+    this.stage.classList.toggle("is-globe", globe);
     this._syncStageChrome();
   }
 
   _showStage(shown) {
     this.stage.hidden = !shown;
-    this._syncStageChrome();
+    this._syncGlobeChrome();
   }
 
   _syncStageChrome() {
