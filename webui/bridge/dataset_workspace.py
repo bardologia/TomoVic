@@ -291,6 +291,19 @@ class DatasetWorkspace:
         stat = Path(path).stat()
         return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
+    def differs(self, stamp: dict, record: DatasetRecord) -> bool:
+        """Says whether a file stamp differs from the size and modification time a record holds for its source.
+
+        Args:
+            stamp  : {size, mtime_ns} of the file now.
+            record : Dataset record.
+
+        Returns:
+            True when the size or the modification time changed.
+        """
+
+        return (stamp["size"], stamp["mtime_ns"]) != (record.source["size"], record.source["mtime_ns"])
+
     def needs_conversion(self, kind: str, path: Path) -> bool:
         """Says whether TomoVis's cube must be converted to a C-ordered native .npy before the tools can use it.
 
@@ -363,8 +376,7 @@ class DatasetWorkspace:
     def source_changed(self, record: DatasetRecord) -> bool:
         """Says whether an import's source file changed size or modification time since its record was written."""
 
-        stamp = self.stamp(Path(record.source["path"]))
-        return (stamp["size"], stamp["mtime_ns"]) != (record.source["size"], record.source["mtime_ns"])
+        return self.differs(self.stamp(Path(record.source["path"])), record)
 
     def refresh(self, record: DatasetRecord) -> None:
         """Points an import at its changed source again: new stamp, TomoVis cube and link, both revisions raised, state "preparing".

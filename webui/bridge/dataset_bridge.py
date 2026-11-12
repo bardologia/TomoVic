@@ -306,7 +306,7 @@ class DatasetBridge:
 
         tomogram = Path(record.tomovis_cube)
         stamp    = self.workspace.stamp(tomogram) if tomogram.is_file() else {"size": 0, "mtime_ns": 0}
-        changed  = (stamp["size"], stamp["mtime_ns"]) != (record.source["size"], record.source["mtime_ns"])
+        changed  = self.workspace.differs(stamp, record)
 
         if changed:
             record.source            = {**record.source, **stamp}
