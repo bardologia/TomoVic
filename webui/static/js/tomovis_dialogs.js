@@ -134,6 +134,19 @@ class TomoVisMessageBox {
     question    : '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#5b8def"/><text x="16" y="22.5" text-anchor="middle" font-size="18" font-weight="700" font-family="sans-serif" fill="#fff">?</text></svg>',
   };
 
+  static MARGIN      = 11;
+  static LABEL_X     = 62;
+  static TITLE_EXTRA = 50;
+
+  static plainText(text) {
+    const box = TomoVisInput.el("div", "tv-messagebox__text");
+    text.split("/").forEach((part, i) => {
+      if (i > 0) box.append(document.createTextNode("/"), TomoVisInput.el("wbr"));
+      box.append(document.createTextNode(part));
+    });
+    return box;
+  }
+
   static richText(text) {
     const box   = TomoVisInput.el("div", "tv-messagebox__text is-rich");
     let target  = box;
@@ -154,13 +167,52 @@ class TomoVisMessageBox {
     return box;
   }
 
+  static limits() {
+    const screen = window.screen.availWidth;
+    return { soft: Math.min(screen / 2, 500), hard: screen <= 1024 ? screen : Math.min(screen - 480, 1000) };
+  }
+
+  static intrinsic(label, sizing) {
+    label.style.width = sizing;
+    const width = Math.ceil(label.getBoundingClientRect().width);
+    label.style.width = "";
+    return width;
+  }
+
+  static titleWidth(modal) {
+    const range = document.createRange();
+    range.selectNodeContents(modal.titleBar);
+    return Math.ceil(range.getBoundingClientRect().width);
+  }
+
+  static fit(modal, label, buttonCount) {
+    const { soft, hard } = TomoVisMessageBox.limits();
+    const chrome  = TomoVisMessageBox.LABEL_X + TomoVisMessageBox.MARGIN;
+    const buttons = 2 * TomoVisMessageBox.MARGIN + buttonCount * 80 + (buttonCount - 1) * 6;
+    let width = Math.max(TomoVisMessageBox.intrinsic(label, "max-content") + chrome, buttons);
+    if (width > soft) {
+      label.classList.add("is-wrapped");
+      width = Math.max(soft, TomoVisMessageBox.intrinsic(label, "min-content") + chrome, buttons);
+      if (width > hard) {
+        label.classList.add("is-anywhere");
+        width = hard;
+      }
+    }
+    width = Math.max(width, Math.min(TomoVisMessageBox.titleWidth(modal) + TomoVisMessageBox.TITLE_EXTRA, hard));
+    modal.el.style.setProperty("--tv-box-w", `${Math.round(width)}px`);
+    modal.center();
+  }
+
   static show({ level = "information", title = "", text = "", rich = false, buttons = ["OK"], escape = null, defaultButton = null, layer = null } = {}) {
     const modal = new TomoVisModal({ title, className: "tv-messagebox", buttons, layer, escape: escape || (buttons.length === 1 ? buttons[0] : buttons[buttons.length - 1]), defaultButton });
     const icon  = TomoVisInput.el("div", `tv-messagebox__icon is-${level}`);
+    const label = rich ? TomoVisMessageBox.richText(text) : TomoVisMessageBox.plainText(text);
     icon.innerHTML = TomoVisMessageBox.ICONS[level];
     modal.el.dataset.level = level;
-    modal.body.append(icon, rich ? TomoVisMessageBox.richText(text) : TomoVisInput.el("div", "tv-messagebox__text", text));
-    return modal.open();
+    modal.body.append(icon, TomoVisInput.el("span", "tv-messagebox__indent"), label);
+    const answer = modal.open();
+    TomoVisMessageBox.fit(modal, label, buttons.length);
+    return answer;
   }
 }
 

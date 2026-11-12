@@ -626,22 +626,30 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   padding: 0 16px 14px;
 }
 
-.tv-messagebox .tv-modal__body {
+.tv-messagebox { min-width: 0; max-width: none; }
+.tv-messagebox > .tv-modal__body,
+.tv-messagebox > .tv-modal__buttons { box-sizing: border-box; width: var(--tv-box-w, auto); }
+.tv-messagebox > .tv-modal__body {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  column-gap: 16px;
-  align-items: center;
-  padding: 18px 20px 16px;
+  grid-template-columns: 32px 7px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+  padding: 11px 11px 6px;
 }
-.tv-messagebox__icon { width: 36px; height: 36px; }
+.tv-messagebox > .tv-modal__buttons { gap: 6px; padding: 0 11px 11px; }
+.tv-messagebox > .tv-modal__buttons .tv-button { min-width: 80px; height: 32px; }
+.tv-messagebox__icon { width: 32px; height: 32px; }
 .tv-messagebox__icon svg { width: 100%; height: 100%; display: block; }
 .tv-messagebox__text {
-  max-width: 520px;
+  min-height: 26px;
+  margin-bottom: 6px;
   color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
   user-select: text;
 }
+.tv-messagebox__text.is-wrapped { white-space: pre-wrap; }
+.tv-messagebox__text.is-anywhere { overflow-wrap: anywhere; }
+.tv-messagebox__text p { margin: 12px 0 0; }
 
 .tv-filedialog .tv-modal__body {
   box-sizing: border-box;

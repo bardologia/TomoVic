@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { TomoVisHarness as H, TomoVisCheckRun as R } from "./harness.mjs";
 
+const LONG_PATH = "/home/bard/Bard/code/TomoVic/logs/tomovis_port/final_verify/shell-verify/sessions/ui_session.hd5";
+
 class FinalShellChecks {
   static DIALOG = {
     body    : [645, 436],
@@ -24,6 +26,16 @@ class FinalShellChecks {
   };
 
   static TYPES = [["sub", "", "Folder"], ["a.npy", "10 bytes", "npy File"], ["b.hd5", "10 bytes", "hd5 File"], ["c.h5", "10 bytes", "h5 File"], ["d.rat", "10 bytes", "rat File"], ["e.txt", "10 bytes", "txt File"], ["f", "10 bytes", "File"], ["g.png", "10 bytes", "png File"], ["h.json", "10 bytes", "json File"], ["i.HD5", "10 bytes", "HD5 File"], ["j.npz", "10 bytes", "npz File"], ["k.npy", "4.00 KiB", "npy File"]];
+
+  static BOXES = {
+    warning     : { spec: { level: "warning", title: "No data", text: "There is no data loaded to save." }, qt: { size: [326, 92], label: [62, 11, 253, 24], ok: [235, 49] } },
+    information : { spec: { level: "information", title: "Save successful", text: `File saved successfully:\n${LONG_PATH}` }, qt: { size: [400, 160], label: [62, 11, 327, 94], ok: [309, 117] } },
+    critical    : { spec: { level: "critical", title: "Import error", text: "Could not import file:\n[Errno 2] Unable to synchronously open file (unable to open file: name = 'x', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)" }, qt: { size: [400, 183], label: [62, 11, 327, 117], ok: [309, 140] } },
+    title       : { spec: { level: "information", title: "A very long window title that is wider than the text", text: "Hi" }, qt: { size: [450, 92], label: [62, 11, 377, 24], ok: [359, 49] } },
+    invalid     : { spec: { level: "information", title: "Invalid filename", text: '<b>The name "renamed" cannot be used.</b><p>Try using another name, with fewer characters or no punctuation marks.', rich: true }, qt: { size: [400, 149], label: [62, 11, 327, 83], ok: [309, 106] } },
+    notfound    : { spec: { level: "warning", title: "Open File", text: "missing_file.hd5\nFile not found.\nPlease verify the correct file name was given." }, qt: { size: [400, 161], label: [62, 11, 327, 95], ok: [309, 118] } },
+    replace     : { spec: { level: "warning", title: "Save File", text: "s.hd5 already exists.\nDo you want to replace it?", buttons: ["Yes", "No"] }, qt: { size: [280, 114], label: [62, 11, 207, 48], ok: [189, 71] } },
+  };
 
   static OPENGL_OK     = "TomoVis: OpenGL context OK, version=(2, 0), profile=0";
   static OPENGL_FAILED = "TomoVis: QOpenGLContext.create() failed";
@@ -492,10 +504,72 @@ class FinalShellChecks {
     });
   }
 
+  async messageBox(page, spec) {
+    await page.evaluate((s) => { window.TomoVisMessageBox.show({ ...s, layer: window.app.tomovisPage.ctx.layer }); }, spec);
+    await page.waitForSelector(".tv-messagebox");
+    const box = await page.evaluate(() => {
+      const el    = document.querySelector(".tv-messagebox");
+      const body  = el.querySelector(".tv-modal__body").getBoundingClientRect();
+      const foot  = el.querySelector(".tv-modal__buttons").getBoundingClientRect();
+      const label = el.querySelector(".tv-messagebox__text");
+      const rect  = label.getBoundingClientRect();
+      const last  = [...el.querySelectorAll(".tv-modal__buttons .tv-button")].pop().getBoundingClientRect();
+      return { size: [Math.round(body.width), Math.round(foot.bottom - body.top)], label: [Math.round(rect.left - body.left), Math.round(rect.top - body.top), Math.round(rect.width), Math.round(rect.height)], ok: [Math.round(last.left - body.left), Math.round(last.top - body.top)], lineHeight: parseFloat(getComputedStyle(label).lineHeight) || 23, title: Boolean(el.querySelector(".tv-modal__title")), wrapped: label.classList.contains("is-wrapped"), breaks: label.querySelectorAll("wbr").length };
+    });
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".tv-messagebox", { state: "detached" });
+    return box;
+  }
+
+  async messageBoxes() {
+    await this.run.check("LS-15 Qt", "message boxes follow QMessageBox's size rules: with Qt's font and an 800 px screen they match the original within 3 px", async () => {
+      const context = await this.browser.newContext({ viewport: { width: 1100, height: 880 }, screen: { width: 800, height: 600 }, deviceScaleFactor: 1 });
+      const page    = await context.newPage();
+      page.on("pageerror", (error) => this.errors.push(`pageerror: ${error.message}`));
+      await H.openTomoVis(page);
+      await page.addStyleTag({ content: '.tv-messagebox, .tv-messagebox .tv-modal__title, .tv-messagebox .tv-button { font-family: "Noto Sans"; font-size: 17px; font-weight: 400; line-height: normal; }' });
+      const seen = {};
+      for (const [key, { spec }] of Object.entries(FinalShellChecks.BOXES)) seen[key] = await this.messageBox(page, spec);
+      await context.close();
+
+      const off = [];
+      for (const [key, { qt }] of Object.entries(FinalShellChecks.BOXES)) {
+        const got = seen[key];
+        const pairs = [...got.size.map((v, i) => [v, qt.size[i]]), ...got.label.map((v, i) => [v, qt.label[i]]), ...got.ok.map((v, i) => [v, qt.ok[i]])];
+        if (pairs.some(([a, b]) => Math.abs(a - b) > 3)) off.push(`${key}: ${JSON.stringify(got)} vs ${JSON.stringify(qt)}`);
+        const lines = Math.round(got.label[3] / 23);
+        const qtLines = Math.round(qt.label[3] / 23);
+        if (lines !== qtLines) off.push(`${key}: ${lines} lines vs Qt's ${qtLines}`);
+      }
+      R.assert(off.length === 0, off.join("\n"));
+      return Object.entries(seen).map(([k, v]) => `${k} ${v.size.join("x")}`).join(", ");
+    });
+
+    await this.run.check("LS-15 port", "with TomoVic's font the boxes are sized to their text, wrap paths after '/', and keep the title bar as the window frame", async () => {
+      await this.fresh();
+      const screen = await this.T(() => window.screen.availWidth);
+      const soft   = Math.min(screen / 2, 500);
+      const warn   = await this.messageBox(this.page, FinalShellChecks.BOXES.warning.spec);
+      const info   = await this.messageBox(this.page, FinalShellChecks.BOXES.information.spec);
+      const crit   = await this.messageBox(this.page, FinalShellChecks.BOXES.critical.spec);
+      await this.T((s) => { window.TomoVisMessageBox.show({ ...s, layer: window.app.tomovisPage.ctx.layer }); }, FinalShellChecks.BOXES.critical.spec);
+      await this.page.waitForSelector(".tv-messagebox");
+      await H.shot(this.page, "ls15_critical", "final-shell", { element: ".tv-messagebox" });
+      await this.page.keyboard.press("Escape");
+
+      R.assert(warn.size[0] < 300 && warn.size[0] === warn.label[2] + 73 && !warn.wrapped, `warning box not sized to its text: ${JSON.stringify(warn)}`);
+      R.equal([info.size[0], info.wrapped, info.breaks > 5, crit.size[0], crit.wrapped], [soft, true, true, soft, true], "long texts wrap at Qt's soft limit");
+      R.assert(crit.label[3] > 2 * crit.lineHeight, `critical text not wrapped onto three or more lines: ${JSON.stringify(crit)}`);
+      R.equal([warn.title, info.ok[0], info.size[1] - info.ok[1]], [true, soft - 91, 43], "title bar, OK button 11 px from the right and bottom");
+      return `warning ${warn.size.join("x")}, information ${info.size.join("x")}, critical ${crit.size.join("x")}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
     this.context = opened.context;
+    this.browser = opened.browser;
     this.page    = opened.page;
     await H.openTomoVis(this.page);
 
@@ -509,6 +583,7 @@ class FinalShellChecks {
     if (this.wanted("computer")) await this.computerPlace();
     if (this.wanted("newfolder")) await this.newFolder();
     if (this.wanted("views")) await this.viewModes();
+    if (this.wanted("messages")) await this.messageBoxes();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
