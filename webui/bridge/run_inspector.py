@@ -162,6 +162,12 @@ class RunInspector:
     def layout(self, run_dir: Path) -> dict:
         """Returns the run's data/dataset.json.
 
+        Args:
+            run_dir : Run directory.
+
+        Returns:
+            The parsed layout.
+
         Raises:
             FileNotFoundError : If the run holds no data/dataset.json.
         """
@@ -172,7 +178,15 @@ class RunInspector:
         return layout
 
     def artifact(self, run_dir: Path, key: str) -> Path | None:
-        """Returns the path the layout names for an artifact, None when it names none (the file may not exist)."""
+        """Returns the path the layout names for an artifact, None when it names none (the file may not exist).
+
+        Args:
+            run_dir : Run directory.
+            key     : Artifact key of dataset.json.
+
+        Returns:
+            data/<name> of the artifact, or None.
+        """
 
         name = self.layout(run_dir)["artifacts"].get(key)
         return run_dir / "data" / name if name else None
@@ -227,7 +241,15 @@ class RunInspector:
         return ""
 
     def launch(self, run_dir: Path, key: str) -> dict | None:
-        """Returns the launch that creates a piece, prefilled for this dataset, or None."""
+        """Returns the launch that creates a piece, prefilled for this dataset, or None.
+
+        Args:
+            run_dir : Dataset run directory.
+            key     : Piece key.
+
+        Returns:
+            {script, label, overrides} with dataset_base_path and dataset_filter set, or None.
+        """
 
         if key not in self.LAUNCHES:
             return None
@@ -235,7 +257,15 @@ class RunInspector:
         return {"script": script, "label": label, "overrides": {"dataset_base_path": str(run_dir.parent), "dataset_filter": [run_dir.name]}}
 
     def cube_header(self, run_dir: Path, record: DatasetRecord | None) -> tuple[tuple, str] | None:
-        """Returns the header of the cube TomoVis shows: the record's TomoVis cube, or a run's tomogram."""
+        """Returns the header of the cube TomoVis shows: the record's TomoVis cube, or a run's tomogram.
+
+        Args:
+            run_dir : Dataset run directory.
+            record  : Its record, None for an unregistered run.
+
+        Returns:
+            (shape, dtype), or None when the cube does not exist.
+        """
 
         if record is None:
             return self.header(self.artifact(run_dir, "tomogram_full"))
@@ -313,7 +343,18 @@ class RunInspector:
         }
 
     def plane_piece(self, run_dir: Path, facts: dict, key: str, artifact: str, value) -> dict:
-        """Builds the Piece of a 2-D (azimuth, range) artifact: present when it exists and covers the footprint."""
+        """Builds the Piece of a 2-D (azimuth, range) artifact: present when it exists and covers the footprint.
+
+        Args:
+            run_dir  : Dataset run directory.
+            facts    : Output of ``facts``.
+            key      : Piece key.
+            artifact : Artifact key of the 2-D file.
+            value    : The piece's value when present.
+
+        Returns:
+            The Piece, with a problem naming the shape when it does not cover the footprint.
+        """
 
         path    = facts["paths"][artifact]
         header  = facts["headers"][artifact]
@@ -405,12 +446,29 @@ class RunInspector:
         return {"label": spec["label"], "ready": ready, "missing": missing, "actionable": actionable, "note": note}
 
     def tools(self, pieces: dict, imported: bool, tomovis: dict) -> dict:
-        """Returns tool key to Tool for every tool of TOOLS."""
+        """Returns tool key to Tool for every tool of TOOLS.
+
+        Args:
+            pieces   : Output of ``pieces``.
+            imported : Whether the dataset is a TomoVis import.
+            tomovis  : The payload's tomovis block.
+
+        Returns:
+            Tool key to Tool.
+        """
 
         return {key: self.tool(key, pieces, imported, tomovis) for key in self.TOOLS}
 
     def link_ready(self, record: DatasetRecord, link: Path) -> bool:
-        """Says whether TomoVis can open a dataset now: its link file and the cube the link points into both exist."""
+        """Says whether TomoVis can open a dataset now: its link file and the cube the link points into both exist.
+
+        Args:
+            record : Dataset record.
+            link   : Path of its TomoVis link.
+
+        Returns:
+            True when both files exist.
+        """
 
         return link.is_file() and Path(record.tomovis_cube).exists()
 

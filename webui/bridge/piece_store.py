@@ -88,6 +88,13 @@ class PieceStore:
     def footprint(self, record: DatasetRecord, piece: str) -> tuple[int, int]:
         """Returns the dataset's (azimuth, range) footprint.
 
+        Args:
+            record : Import record.
+            piece  : Piece key, for the message.
+
+        Returns:
+            (azimuth, range) of the dataset's 3-D tomogram.
+
         Raises:
             PieceError : If the dataset has no tomogram to compare against.
         """
@@ -117,6 +124,13 @@ class PieceStore:
     def height_range(self, record: DatasetRecord, fields: dict) -> tuple:
         """Stores two heights in metres as the tomogram's height range and rewrites the TomoVis link.
 
+        Args:
+            record : Import record; its origins and TomoVis revision are updated.
+            fields : {low, high} in metres.
+
+        Returns:
+            An empty tuple: no preparation step follows.
+
         Raises:
             PieceError : If the heights are not numbers or not in increasing order.
         """
@@ -136,6 +150,13 @@ class PieceStore:
 
     def spacing(self, record: DatasetRecord, fields: dict) -> tuple:
         """Stores the azimuth and range pixel spacing as one-track track parameters, replacing a copied geometry.
+
+        Args:
+            record : Import record; its origins, links and TomoVis revision are updated.
+            fields : {azimuth, range} pixel spacing in metres.
+
+        Returns:
+            An empty tuple: no preparation step follows.
 
         Raises:
             PieceError : If a spacing is not a positive number.
@@ -159,6 +180,10 @@ class PieceStore:
     def channel(self, record: DatasetRecord, fields: dict) -> tuple:
         """Chooses the channel of a multi-channel cube the tools show; the preparer rewrites the tomogram.
 
+        Args:
+            record : Import record; its channel and origins are updated.
+            fields : {choice: "combined" or a channel index}.
+
         Returns:
             The preparation steps to run.
 
@@ -181,6 +206,10 @@ class PieceStore:
     def primary(self, record: DatasetRecord, fields: dict) -> tuple:
         """Links a picked primary image, or asks the preparer to rebuild the stand-in from the cube.
 
+        Args:
+            record : Import record; its origins and links are updated.
+            fields : {from: "cube"} or {from: "file", path}.
+
         Returns:
             The preparation steps to run.
 
@@ -202,6 +231,13 @@ class PieceStore:
     def dem(self, record: DatasetRecord, fields: dict) -> tuple:
         """Links a picked DEM.
 
+        Args:
+            record : Import record; its origins and links are updated.
+            fields : {path} of a 2-D .npy in metres.
+
+        Returns:
+            An empty tuple: no preparation step follows.
+
         Raises:
             PieceError : If the file is refused.
         """
@@ -213,6 +249,13 @@ class PieceStore:
 
     def geometry(self, record: DatasetRecord, fields: dict) -> tuple:
         """Copies a TomoVic run's acquisition geometry: its track parameters, geometry field, crop offsets, pass labels and, when the dataset has none, its DEM.
+
+        Args:
+            record : Import record; its origins, links and TomoVis revision are updated.
+            fields : {run} folder of a TomoVic run.
+
+        Returns:
+            An empty tuple: no preparation step follows.
 
         Raises:
             PieceError : If the folder is not a run, has no complete track parameters, covers another footprint or names another number of passes than the dataset's pass stack.
@@ -274,6 +317,13 @@ class PieceStore:
     def passes(self, record: DatasetRecord, fields: dict) -> tuple:
         """Links a picked secondary stack and, optionally, its interferograms.
 
+        Args:
+            record : Import record; its origins and links are updated.
+            fields : {secondaries, interferograms or null} .npy paths.
+
+        Returns:
+            An empty tuple: no preparation step follows.
+
         Raises:
             PieceError : If a file is refused or the stack disagrees with the pass labels of a copied geometry.
         """
@@ -302,6 +352,13 @@ class PieceStore:
     def polarimetry(self, record: DatasetRecord, fields: dict) -> tuple:
         """Links a picked polarimetric primary and writes its sidecar with the multilook window.
 
+        Args:
+            record : Import record; its origins and links are updated.
+            fields : {path, window: [azimuth, range]}.
+
+        Returns:
+            An empty tuple: no preparation step follows.
+
         Raises:
             PieceError : If the window is not two whole numbers from 1 to 99 or the file is refused.
         """
@@ -317,7 +374,15 @@ class PieceStore:
         return ()
 
     def tag(self, record: DatasetRecord, name: str) -> str:
-        """Returns a free folder name under params/: the picked folder's name, then name_2, name_3 and so on."""
+        """Returns a free folder name under params/: the picked folder's name, then name_2, name_3 and so on.
+
+        Args:
+            record : Import record.
+            name   : Name of the picked folder.
+
+        Returns:
+            The first of name, name_2, name_3 and so on that params/ does not hold.
+        """
 
         params = Path(record.id) / "params"
         tag    = name
@@ -329,6 +394,13 @@ class PieceStore:
 
     def params(self, record: DatasetRecord, fields: dict) -> tuple:
         """Copies a parameter run folder into params/<folder name> (a clashing name gets _2, _3 and so on).
+
+        Args:
+            record : Import record; its origins are updated.
+            fields : {path} of a parameter run folder.
+
+        Returns:
+            An empty tuple: no preparation step follows.
 
         Raises:
             PieceError : If the folder is refused.

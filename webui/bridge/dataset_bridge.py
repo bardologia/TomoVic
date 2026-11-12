@@ -147,7 +147,11 @@ class DatasetBridge:
         self.logger.info(f"bridge: workspace {self.workspace.root} holds {len(records)} datasets")
 
     def forget(self, run_dir: str) -> None:
-        """Drops what the Cube and Slices pages hold in memory for a dataset."""
+        """Drops what the Cube and Slices pages hold in memory for a dataset.
+
+        Args:
+            run_dir : Dataset id.
+        """
 
         self.cubes.forget(run_dir)
         self.slices.forget(run_dir)
@@ -176,7 +180,14 @@ class DatasetBridge:
             self.forget(dataset_id)
 
     def payload(self, record: DatasetRecord) -> dict:
-        """Returns the Dataset payload of a registered dataset."""
+        """Returns the Dataset payload of a registered dataset.
+
+        Args:
+            record : Dataset record.
+
+        Returns:
+            The Dataset payload.
+        """
 
         return self.inspector.payload(Path(record.id), record, self.preparer.progress(record.id), self.workspace.link_paths(record))
 
@@ -355,6 +366,10 @@ class DatasetBridge:
 
     def refuse_busy(self, record: DatasetRecord, piece: str) -> None:
         """Refuses an add while the dataset is being prepared or the Cube page is loading it.
+
+        Args:
+            record : Import record.
+            piece  : Piece key the refusal is about.
 
         Raises:
             BridgeRefusal : 409 in either case.

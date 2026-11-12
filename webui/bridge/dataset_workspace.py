@@ -192,7 +192,11 @@ class DatasetWorkspace:
         return not record.path.is_file() or not (Path(record.id) / "data" / "dataset.json").is_file()
 
     def add_root(self, run_dir: Path) -> None:
-        """Lets the Cube and Slices pages open a run folder outside the runs roots the user opened."""
+        """Lets the Cube and Slices pages open a run folder outside the runs roots the user opened.
+
+        Args:
+            run_dir : Run folder.
+        """
 
         self.roots.add(Path(run_dir))
 
@@ -216,7 +220,14 @@ class DatasetWorkspace:
         return Path(os.path.realpath(typed.parent)) / typed.name
 
     def link_paths(self, record: DatasetRecord) -> tuple[Path, Path]:
-        """Returns (link, scripts link) of a dataset; the scripts link is the link itself for a 3-D TomoVis cube."""
+        """Returns (link, scripts link) of a dataset; the scripts link is the link itself for a 3-D TomoVis cube.
+
+        Args:
+            record : Dataset record.
+
+        Returns:
+            (link, scripts link) paths.
+        """
 
         link   = record.folder / TomoVisLink.NAME
         header = self.inspector.header(Path(record.tomovis_cube))
@@ -461,12 +472,22 @@ class DatasetWorkspace:
         self.writer.json(path, layout)
 
     def write_height_range(self, run_dir: Path, height_range) -> None:
-        """Writes meta/config_state.json with tomogram_config.height_range in metres."""
+        """Writes meta/config_state.json with tomogram_config.height_range in metres.
+
+        Args:
+            run_dir      : Import run directory.
+            height_range : (low, high) in metres.
+        """
 
         self.writer.json(Path(run_dir) / "meta" / "config_state.json", {"tomogram_config": {"height_range": [float(height_range[0]), float(height_range[1])]}})
 
     def write_spacing(self, run_dir: Path, spacing) -> None:
-        """Writes meta/track_parameters.json with one track holding the azimuth and range pixel spacing in metres."""
+        """Writes meta/track_parameters.json with one track holding the azimuth and range pixel spacing in metres.
+
+        Args:
+            run_dir : Import run directory.
+            spacing : (azimuth, range) pixel spacing in metres.
+        """
 
         params = TrackParameters(labels=[self.TRACK_LABEL], parameters=[{"ps_az": float(spacing[0]), "ps_rg": float(spacing[1])}], track_files=[])
         self.writer.json(Path(run_dir) / "meta" / TrackParameters.FILENAME, params.to_payload())

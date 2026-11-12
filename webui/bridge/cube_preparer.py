@@ -119,7 +119,13 @@ class CubePreparer:
             return self.running.get(dataset_id)
 
     def report(self, dataset_id: str, stage: str, fraction: float) -> None:
-        """Publishes a job's progress; a new stage text is also saved in the record."""
+        """Publishes a job's progress; a new stage text is also saved in the record.
+
+        Args:
+            dataset_id : Dataset id.
+            stage      : Stage text shown to the user.
+            fraction   : Fraction of the stage done, 0 to 1.
+        """
 
         with self.lock:
             previous                 = self.running.get(dataset_id)
@@ -342,7 +348,12 @@ class CubePreparer:
         self.on_change(record.id, {"origins": {"primary": "stand-in"}})
 
     def finish(self, dataset_id: str, changes: dict) -> None:
-        """Hands the final state to the bridge, then stops reporting progress for the dataset."""
+        """Hands the final state to the bridge, then stops reporting progress for the dataset.
+
+        Args:
+            dataset_id : Dataset id.
+            changes    : Final record fields: state, stage and error.
+        """
 
         self.on_change(dataset_id, changes)
         with self.lock:
