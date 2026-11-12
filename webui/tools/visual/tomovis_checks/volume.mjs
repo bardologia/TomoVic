@@ -749,6 +749,6 @@ class VolumeChecks {
   }
 }
 
-const options = H.args(process.argv);
+const options = H.args(process.argv, "volume");
 options.original = process.env.TOMOVIS_ORIGINAL_SHOTS || path.join(REPO, "logs/tomovis_port/original_shots");
 await new VolumeChecks(options).main();

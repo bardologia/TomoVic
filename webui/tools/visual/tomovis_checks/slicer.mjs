@@ -621,7 +621,7 @@ class SlicerChecks {
   }
 }
 
-const options = H.args(process.argv);
+const options = H.args(process.argv, "slicer");
 options.original = process.env.TOMOVIS_ORIGINAL_SHOTS || path.join(REPO, "logs/tomovis_port/original_shots");
 options.ignore   = (process.env.TOMOVIS_IGNORE_ERRORS || "").split("|").filter(Boolean);
 await new SlicerChecks(options).main();

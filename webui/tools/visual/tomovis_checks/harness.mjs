@@ -24,8 +24,8 @@ class TomoVisHarness {
   static base  = "http://127.0.0.1:8802";
   static agent = "shell";
 
-  static args(argv) {
-    const out = { port: 8802, gl: "angle", agent: TomoVisHarness.agent, only: [] };
+  static args(argv, agent = TomoVisHarness.agent) {
+    const out = { port: 8802, gl: "angle", agent, only: [] };
     for (let i = 2; i < argv.length; i += 1) {
       if (argv[i] === "--port") out.port = Number(argv[++i]);
       else if (argv[i] === "--gl") out.gl = argv[++i];
