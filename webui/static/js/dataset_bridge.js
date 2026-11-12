@@ -806,6 +806,7 @@ class DatasetCard extends DatasetLayer {
     form.hidden       = true;
     row.appendChild(actions);
     if (piece.problem) row.appendChild(this._text(piece.problem, "ds-row__problem"));
+    if (piece.present && piece.note) row.appendChild(this._text(piece.note, "ds-tool__note"));
     row.appendChild(form);
 
     if (piece.addable && dataset.state !== "error") {

@@ -41,6 +41,7 @@ class RunInspector:
         RUN_ONLY_NOTE      : Note of a tool that needs a preprocessing run, on an import.
         PREPROCESSING_NOTE : Note of a piece or tool a run lacks and only preprocessing writes.
         MOVED_SOURCE       : Error of an import whose linked tomogram file was moved or deleted.
+        FOUR_CHANNELS_NOTE : Note of the channel piece of a four-channel cube, of which TomoVis drops the third channel.
     """
 
     PIECES       = ("tomogram", "channel", "height_range", "primary", "spacing", "dem", "geometry", "passes", "polarimetry", "params")
@@ -87,6 +88,7 @@ class RunInspector:
     RUN_ONLY_NOTE      = "Needs a preprocessing run made from raw F-SAR data; not available for TomoVis imports."
     PREPROCESSING_NOTE = "Missing from this run; rerun Pre Process to create it."
     MOVED_SOURCE       = "{name} was moved or deleted: {path} is gone. Put the file back, or import it again in TomoVis."
+    FOUR_CHANNELS_NOTE = "TomoVis shows channels 1, 2 and 4 of a four-channel cube and leaves out channel 3; the TomoVic tools offer all four."
 
     def __init__(self) -> None:
         """Starts with an empty file cache."""
@@ -367,6 +369,8 @@ class RunInspector:
         elif tomogram_ok:
             pieces["channel"]["addable"] = facts["imported"]
             pieces["channel"]["origin"]  = facts["origins"].get("channel", "default")
+        if channels == 4:
+            pieces["channel"]["note"] = self.FOUR_CHANNELS_NOTE
         return pieces
 
     def tool(self, key: str, pieces: dict, imported: bool, tomovis: dict) -> dict:

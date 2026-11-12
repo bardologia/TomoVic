@@ -302,3 +302,14 @@ def test_a_moved_npy_source_is_an_error_with_what_to_do(tmp_path):
     assert dataset["error"] == f"copy.npy was moved or deleted: {source} is gone. Put the file back, or import it again in TomoVis."
     assert dataset["pieces"]["tomogram"]["problem"] == f"file moved or deleted: {source}"
     assert not dataset["tomovis"]["ready"]
+
+
+def test_a_four_channel_cube_states_what_tomovis_leaves_out(tmp_path):
+    """npy_channels_4: the channel piece notes that TomoVis drops channel 3 while the TomoVic tools offer all four; three channels carry no note."""
+
+    four  = Prepared(tmp_path, "npy", INPUTS / "npy_channels_4.npy")
+    three = Prepared(tmp_path / "three", "npy", INPUTS / "npy_channels_3.npy")
+
+    assert four.dataset["channel"]["choices"] == ["combined", 0, 1, 2, 3]
+    assert four.piece("channel")["note"] == "TomoVis shows channels 1, 2 and 4 of a four-channel cube and leaves out channel 3; the TomoVic tools offer all four."
+    assert three.piece("channel")["note"] == ""
