@@ -858,7 +858,8 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 }
 .tv-filedialog__table tbody tr.is-selected .tv-filedialog__icon.is-file,
 .tv-filedialog__item.is-selected .tv-filedialog__icon.is-file { border-color: currentColor; }
-.tv-filedialog__lookinpopup .tv-combo__option { display: flex; align-items: center; gap: 8px; }
+.tv-filedialog__lookinpopup { padding: 0; border-width: 1px; }
+.tv-filedialog__lookinpopup .tv-combo__option { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; }
 .tv-filedialog__lookinpopup .tv-combo__option.is-disabled { color: var(--ink-faint); }
 .tv-filedialog__form {
   display: grid;

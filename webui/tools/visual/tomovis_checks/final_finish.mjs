@@ -180,6 +180,34 @@ class FinalFinishChecks {
     });
   }
 
+  async lookInPopup() {
+    await this.run.check("NEW-1", "the Look in popup opens in Qt's popup mode: 32 px rows, every place listed, the current folder over the combo, the icon and text at Qt's offsets", async () => {
+      await this.fresh();
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, this.inputs);
+      await this.page.click(".tv-filedialog__lookin");
+      const seen = await this.T(() => {
+        const popup = document.querySelector(".tv-filedialog__lookinpopup");
+        const p     = popup.getBoundingClientRect();
+        const combo = document.querySelector(".tv-filedialog__lookin").getBoundingClientRect();
+        const rows  = [...popup.querySelectorAll(".tv-combo__option")];
+        const first = rows[0];
+        const range = document.createRange();
+        range.selectNodeContents(first.lastChild);
+        return { top: Math.round(p.top - combo.top), height: Math.round(p.height), rows: rows.map((r) => Math.round(r.getBoundingClientRect().height)), icon: Math.round(first.querySelector(".tv-filedialog__icon").getBoundingClientRect().left - p.left), text: Math.round(range.getBoundingClientRect().left - p.left), hot: rows.findIndex((r) => r.classList.contains("is-hot")) };
+      });
+      await this.page.keyboard.press("Escape");
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      R.equal([seen.top, seen.hot, seen.rows.every((h) => h === 32), seen.height], [0, 0, true, 32 * seen.rows.length + 2], "popup over the combo with 32 px rows and a 1 px frame");
+      R.assert(Math.abs(seen.icon - 13) <= 1 && seen.text === 37, `icon at ${seen.icon} and text at ${seen.text}, Qt's 16 px icon spans 12..27 and its text starts at 37`);
+      return `${seen.rows.length} rows of 32 px, ${seen.height} px tall, opened over the combo`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -193,6 +221,7 @@ class FinalFinishChecks {
     if (this.wanted("sizes")) await this.textSizes();
     if (this.wanted("elide")) await this.elidedCells();
     if (this.wanted("tabs")) await this.tabsAndMenus();
+    if (this.wanted("lookin")) await this.lookInPopup();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

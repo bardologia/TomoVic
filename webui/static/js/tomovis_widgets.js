@@ -1358,11 +1358,12 @@ class QtDoubleSpinBoxView extends QtSpinBoxView {
 class QtComboPopup {
   static VISIBLE_ROWS = 10;
 
-  constructor(anchor, layer, items, { className = "", capped = true, onPick, onClose }) {
+  constructor(anchor, layer, items, { className = "", capped = true, overlay = false, onPick, onClose }) {
     this.anchor  = anchor;
     this.layer   = layer;
     this.items   = items;
     this.capped  = capped;
+    this.overlay = overlay;
     this.onPick  = onPick;
     this.onClose = onClose;
     this.hot     = -1;
@@ -1391,7 +1392,8 @@ class QtComboPopup {
     const rect = this.anchor.getBoundingClientRect();
     this.list.style.minWidth = `${rect.width}px`;
     if (this.capped) this.cap();
-    TomoVisInput.place(this.layer, this.list, rect.left, rect.bottom, { flipBottom: rect.top });
+    if (this.overlay) TomoVisInput.place(this.layer, this.list, rect.left, Math.max(4, rect.top - this.rows[current].offsetTop));
+    else TomoVisInput.place(this.layer, this.list, rect.left, rect.bottom, { flipBottom: rect.top });
     this.highlight(current, true);
     this.anchor.setAttribute("aria-expanded", "true");
     this.anchor.classList.add("is-open");

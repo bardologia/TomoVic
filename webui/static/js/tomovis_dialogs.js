@@ -539,6 +539,7 @@ class TomoVisFileDialog {
     this.popup  = new QtComboPopup(this.lookIn, this.layer, rows, {
       className : "tv-filedialog__lookinpopup",
       capped    : false,
+      overlay   : true,
       onPick    : (i) => this.choose(items[i]),
       onClose   : () => { this.popup = null; },
     });
