@@ -655,8 +655,21 @@ class DatasetPopover extends DatasetLayer {
 }
 
 class DatasetCard extends DatasetLayer {
-  static openCard = null;
-  static RECENT   = 6;
+  static openCard   = null;
+  static RECENT     = 6;
+  static TOOL_PAGES = {
+    cube            : "cube",
+    slices          : "slices",
+    cube_dem        : "cube",
+    cube_metric     : "cube",
+    cube_globe      : "cube",
+    cube_passes     : "cube",
+    cube_pauli      : "cube",
+    cube_param      : "cube",
+    tomovis         : "tomovis",
+    tomovis_metres  : "tomovis",
+    tomovis_scripts : "tomovis_scripts",
+  };
 
   constructor(bridge, anchor, placement) {
     super("ds-card", "Current dataset");
@@ -868,10 +881,40 @@ class DatasetCard extends DatasetLayer {
       row.innerHTML    = `<span class="ds-tool__label"></span><span class="ds-tool__status"></span>`;
       row.querySelector(".ds-tool__label").textContent  = tool.label;
       row.querySelector(".ds-tool__status").textContent = this._toolStatus(dataset, tool);
+      if (tool.ready) this._toolButton(dataset, key, tool, row);
       if (tool.note) row.appendChild(this._text(tool.note, "ds-tool__note"));
       list.appendChild(row);
     });
     return list;
+  }
+
+  _toolButton(dataset, key, tool, row) {
+    const page   = DatasetCard.TOOL_PAGES[key];
+    const launch = page ? null : this._toolLaunch(dataset, key);
+    if (!page && !launch) return;
+
+    const btn = DatasetCompleter.button("Open", "ds-tool__open");
+    btn.title = page ? `Open ${dataset.name} in the ${tool.label}` : `Open the ${tool.label} launch page with ${dataset.name} filled in`;
+    btn.addEventListener("click", () => {
+      if (launch) {
+        this.bridge.launch(launch, dataset.name);
+        return;
+      }
+      this.close();
+      this.bridge.openIn(page, dataset.id).catch((error) => Toast.show(error.message, "error"));
+    });
+    row.appendChild(btn);
+  }
+
+  _toolLaunch(dataset, key) {
+    const parent = dataset.folder.replace(/\/[^/]+$/, "");
+    const name   = dataset.folder.split("/").pop();
+    if (key === "extract_params") return dataset.pieces.params.launch;
+    if (key === "extract_polarimetry") return dataset.pieces.polarimetry.launch;
+    if (key === "analyze_param_extraction") return { script: key, overrides: { params_dir: `${dataset.folder}/params` } };
+    if (key === "analyze_preprocessing") return { script: key, overrides: { runs_dir: parent, run_tags: [name] } };
+    if (key === "compare_preprocessing_trials") return { script: key, overrides: { runs_dir: parent } };
+    return null;
   }
 
   async _loadRecent() {

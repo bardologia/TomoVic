@@ -3520,6 +3520,8 @@ hairline-figure { --hairline-plate: var(--bg); --hairline-hi: var(--ink); --hair
 .ds-tool__label { color: var(--ink); }
 .ds-tool__status { color: var(--warn); }
 .ds-tool.is-ready .ds-tool__status { color: var(--accent-2); }
+.ds-tool .ds-tool__status { margin-left: auto; }
+.ds-tool__open.btn { padding: 2px 9px; font-size: 11px; }
 .ds-tool__note { flex: 1 1 100%; margin: 0; color: var(--ink-faint); }
 .ds-recent__row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 2px solid var(--line); }
 .ds-recent__name { flex: 1 1 auto; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
