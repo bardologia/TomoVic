@@ -54,7 +54,7 @@ class TomoVisRouter(SubRouter):
         self.sessions          = sessions
         self.logger            = logger
         self.envelope          = TomoVisEnvelope()
-        self.lister            = DirectoryLister()
+        self.lister            = DirectoryLister(logger)
         self.writer            = ExportWriter()
         self.hdf5              = Hdf5PlotExporter()
         self.matplotlib_export = MatplotlibPlotExporter()
@@ -280,7 +280,7 @@ class TomoVisRouter(SubRouter):
         exchange.send_json(self.lister.computer())
 
     def mkdir(self, exchange: HttpExchange) -> None:
-        """Creates "New Folder" (or "New Folder2", ...) for the file dialog's Create New Folder; a folder that cannot be made answers ok false, which QFileDialog ignores."""
+        """Creates "New Folder" (or "New Folder2", ...) for the file dialog's Create New Folder; a folder that cannot be made is logged and answers ok false, which QFileDialog ignores."""
 
         if self.entry(exchange, exchange.body.get("sid")) is None:
             return

@@ -402,6 +402,25 @@ class FinalFinishChecks {
     });
   }
 
+  async folderFailures() {
+    await this.run.check("CR-05", "a Create New Folder or rename that fails on the disk is logged with its cause, and the browser still gets Qt's answers", async () => {
+      await this.fresh();
+      const scratch = path.join(this.out, "cr05");
+      fs.mkdirSync(scratch, { recursive: true });
+      const answers = await this.T(async (dir) => {
+        const sid  = window.app.tomovisPage.ctx.session.sid;
+        const post = (route, body) => fetch(`/api/tomovis/${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid, ...body }) }).then((r) => r.json());
+        return { mkdir: await post("mkdir", { path: "/" }), rename: await post("rename", { path: dir, old: "missing_entry", new: "renamed" }) };
+      }, scratch);
+      const lines = (await this.T(() => fetch("/api/server-log?limit=40").then((r) => r.json()))).lines.map((line) => `${line.level} ${line.message}`);
+
+      R.equal([answers.mkdir.ok, answers.rename.ok, answers.rename.title], [false, false, "Invalid filename"], "answers to the browser");
+      R.assert(lines.some((line) => line.startsWith("WARN TomoVis: Create New Folder in / failed:") && line.includes("Permission denied")), `mkdir failure not logged: ${lines.slice(-4).join(" | ")}`);
+      R.assert(lines.some((line) => line.startsWith(`WARN TomoVis: renaming ${scratch}/missing_entry to renamed failed:`) && line.includes("No such file")), `rename failure not logged: ${lines.slice(-4).join(" | ")}`);
+      return "both failures logged at warning level";
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -422,6 +441,7 @@ class FinalFinishChecks {
     if (this.wanted("axis")) await this.axisFields();
     if (this.wanted("export")) await this.exportParams();
     if (this.wanted("tools")) await this.checkedTools();
+    if (this.wanted("folders")) await this.folderFailures();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

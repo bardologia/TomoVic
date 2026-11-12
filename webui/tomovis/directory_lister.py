@@ -16,6 +16,8 @@ import fnmatch
 import os
 from pathlib import Path
 
+from web_logger import WebLogger
+
 
 class DirectoryLister:
     """Lists server directories for the file dialog and creates and renames folders in them.
@@ -23,10 +25,20 @@ class DirectoryLister:
     Attributes:
         NEW_FOLDER   : Name QFileDialog gives a new folder; later ones get 2, 3, ... appended.
         INVALID_NAME : QFileSystemModel's message when a rename fails, as (title, rich text with %1 for the name).
+        logger       : Console logger for folder edits that fail on the disk.
     """
 
     NEW_FOLDER   = "New Folder"
     INVALID_NAME = ("Invalid filename", "<b>The name \"%1\" cannot be used.</b><p>Try using another name, with fewer characters or no punctuation marks.")
+
+    def __init__(self, logger: WebLogger) -> None:
+        """Stores the logger.
+
+        Args:
+            logger : Console logger for folder edits that fail on the disk.
+        """
+
+        self.logger = logger
 
     def kind(self, path: Path, directory: bool) -> str:
         """Returns the Type column's text of one entry.
@@ -141,6 +153,7 @@ class DirectoryLister:
         try:
             (target / name).mkdir()
         except OSError as error:
+            self.logger.warning(f"TomoVis: Create New Folder in {target} failed: {error}")
             return {"ok": False, "error": str(error)}
         return {"ok": True, "name": name, "entry": self.entry(target / name)}
 
@@ -172,6 +185,7 @@ class DirectoryLister:
             return refused
         try:
             (target / old).rename(target / new)
-        except OSError:
+        except OSError as error:
+            self.logger.warning(f"TomoVis: renaming {target / old} to {new} failed: {error}")
             return refused
         return {"ok": True, "entry": self.entry(target / new)}
