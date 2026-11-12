@@ -24,7 +24,7 @@ from routers.tomovis_router  import TomoVisRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 89
+ROUTE_COUNT   = 93
 SECTION_COUNT = 23
 
 RESOLUTIONS = [
