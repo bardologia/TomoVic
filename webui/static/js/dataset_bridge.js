@@ -1048,16 +1048,17 @@ class DatasetBridge {
   static POLL_MS = 500;
 
   constructor() {
-    this.handlers   = { current: new Set(), dataset: new Set() };
-    this.indicators = [];
-    this.state      = null;
-    this.key        = null;
-    this.announced  = null;
-    this.seq        = 0;
-    this.applied    = 0;
-    this.route      = null;
-    this.failure    = "";
-    this.pollTimer  = null;
+    this.handlers     = { current: new Set(), dataset: new Set() };
+    this.indicators   = [];
+    this.navIndicator = null;
+    this.state        = null;
+    this.key          = null;
+    this.announced    = null;
+    this.seq          = 0;
+    this.applied      = 0;
+    this.route        = null;
+    this.failure      = "";
+    this.pollTimer    = null;
 
     window.addEventListener("focus", () => this.refresh());
   }
@@ -1221,6 +1222,7 @@ class DatasetBridge {
   mountIndicator(host, { variant, page = null }) {
     const indicator = new DatasetIndicator(this, host, { variant, page });
     this.indicators.push(indicator);
+    if (variant === "nav") this.navIndicator = indicator;
     indicator.render(this.state);
     return indicator;
   }

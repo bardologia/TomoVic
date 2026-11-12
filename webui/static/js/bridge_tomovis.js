@@ -57,10 +57,16 @@ class TomoVisBridge {
   hidden() {
     clearTimeout(this.timer);
     this.timer = null;
+    if (this.bridge.navIndicator) this.bridge.navIndicator.setNotice(null);
   }
 
   render(state) {
     this.caption.hidden = !(state.current || state.bridge_error);
+  }
+
+  paint(notice) {
+    this.indicator.setNotice(notice);
+    if (this.bridge.navIndicator) this.bridge.navIndicator.setNotice(notice);
   }
 
   blocked() {
@@ -183,7 +189,7 @@ class TomoVisBridge {
     }
 
     this.render(state);
-    this.indicator.setNotice(this.notice(state));
+    if (this.page.active) this.paint(this.notice(state));
     if (state.current && state.current.state === "preparing") this.later(TomoVisBridge.PREPARING_MS);
   }
 
