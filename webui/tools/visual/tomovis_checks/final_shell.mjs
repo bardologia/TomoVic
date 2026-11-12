@@ -118,6 +118,34 @@ class FinalShellChecks {
     });
   }
 
+  async statusAfterSubmenu() {
+    await this.run.check("SH-05", "the status tip clears when ArrowLeft or Escape leaves the Import submenu", async () => {
+      await this.fresh();
+      const sequences = {
+        left           : ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowDown", "ArrowLeft"],
+        escape         : ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowDown", "Escape"],
+        left_then_down : ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowUp"],
+      };
+      const seen = {};
+      for (const [name, keys] of Object.entries(sequences)) {
+        await this.page.click('.tv-menubar__item[data-menu="file"]');
+        const steps = [(await this.menuState()).status];
+        for (const key of keys) {
+          await this.page.keyboard.press(key);
+          steps.push((await this.menuState()).status);
+        }
+        const active = await this.T(() => [...document.querySelectorAll(".tv-menu")].map((m) => { const row = m.querySelector(".tv-menu__item.is-active .tv-menu__text"); return row ? row.textContent : null; }));
+        seen[name] = { steps, active };
+        await this.closeMenus();
+      }
+      const original = ["", "Open File", "", "Import hd5 file", "Import rat file", "Import h5 file"];
+      R.equal(seen.left, { steps: [...original, ""], active: ["Import"] }, "Left");
+      R.equal(seen.escape, { steps: [...original, ""], active: ["Import"] }, "Escape");
+      R.equal(seen.left_then_down.steps, [...original, "", "Open File"], "Left then Up");
+      return "status tips match the original's sequences, '' after leaving the submenu";
+    });
+  }
+
   async closeMenus() {
     await this.T(() => { if (window.TomoVisMenu.root) window.TomoVisMenu.root.close(); });
   }
@@ -132,6 +160,7 @@ class FinalShellChecks {
     if (this.wanted("sessions")) await this.sessionsSurvive();
     if (this.wanted("opengl")) await this.openGlPrint();
     if (this.wanted("shortcuts")) await this.shortcutsInPopups();
+    if (this.wanted("status")) await this.statusAfterSubmenu();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

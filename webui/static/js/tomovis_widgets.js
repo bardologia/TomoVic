@@ -1729,6 +1729,7 @@ class TomoVisMenu {
   dismiss(notify) {
     clearTimeout(this.timer);
     this.closeChild();
+    if (this.parent && this.active >= 0) this.ctx.bus.emit("status", { text: "" });
     if (this.outside) document.removeEventListener("pointerdown", this.outside, true);
     this.outside = null;
     if (this.el) this.el.remove();
