@@ -264,7 +264,7 @@ class FinalFiguresChecks {
       return `${off.length} byte grabs identical`;
     });
 
-    await this.run.check("LF-05", "toolbar pitch, 6 px separators, raised hover, sunken checked look and the readout at the window font size", async () => {
+    await this.run.check("LF-05", "toolbar pitch, 6 px separators, raised hover, the accent checked look of every TomoVis button and the readout at the window font size", async () => {
       const items = await this.toolbarItems();
       const ori   = FinalFiguresChecks.ORIGINAL.toolbar;
       const tokens = await this.T(() => {
@@ -296,8 +296,7 @@ class FinalFiguresChecks {
       R.equal(items.label, ori.label, "readout label x and width");
       R.equal(idle.border.split(" ")[0], "1px", "1 px tool frame");
       R.equal([hover.border, hover.background], [`1px ${tokens.strong}`, "gradient"], "hover is a raised panel");
-      R.equal(checked.border, `1px ${tokens.strong}`, "checked frame");
-      R.assert(checked.shadow.includes("inset") && !checked.border.includes(tokens.accent), `checked is sunken, not an accent outline (${checked.shadow})`);
+      R.equal([checked.border, checked.shadow], [`1px ${tokens.accent}`, "none"], "checked carries TomoVic's accent, as every checked TomoVis button does");
       R.equal([items.readout[0] === items.readout[1], items.readout[2]], [true, "right"], "readout at the window label size, right aligned");
       return `hover ${hover.border}, checked ${checked.shadow}, readout ${items.readout[0]}`;
     });

@@ -374,6 +374,34 @@ class FinalFinishChecks {
     });
   }
 
+  async checkedTools() {
+    await this.run.check("COL-01", "checked matplotlib tools use the same TomoVic tokens as every other checked TomoVis button; a held tool keeps the sunken well", async () => {
+      await this.fresh();
+      await this.load();
+      await this.page.click('[data-widget="tab1PlotButton"]');
+      await H.waitIdle(this.page);
+      await this.page.click('#tv-panel-plot .tv-mpl-tool[data-method="pan"]');
+      await H.waitIdle(this.page);
+      await this.page.mouse.move(5, 5);
+      await this.page.waitForTimeout(200);
+      const looks = await this.T(() => {
+        const look = (el) => { const st = getComputedStyle(el); return [st.borderTopColor, st.backgroundColor]; };
+        const tool = document.querySelector('#tv-panel-plot .tv-mpl-tool[data-method="pan"]');
+        const ref  = document.createElement("button");
+        ref.className = "tv-button is-checked";
+        document.querySelector("#tv-panel-plot").append(ref);
+        const out = { tool: look(tool), button: look(ref), checked: tool.classList.contains("is-checked") };
+        ref.remove();
+        return out;
+      });
+      await this.page.click('#tv-panel-plot .tv-mpl-tool[data-method="pan"]');
+      await H.waitIdle(this.page);
+      R.equal([looks.checked, looks.tool], [true, looks.button], "checked Pan against a checked TomoVis push button");
+      R.assert(this.source("css/tomovis_plot.css").includes(".tv-mpl-tool:not(:disabled):active { background: var(--tv-well)"), "held tools keep the sunken well");
+      return `border ${looks.tool[0]}, fill ${looks.tool[1]}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -393,6 +421,7 @@ class FinalFinishChecks {
     if (this.wanted("scrim")) await this.noDimming();
     if (this.wanted("axis")) await this.axisFields();
     if (this.wanted("export")) await this.exportParams();
+    if (this.wanted("tools")) await this.checkedTools();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
