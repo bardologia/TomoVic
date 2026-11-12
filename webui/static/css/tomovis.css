@@ -464,7 +464,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 .tv-button:not(:disabled):hover { border-color: var(--ink); background: var(--bg-2); }
-.tv-button:not(:disabled):active { transform: translateY(1px); }
+.tv-button:not(:disabled):active { background: var(--tv-well); }
 .tv-button:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .tv-button.is-checked { border-color: var(--accent); background: var(--tv-checked); }
 .tv-button--icon { min-width: 0; padding: 0 7px; }
