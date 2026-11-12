@@ -1030,6 +1030,7 @@ class DatasetIndicator {
     const text = document.createElement("span");
     text.className   = "ds-indicator__text";
     text.textContent = notice.text;
+    text.title       = notice.text;
     this.noticeEl.appendChild(text);
 
     (notice.actions || []).forEach((action) => {
