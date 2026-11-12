@@ -187,7 +187,7 @@ class PgExporter {
 
   sourceRect() {
     if (this.target.kind === "scene") return { x: 0, y: 0, w: this.scene().width, h: this.scene().height };
-    return { ...this.target.rect() };
+    return { ...this.target.bounds() };
   }
 
   targetRect() {
@@ -247,12 +247,16 @@ class PgExporter {
     }
     const sr = this.sourceRect();
     if (sr.w === 0 || sr.h === 0) return canvas;
-    ctx.setTransform(width / sr.w, 0, 0, height / sr.h, -sr.x * width / sr.w, -sr.y * height / sr.h);
+    const ratio = Math.min(width / sr.w, height / sr.h);
     ctx.beginPath();
-    ctx.rect(sr.x, sr.y, sr.w, sr.h);
+    ctx.rect(0, 0, width, height);
     ctx.clip();
-    this.scene().sigPrepareForPaint.emit();
-    this.scene().paintScene(ctx, { background: null, overlays: false });
+    ctx.setTransform(ratio, 0, 0, ratio, -sr.x * ratio, -sr.y * ratio);
+    const scene = this.scene();
+    scene.sigPrepareForPaint.emit();
+    scene.exportAntialias = antialias;
+    scene.paintScene(ctx, { background: null, overlays: false });
+    scene.exportAntialias = false;
     return canvas;
   }
 }
@@ -541,9 +545,59 @@ class PgMatplotlibExporter extends PgExporter {
   }
 }
 
+class PgSpinBoxView extends QtDoubleSpinBoxView {
+  static NUMBER = /^[+-]?((((\d+(\.\d*)?)|(\d*\.\d+))([eE][+-]?\d+)?)|([nN][aA][nN])|(inf))\s*$/;
+
+  build() {
+    const root   = super.build();
+    this.integer = this.options.integer === true;
+    this.double  = !this.integer;
+    return root;
+  }
+
+  textFromValue(value) {
+    return this.integer ? String(Math.round(value)) : PgFormat.qtG(value, this.decimals);
+  }
+
+  interpret(text) {
+    const trimmed = text.trim();
+    if (!PgSpinBoxView.NUMBER.test(trimmed)) return null;
+    const value = Number(trimmed);
+    if (!Number.isFinite(value)) return null;
+    return this.integer ? Math.trunc(value) : value;
+  }
+
+  validate(text, pos = text.length) {
+    const value = this.interpret(text);
+    const state = value !== null && value >= this.minimum && value <= this.maximum ? "Acceptable" : "Intermediate";
+    return [state, value, text, pos];
+  }
+
+  typed() {
+    this.input.parentElement.classList.toggle("is-invalid", this.validate(this.input.value)[0] !== "Acceptable");
+  }
+
+  commit(num, how) {
+    if (num === this.value) return;
+    this.value = num;
+    this.renderSteps();
+    this.changed(this.value, how);
+  }
+
+  fixup() {
+    const [state, value] = this.validate(this.input.value);
+    if (state === "Acceptable") this.commit(value, "commit");
+    this.input.parentElement.classList.remove("is-invalid");
+    this.input.value = this.format(this.value);
+  }
+}
+
 class PgExportDialog {
-  static EXPORTERS     = [PgCsvExporter, PgHdf5Exporter, PgImageExporter, PgMatplotlibExporter, PgSvgExporter];
-  static lastDirectory = null;
+  static EXPORTERS        = [PgCsvExporter, PgHdf5Exporter, PgImageExporter, PgMatplotlibExporter, PgSvgExporter];
+  static VIEWBOX_MARGIN   = 0.5;
+  static INDENT           = 20;
+  static LIST_ITEM_CHROME = 6;
+  static lastDirectory    = null;
 
   static open(ctx, scene, view) {
     if (!scene.exportDialog) scene.exportDialog = new PgExportDialog(ctx, scene);
@@ -561,14 +615,20 @@ class PgExportDialog {
     this.overlay   = (c) => this.paintSelectBox(c);
   }
 
+  static viewBoxBounds(view) {
+    const r = view.rect;
+    return { x: r.x, y: r.y, w: r.w + PgExportDialog.VIEWBOX_MARGIN, h: r.h + PgExportDialog.VIEWBOX_MARGIN };
+  }
+
   targets() {
-    const list = [{ kind: "scene", label: "Entire Scene", depth: 0, rect: () => ({ x: 0, y: 0, w: this.scene.width, h: this.scene.height }) }];
+    const sceneRect = () => ({ x: 0, y: 0, w: this.scene.width, h: this.scene.height });
+    const list      = [{ kind: "scene", label: "Entire Scene", depth: 0, rect: sceneRect, bounds: sceneRect }];
     for (const widget of this.scene.widgets) {
       if (widget instanceof PgRoiPlot) {
-        list.push({ kind: "plot", label: "Plot", depth: 1, plot: widget, rect: () => ({ x: 0, y: 0, w: this.scene.width, h: this.scene.height }) });
-        list.push({ kind: "viewbox", label: "ViewBox", depth: 2, view: widget.vb, rect: () => ({ ...widget.vb.rect }) });
+        list.push({ kind: "plot", label: "Plot", depth: 1, plot: widget, rect: sceneRect, bounds: sceneRect });
+        list.push({ kind: "viewbox", label: "ViewBox", depth: 2, view: widget.vb, rect: () => ({ ...widget.vb.rect }), bounds: () => PgExportDialog.viewBoxBounds(widget.vb) });
       } else if (widget instanceof PgViewBox && !this.scene.widgets.some((w) => w instanceof PgRoiPlot && w.vb === widget)) {
-        list.push({ kind: "viewbox", label: "ViewBox", depth: 1, view: widget, rect: () => ({ ...widget.rect }) });
+        list.push({ kind: "viewbox", label: "ViewBox", depth: 1, view: widget, rect: () => ({ ...widget.rect }), bounds: () => PgExportDialog.viewBoxBounds(widget) });
       }
     }
     return list;
@@ -580,9 +640,9 @@ class PgExportDialog {
     this.el.setAttribute("role", "dialog");
     this.title  = el("div", "tv-modal__title", "Export");
     const body  = el("div", "tv-modal__body");
-    this.tree   = el("div", "tv-pg-export__tree");
-    this.list   = el("div", "tv-pg-export__formats");
-    this.params = el("div", "tv-pg-export__params");
+    this.tree   = el("div", "tv-pg-export__tree tv-qt-scroll");
+    this.list   = el("div", "tv-pg-export__formats tv-qt-scroll");
+    this.params = el("div", "tv-pg-export__params tv-qt-scroll");
     const buttons = el("div", "tv-pg-export__buttons");
     this.copyBtn   = el("button", "tv-button", "Copy");
     this.exportBtn = el("button", "tv-button", "Export");
@@ -592,7 +652,7 @@ class PgExportDialog {
       TomoVisInput.plainPushButton(b);
     }
     buttons.append(this.copyBtn, this.exportBtn, this.closeBtn);
-    body.append(el("span", "tv-label", "Item to export:"), this.tree, el("span", "tv-label", "Export format"), this.list, el("span", "tv-label", "Export options"), this.params, buttons);
+    body.append(el("span", "tv-label tv-pg-export__label", "Item to export:"), this.tree, el("span", "tv-label tv-pg-export__label", "Export format"), this.list, el("span", "tv-label tv-pg-export__label", "Export options"), this.params, buttons);
     this.el.append(this.title, body);
     this.copyBtn.addEventListener("click", () => this.run(true));
     this.exportBtn.addEventListener("click", () => this.run(false));
@@ -647,13 +707,42 @@ class PgExportDialog {
 
   renderTree(select) {
     this.tree.replaceChildren();
-    this.items.forEach((target) => {
-      const row = TomoVisInput.el("div", `tv-pg-export__row${target.depth === 1 ? " tv-pg-export__row--child" : ""}${target.depth === 2 ? " tv-pg-export__row--grandchild" : ""}`, target.label);
+    this.items.forEach((target, i) => {
+      const row    = TomoVisInput.el("div", "tv-pg-export__row tv-pg-export__item");
+      const branch = TomoVisInput.el("span", "tv-pg-export__branch");
+      const text   = TomoVisInput.el("span", "tv-pg-export__text", target.label);
+      const next   = this.items[i + 1];
+      target.parent   = [...this.items.slice(0, i)].reverse().find((t) => t.depth < target.depth) || null;
+      target.expanded = true;
+      target.hasKids  = Boolean(next && next.depth > target.depth);
+      row.style.paddingLeft = `${target.depth * PgExportDialog.INDENT}px`;
+      if (target.hasKids) {
+        branch.dataset.kids = "true";
+        branch.classList.add("is-open");
+        branch.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.toggleItem(target);
+        });
+      }
+      row.append(branch, text);
       row.addEventListener("click", () => this.selectItem(target));
+      row.addEventListener("dblclick", () => {
+        if (target.hasKids) this.toggleItem(target);
+      });
       target.row = row;
       this.tree.append(row);
     });
     this.selectItem(select);
+  }
+
+  toggleItem(target) {
+    target.expanded = !target.expanded;
+    target.row.querySelector(".tv-pg-export__branch").classList.toggle("is-open", target.expanded);
+    for (const t of this.items) {
+      let shown = true;
+      for (let up = t.parent; up; up = up.parent) shown = shown && up.expanded;
+      t.row.hidden = !shown;
+    }
   }
 
   selectItem(target) {
@@ -667,8 +756,10 @@ class PgExportDialog {
 
   renderFormats() {
     this.list.replaceChildren();
+    const width = Math.max(...PgExportDialog.EXPORTERS.map((cls) => QtFontMetrics.horizontalAdvance(cls.NAME, QtFontMetrics.APP))) + PgExportDialog.LIST_ITEM_CHROME;
     PgExportDialog.EXPORTERS.forEach((cls, i) => {
       const row = TomoVisInput.el("div", `tv-pg-export__row${i === this.format ? " is-selected" : ""}`, cls.NAME);
+      row.style.minWidth = `${width}px`;
       row.addEventListener("click", () => {
         this.format = i;
         this.renderFormats();
@@ -684,17 +775,19 @@ class PgExportDialog {
   renderParams() {
     this.params.replaceChildren();
     if (!this.exporter.params) return;
-    const kit = this.ctx.kit;
+    const kit   = this.ctx.kit;
+    const group = TomoVisInput.el("div", "tv-pg-export__group", "params");
+    this.params.append(group);
     for (const p of this.exporter.params) {
       const row = TomoVisInput.el("div", "tv-pg-export__param");
       row.append(TomoVisInput.el("span", "tv-label", p.name));
       let view;
       if (p.type === "int" || p.type === "float") {
-        view = kit.local(p.type === "int" ? "spin" : "doubleSpin", { decimals: p.type === "float" ? 3 : 0, onChange: (value) => {
+        view = new PgSpinBoxView(kit, "doubleSpin", null, { integer: p.type === "int", decimals: p.type === "float" ? 3 : 0, onChange: (value) => {
           p.value = value;
           this.exporter.parameterChanged(p.name);
         } });
-        view.set({ minimum: p.limits[0], maximum: 2147483647, value: p.value });
+        view.set({ decimals: p.type === "float" ? 3 : 0, minimum: p.limits[0], maximum: 2147483647, value: p.value });
       } else if (p.type === "bool") {
         view = kit.local("checkbox", { onChange: (checked) => {
           p.value = checked;
@@ -738,7 +831,7 @@ class PgExportDialog {
 
   paintSelectBox(ctx) {
     if (!this.selectBoxVisible || !this.selected) return;
-    const r = this.selected.rect();
+    const r = this.selected.bounds();
     ctx.save();
     ctx.strokeStyle = "rgb(255, 255, 0)";
     ctx.lineWidth   = 3;
@@ -761,6 +854,7 @@ class PgExportDialog {
 }
 
 window.PgSvgContext         = PgSvgContext;
+window.PgSpinBoxView        = PgSpinBoxView;
 window.PgExporter           = PgExporter;
 window.PgImageExporter      = PgImageExporter;
 window.PgSvgExporter        = PgSvgExporter;

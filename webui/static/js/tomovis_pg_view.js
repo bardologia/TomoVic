@@ -219,6 +219,18 @@ class PgFormat {
     return `${padded.slice(0, padded.length - scale)}.${padded.slice(padded.length - scale)}`;
   }
 
+  static qtG(x, precision) {
+    if (!Number.isFinite(x)) return Number.isNaN(x) ? "nan" : (x > 0 ? "inf" : "-inf");
+    if (x === 0) return "0";
+    const digits = Math.max(1, precision);
+    const sign   = x < 0 ? "-" : "";
+    const [m, e] = Math.abs(x).toExponential(digits - 1).split("e");
+    const exp    = Number(e);
+    const trim   = (text) => (text.includes(".") ? text.replace(/\.?0+$/, "") : text);
+    if (exp < -4 || exp >= digits) return `${sign}${trim(m)}e${exp < 0 ? "-" : "+"}${String(Math.abs(exp)).padStart(2, "0")}`;
+    return `${sign}${trim(Math.abs(x).toFixed(digits - 1 - exp))}`;
+  }
+
   static fixed(x, places) {
     if (!Number.isFinite(x)) return Number.isNaN(x) ? "nan" : (x > 0 ? "inf" : "-inf");
     const { digits, scale } = PgFormat.exact(x);
@@ -281,6 +293,7 @@ class PgGraphicsView {
     this.hoverItems  = new Set();
     this.lastHover   = null;
     this.overlays    = [];
+    this.exportAntialias = false;
     this.sigPrepareForPaint = new PgSignal();
     host.append(this.el);
 
@@ -1575,6 +1588,21 @@ class PgImageItem {
     this.rendered = true;
   }
 
+  paddedCanvas() {
+    const w      = this.shape[0];
+    const h      = this.shape[1];
+    const padded = document.createElement("canvas");
+    padded.width  = w + 2;
+    padded.height = h + 2;
+    const ctx    = padded.getContext("2d");
+    ctx.drawImage(this.canvas, 1, 1);
+    ctx.drawImage(this.canvas, 0, 0, w, 1, 1, 0, w, 1);
+    ctx.drawImage(this.canvas, 0, h - 1, w, 1, 1, h + 1, w, 1);
+    ctx.drawImage(padded, 1, 0, 1, h + 2, 0, 0, 1, h + 2);
+    ctx.drawImage(padded, w, 0, 1, h + 2, w + 1, 0, 1, h + 2);
+    return padded;
+  }
+
   paint(ctx, vb) {
     if (!this.image || this.shape[0] === 0 || this.shape[1] === 0) return;
     if (!this.rendered) this.render();
@@ -1582,7 +1610,14 @@ class PgImageItem {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.transform(t.sx, 0, 0, t.sy, t.tx, t.ty);
-    ctx.drawImage(this.canvas, 0, 0, this.shape[0], this.shape[1]);
+    if (vb.scene && vb.scene.exportAntialias) {
+      ctx.beginPath();
+      ctx.rect(0, 0, this.shape[0], this.shape[1]);
+      ctx.clip();
+      ctx.drawImage(this.paddedCanvas(), -1, -1, this.shape[0] + 2, this.shape[1] + 2);
+    } else {
+      ctx.drawImage(this.canvas, 0, 0, this.shape[0], this.shape[1]);
+    }
     ctx.restore();
   }
 
