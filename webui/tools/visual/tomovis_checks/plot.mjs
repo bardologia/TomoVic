@@ -484,7 +484,11 @@ class PlotProfileChecks {
       await page.waitForSelector(".tv-mpl-export__text");
       const text = await page.inputValue(".tv-mpl-export__text");
       Run.equal(text, "top=0.9,\nbottom=0.1,\nleft=0.12,\nright=1.0,\nhspace=0.2,\nwspace=0.2", "export text");
-      await page.click('.tv-mpl-export .tv-button:text-is("Close")');
+      const exportTitle = await page.locator(".tv-mpl-export .tv-modal__title").boundingBox();
+      await page.mouse.move(exportTitle.x + 40, exportTitle.y + exportTitle.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(exportTitle.x - 360, exportTitle.y + exportTitle.height / 2, { steps: 4 });
+      await page.mouse.up();
 
       await page.click('.tv-mpl-subplots .tv-button:text-is("Tight layout")');
       await this.settle(page);
@@ -494,6 +498,8 @@ class PlotProfileChecks {
       await this.settle(page);
       await page.click('.tv-mpl-subplots .tv-button:text-is("Close")');
       await page.waitForSelector(".tv-mpl-subplots", { state: "detached" });
+      await page.click(".tv-mpl-export .tv-mpl-window__close");
+      await page.waitForSelector(".tv-mpl-export", { state: "detached" });
       return `tight ${tight.join(" ")}`;
     });
 

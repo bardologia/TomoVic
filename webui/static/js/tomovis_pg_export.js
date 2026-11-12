@@ -457,21 +457,12 @@ class PgHdf5Exporter extends PgExporter {
   }
 }
 
-class PgMatplotlibWindow extends MplModelessDialog {
+class PgMatplotlibWindow extends MplWindow {
   static CASCADE = 24;
   static opened  = 0;
 
   constructor(layer) {
     super({ title: "Matplotlib Window", className: "tv-pg-mplwindow", buttons: [], layer, escape: "Close" });
-    this.el.setAttribute("aria-modal", "false");
-    const close = TomoVisInput.el("button", "tv-pg-mplwindow__close", "\u00d7");
-    close.type  = "button";
-    close.title = "Close";
-    close.setAttribute("aria-label", "Close");
-    close.addEventListener("pointerdown", (event) => event.stopPropagation());
-    close.addEventListener("click", () => this.close("Close"));
-    this.titleBar.append(close);
-    this.el.addEventListener("pointerup", () => requestAnimationFrame(() => this.raise()), true);
   }
 
   open() {
@@ -481,11 +472,6 @@ class PgMatplotlibWindow extends MplModelessDialog {
     this.el.style.left = `${(parseFloat(this.el.style.left) || 0) + step}px`;
     this.el.style.top  = `${(parseFloat(this.el.style.top) || 0) + step}px`;
     return shown;
-  }
-
-  raise() {
-    if (!this.el.isConnected || TomoVisModal.isOpen() || this.layer.lastElementChild === this.el) return;
-    this.layer.append(this.el);
   }
 
   key() {}

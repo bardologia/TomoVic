@@ -139,17 +139,38 @@
 .tv-mpl-subplots__stretch { flex: 1 1 auto; }
 .tv-mpl-subplots__column > .tv-button { width: 100%; }
 
+.tv-mpl-window { box-shadow: 0 18px 44px var(--tv-shadow); }
+.tv-mpl-window > .tv-modal__title { display: flex; align-items: center; gap: 10px; padding-right: 6px; }
+.tv-mpl-window__close {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-input);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 16px;
+  line-height: 22px;
+  cursor: default;
+}
+.tv-mpl-window__close:hover { background: var(--surface-2); color: var(--ink); }
+.tv-mpl-window__close:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.tv-mpl-export { min-width: 0; }
+.tv-mpl-export .tv-modal__body { padding: 11px; }
 .tv-mpl-export__text {
   display: block;
-  width: 220px;
-  padding: 6px 8px;
+  width: 256px;
+  height: 159px;
+  padding: 3px;
   border: 2px solid var(--line);
   border-radius: var(--r-input);
   background: var(--bg-1);
   color: var(--ink);
   font-family: var(--mono);
   font-size: 12.5px;
-  line-height: 1.35;
+  line-height: 23px;
   resize: none;
   outline: none;
 }

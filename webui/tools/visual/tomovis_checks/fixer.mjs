@@ -385,7 +385,7 @@ class FixerChecks {
       const afterEscape = await this.T(() => document.querySelectorAll(".tv-pg-mplwindow").length);
 
       const first = windows[0].figure;
-      await this.page.locator(".tv-pg-mplwindow").first().locator(".tv-pg-mplwindow__close").click();
+      await this.page.locator(".tv-pg-mplwindow").first().locator(".tv-mpl-window__close").click();
       await H.waitIdle(this.page);
       const left    = await this.T(() => [...document.querySelectorAll(".tv-pg-mplwindow .tv-mpl-canvaswrap")].map((w) => w.dataset.figure));
       const probe   = (name) => this.T(async (n) => (await fetch("/api/tomovis/figure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid: window.app.tomovisPage.ctx.session.sid, figure: n, op: "refresh" }) })).status, name);
@@ -399,7 +399,7 @@ class FixerChecks {
       R.equal(afterEscape, 2, "Escape does not close a QMainWindow");
       R.equal(left.length, 1, "one window left after closing the first");
       R.equal([alive, dropped], [200, 404], "the other window's figure answers, the closed one's is gone");
-      await this.page.locator(".tv-pg-mplwindow .tv-pg-mplwindow__close").click();
+      await this.page.locator(".tv-pg-mplwindow .tv-mpl-window__close").click();
       return `figures ${windows.map((w) => w.figure).join(", ")}; closed one answers ${dropped}`;
     });
   }

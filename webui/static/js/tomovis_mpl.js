@@ -136,6 +136,43 @@ class MplModelessDialog extends TomoVisModal {
   }
 }
 
+class MplWindow extends MplModelessDialog {
+  static SCREENED = ["pointerdown", "mousedown", "click", "dblclick", "contextmenu", "wheel"];
+
+  constructor(options) {
+    super(options);
+    this.el.classList.add("tv-mpl-window");
+    this.el.setAttribute("aria-modal", "false");
+
+    this.closeBox       = TomoVisInput.el("button", "tv-mpl-window__close", "×");
+    this.closeBox.type  = "button";
+    this.closeBox.title = "Close";
+    this.closeBox.setAttribute("aria-label", "Close");
+    this.closeBox.addEventListener("pointerdown", (event) => event.stopPropagation());
+    this.closeBox.addEventListener("click", () => this.close("Close"));
+    this.titleBar.append(this.closeBox);
+
+    for (const type of MplWindow.SCREENED) this.el.addEventListener(type, (event) => this.screen(event), { capture: true, passive: false });
+    this.el.addEventListener("pointerup", () => requestAnimationFrame(() => this.raise()), true);
+  }
+
+  blocked() {
+    return TomoVisModal.isOpen();
+  }
+
+  screen(event) {
+    if (!this.blocked()) return;
+    if (this.titleBar.contains(event.target) && !this.closeBox.contains(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  raise() {
+    if (!this.el.isConnected || this.blocked() || this.layer.lastElementChild === this.el) return;
+    this.layer.append(this.el);
+  }
+}
+
 class MplRubberBand {
   constructor(canvas) {
     this.canvas  = canvas;
@@ -281,16 +318,21 @@ class MplAxesChooser {
   }
 }
 
-class MplExportValuesDialog {
-  static show(ctx, text) {
-    const modal = new TomoVisModal({ title: "", className: "tv-mpl-export", buttons: ["Close"], escape: "Close", layer: ctx.layer });
-    const area  = TomoVisInput.el("textarea", "tv-mpl-export__text");
-    area.readOnly   = true;
-    area.spellcheck = false;
-    area.value      = text;
-    area.rows       = text.split("\n").length;
-    modal.body.append(area);
-    return modal.open();
+class MplExportValuesWindow extends MplWindow {
+  constructor(layer, text) {
+    super({ title: "", className: "tv-mpl-export", buttons: [], layer, escape: "Close" });
+    this.text            = TomoVisInput.el("textarea", "tv-mpl-export__text");
+    this.text.readOnly   = true;
+    this.text.spellcheck = false;
+    this.text.value      = text;
+    this.body.append(this.text);
+  }
+
+  open() {
+    this.layer.append(this.el);
+    this.center();
+    if (!this.blocked()) this.text.focus({ preventScroll: true });
+    return new Promise((resolve) => { this.resolve = resolve; });
   }
 }
 
@@ -374,7 +416,7 @@ class MplSubplotDialog {
 
   exportValues() {
     this.view.op("subplots_export").then((header) => {
-      if (header) MplExportValuesDialog.show(this.ctx, header.result.text);
+      if (header) new MplExportValuesWindow(this.ctx.layer, header.result.text).open();
     }, (error) => this.ctx.session.raiseUnreported(error));
   }
 }
@@ -897,7 +939,8 @@ window.MplModelessDialog      = MplModelessDialog;
 window.MplRubberBand          = MplRubberBand;
 window.MplToolbar             = MplToolbar;
 window.MplAxesChooser         = MplAxesChooser;
-window.MplExportValuesDialog  = MplExportValuesDialog;
+window.MplWindow              = MplWindow;
+window.MplExportValuesWindow  = MplExportValuesWindow;
 window.MplSubplotDialog       = MplSubplotDialog;
 window.MplFormLayout          = MplFormLayout;
 window.MplFigureOptionsDialog = MplFigureOptionsDialog;
