@@ -3514,7 +3514,7 @@ hairline-figure { --hairline-plate: var(--bg); --hairline-hi: var(--ink); --hair
 .ds-piece__value { color: var(--ink-faint); overflow-wrap: anywhere; }
 .ds-piece__actions { display: inline-flex; gap: 6px; }
 .ds-piece__actions .btn, .ds-recent__row .btn { padding: 3px 9px; font-size: 11px; }
-.ds-piece > .ds-row__problem, .ds-piece__form { grid-column: 2 / -1; }
+.ds-piece > .ds-row__problem, .ds-piece > .ds-tool__note, .ds-piece__form { grid-column: 2 / -1; }
 .ds-piece__form[hidden] { display: none; }
 .ds-tool { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 4px 0; border-top: 2px solid var(--line); }
 .ds-tool__label { color: var(--ink); }
