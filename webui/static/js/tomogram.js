@@ -1974,7 +1974,12 @@ class TomogramView {
       return;
     }
     this._use(id);
+    this._fold(id);
     this.select(id);
+  }
+
+  _fold(id) {
+    if (this.runStrip) this.runStrip.close((this.cubes.find((c) => c.id === id) || {}).group);
   }
 
   _resume() {
@@ -2071,6 +2076,7 @@ class TomogramView {
     if (state.id !== this.selectedId || !this.meta) {
       if (this.cubes.some((cube) => cube.id === state.id)) {
         localStorage.setItem(`cube-param:${state.id}`, state.tag);
+        this._fold(state.id);
         this.select(state.id);
       } else if (this.cubes.length) {
         Toast.show("The linked cube is not in the current runs root.", "warn");
@@ -2369,7 +2375,6 @@ class TomogramView {
     this.stale = false;
     this._stopSweeps();
     this.selectedId = cubeId;
-    if (this.runStrip) this.runStrip.close((this.cubes.find((c) => c.id === cubeId) || {}).group);
     this.meta = null;
     this.point = null;
     this.locked = null;
