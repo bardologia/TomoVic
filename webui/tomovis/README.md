@@ -41,7 +41,13 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
 - **D-4.** File dialogs browse the server, and every save writes on the server.
 - **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. Lines the browser
   posts to `log` keep vispy's level: `ERROR: ...` lines are logged at error, `WARNING: ...` at warning, the
-  rest at info (`TomoVisConsole.relay`).
+  rest at info (`TomoVisConsole.relay`). A browser-side vispy callback error is logged as vispy's
+  `_handle_exception` logs it: one multi-line `WARNING: Traceback (most recent call last): ...` entry, then
+  `ERROR: Invoking <callback> for <EventClass>`. The fly camera's timer keeps vispy's "reminders" policy:
+  later failures log only `ERROR: Invoking FlyCamera.on_timer repeat <n>` when n is a power of two. A
+  failing scene mouse callback is logged as `SceneCanvas._process_mouse_event for MouseEvent` after a
+  chained `TypeError: SceneMouseEvent type '<type>' has no scale`, because vispy 0.17 raises while it builds
+  the registry key from `repr(event)`; the rest of that mouse event's processing is skipped, as there.
 - **matplotlib defaults.** TomoVis ran with matplotlib's default rcParams. In the console, the cube
   explorer's figure archiver changes the global rcParams (300 dpi, serif) whenever it saves. Every
   TomoVis figure operation therefore runs under `matplotlib.style.context("default")`, behind one
@@ -58,6 +64,14 @@ Crash fixes (the original printed a traceback and kept a half-applied state):
 | E-009 | Set with a field that is not a number (`-`) does nothing |
 | E-011 | X [m] / Plot (profile) / histogram equalization without a tomogram: state changes are kept and the draw is skipped. Plot (profile) does not switch tabs; in the mono branch it leaves the empty 0..1 axes the original's `add_subplot(111)` created, which renders when the Profile tab is first shown (a figure renders on its tab's first show, as a Qt canvas does on its first resize event) |
 | E-012 | A clipped ROI of length zero samples nothing instead of raising `ZeroDivisionError` in `Point.norm` |
+
+Known divergences from the original, kept on purpose or not verifiable here:
+
+| F-ids | Divergence |
+|---|---|
+| F-153 | The traceback before a vispy callback error lists the browser's JavaScript frames (V8's `at ...` lines, at most `Error.stackTraceLimit` of them, most recent last) and its final `<Type>: <message>` line, not Python frames. vispy's `<< caught exception here: >>` caller stack is not reproduced. The callback is named `<Class>.<method>` (`FlyCamera.on_timer`), not by the bound method's repr, which carried a memory address. Key and mouse callback errors are logged in full every time, because in Qt each event's repr differs (it holds the native Qt event), so the reminders registry never repeats a key for them |
+| F-113, F-120 | Image exports have the pixels of Qt's files, but not always its bytes. TIFF carries Pillow's tags, not libtiff's: Qt writes an Orientation tag and a 4 MB RowsPerStrip and puts the strip before the IFD. The PNG inside an ICNS comes from Pillow, not libpng. ICO and CUR write zeros in the AND-mask alignment padding, which Qt leaves uninitialised. In scaled ICO and ICNS, translucent pixels can differ by 1, because Qt's SSE4.1 unpremultiply uses the CPU's `rcpps` approximation and the port the scalar `qUnpremultiply` |
+| F-003, F-004, F-007 | On macOS Qt maps Ctrl+O, Ctrl+S and Ctrl+F to Cmd. `tomovis_page.js` accepts `metaKey` for the three shortcuts, but this has not been run on a Mac |
 
 ## API
 
