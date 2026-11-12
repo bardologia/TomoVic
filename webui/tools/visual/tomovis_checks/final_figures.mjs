@@ -314,7 +314,7 @@ class FinalFiguresChecks {
       return {
         window  : Math.round(win.width),
         slider  : Math.round(s.width),
-        layout  : Math.round(s.width + parseFloat(getComputedStyle(slider).marginRight)),
+        layout  : Math.round(document.querySelector("#tv-panel-plot .tv-plot__spacer").getBoundingClientRect().left - s.left - 6),
         stretch : Math.round(stretch.getBoundingClientRect().width),
         spin    : Math.round(get("tab2SpinBox").getBoundingClientRect().width),
         clear   : Math.round(clear.right - win.left),

@@ -91,8 +91,23 @@ class QtFontMetrics {
     return Math.round(QtFontMetrics.advance(text, font));
   }
 
-  static widest(texts, font) {
-    return Math.max(0, ...texts.map((text) => QtFontMetrics.horizontalAdvance(text, font)));
+  static boundingWidth(text, font) {
+    let x     = 0;
+    let left  = Infinity;
+    let right = -Infinity;
+    for (const ch of text) {
+      const m = QtFontMetrics.measure(ch, font);
+      if (m.actualBoundingBoxLeft + m.actualBoundingBoxRight > 0) {
+        left  = Math.min(left, x + Math.floor(-m.actualBoundingBoxLeft));
+        right = Math.max(right, x + Math.ceil(m.actualBoundingBoxRight));
+      }
+      x += Math.round(m.width);
+    }
+    return right > left ? right - left : 0;
+  }
+
+  static widest(texts, font, width = QtFontMetrics.horizontalAdvance) {
+    return Math.max(0, ...texts.map((text) => width(text, font)));
   }
 
   static elidedMiddle(text, width, font) {
@@ -1437,9 +1452,8 @@ class QtComboPopup {
 }
 
 class QtComboBoxView extends QtWidgetView {
-  static SEARCH_MS          = 400;
-  static STYLE_SHEET_CHROME = 30;
-  static FUSION_CHROME      = 27;
+  static SEARCH_MS = 400;
+  static CHROME    = 30;
 
   build() {
     const root = TomoVisInput.el("span", "tv-combo");
@@ -1492,7 +1506,7 @@ class QtComboBoxView extends QtWidgetView {
   }
 
   sizeHint() {
-    return QtFontMetrics.widest(this.items, this.options.qtFont) + (this.options.styleSheet ? QtComboBoxView.STYLE_SHEET_CHROME : QtComboBoxView.FUSION_CHROME);
+    return QtFontMetrics.widest(this.items, this.options.qtFont, QtFontMetrics.boundingWidth) + QtComboBoxView.CHROME;
   }
 
   get currentText() {

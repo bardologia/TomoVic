@@ -64,7 +64,12 @@ class TomoVisAxesDialog {
 class TomoVisPlotTab {
   static SPIN_WIDTH   = 180;
   static BUTTON_WIDTH = 100;
+  static BUTTON_HINT  = 80;
   static SLIDER_MIN   = 200;
+  static SPACER       = 5;
+  static SPACING      = 6;
+  static ROW_HEIGHT   = 39;
+  static CHECK_SIZE   = [14, 15];
 
   constructor(root, ctx) {
     this.root     = root;
@@ -73,68 +78,82 @@ class TomoVisPlotTab {
 
     root.classList.add("tv-plot");
     this.figureHost = TomoVisInput.el("div", "tv-plot__figure");
-    this.row        = TomoVisInput.el("div", "tv-row tv-plot__controls");
+    this.row        = TomoVisInput.el("div", "tv-plot__controls");
     this.stretch    = TomoVisInput.el("span", "tv-stretch");
     root.append(this.figureHost, this.row);
 
     this.figure = new MplFigureView(this.figureHost, ctx, "plot", { persistent: true });
     this.build();
     this.observeRow();
+    ctx.bus.on("snapshot", () => this.layoutRow());
     ctx.dialogs.register("axes", (request, context) => new TomoVisAxesDialog(context, request).run());
   }
 
   label(text) {
-    return this.ctx.kit.local("label", { text }).el;
+    const width = Math.max(...text.split("\n").map((line) => QtFontMetrics.labelWidth(line, QtFontMetrics.WINDOW)));
+    return { el: this.ctx.kit.local("label", { text }).el, hint: () => width, height: TomoVisPlotTab.ROW_HEIGHT };
   }
 
-  bound(kind, name, options = {}) {
+  bound(kind, name, options, cell) {
     const view = this.ctx.kit.bound(kind, name, options);
     this.controls[name] = view;
-    return view.el;
+    return { el: view.el, ...cell };
+  }
+
+  check(name) {
+    const [width, height] = TomoVisPlotTab.CHECK_SIZE;
+    return this.bound("checkbox", name, {}, { hint: () => width, height });
+  }
+
+  button(name, text) {
+    return this.bound("button", name, { text, maxWidth: TomoVisPlotTab.BUTTON_WIDTH }, { hint: () => TomoVisPlotTab.BUTTON_HINT, max: TomoVisPlotTab.BUTTON_WIDTH, height: 28 });
   }
 
   build() {
     const names  = this.ctx.tables.plot_colormaps.names;
-    const spacer = TomoVisInput.el("span", "tv-plot__spacer");
-    const button = { maxWidth: TomoVisPlotTab.BUTTON_WIDTH };
+    const spacer = { el: TomoVisInput.el("span", "tv-plot__spacer"), hint: () => TomoVisPlotTab.SPACER, max: TomoVisPlotTab.SPACER, empty: true, height: 0 };
 
-    this.row.append(
+    this.cells = [
       this.label("Normalize"),
-      this.bound("checkbox", "tab2ChkBox1"),
+      this.check("tab2ChkBox1"),
       this.label("Histogram\nequalization"),
-      this.bound("checkbox", "tab2ChkBox2"),
-      this.bound("slider", "tab2Slider"),
+      this.check("tab2ChkBox2"),
+      this.bound("slider", "tab2Slider", {}, { hint: () => TomoVisPlotTab.SLIDER_MIN, floor: TomoVisPlotTab.SLIDER_MIN, expansive: true, height: 15 }),
       spacer,
       this.label("Colormap"),
-      this.bound("combo", "tab2ComboBox", { items: names }),
+      this.bound("combo", "tab2ComboBox", { items: names, qtFont: QtFontMetrics.APP, styleSheet: true }, { hint: () => this.controls.tab2ComboBox.sizeHint(), height: 32 }),
       this.label("X [m]"),
-      this.bound("checkbox", "tab2ChkBox3"),
-      this.bound("doubleSpin", "tab2SpinBox", { maxWidth: TomoVisPlotTab.SPIN_WIDTH, decimals: 2, step: 1 }),
+      this.check("tab2ChkBox3"),
+      this.bound("doubleSpin", "tab2SpinBox", { maxWidth: TomoVisPlotTab.SPIN_WIDTH, decimals: 2, step: 1 }, { hint: () => this.controls.tab2SpinBox.sizeHint(QtFontMetrics.WINDOW), max: TomoVisPlotTab.SPIN_WIDTH, height: 29 }),
       this.label("Full View"),
-      this.bound("checkbox", "tab2ChkBox4"),
-      this.bound("button", "tab2AxesButton", { text: "Axes", ...button }),
-      this.bound("button", "tab2PlotButton", { text: "Plot", ...button }),
-      this.bound("button", "tab2ClearButton", { text: "Clear", ...button }),
-      this.stretch,
-    );
+      this.check("tab2ChkBox4"),
+      this.button("tab2AxesButton", "Axes"),
+      this.button("tab2PlotButton", "Plot"),
+      this.button("tab2ClearButton", "Clear"),
+      { el: this.stretch, hint: () => 0, expansive: true, empty: true, height: 0 },
+    ];
+    this.row.append(...this.cells.map((cell) => cell.el));
   }
 
   observeRow() {
-    const slider  = this.controls.tab2Slider.el;
-    this.rowWatch = new ResizeObserver(() => this.fitSlider());
+    this.rowWatch = new ResizeObserver(() => this.layoutRow());
     this.rowWatch.observe(this.row);
-    for (const child of this.row.children) if (child !== slider && child !== this.stretch) this.rowWatch.observe(child);
   }
 
-  fitSlider() {
-    const slider = this.controls.tab2Slider.el;
-    const style  = getComputedStyle(this.row);
-    const width  = this.row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  layoutRow() {
+    const width = this.row.clientWidth;
     if (width <= 0) return;
-
-    let taken = parseFloat(style.columnGap) * (this.row.children.length - 1) + parseFloat(getComputedStyle(this.stretch).marginLeft);
-    for (const child of this.row.children) if (child !== slider && child !== this.stretch) taken += child.getBoundingClientRect().width;
-    slider.style.marginRight = `${Math.min(0, width - taken - TomoVisPlotTab.SLIDER_MIN)}px`;
+    const chain = this.cells.map((cell) => new QtLayoutStruct({ sizeHint: cell.hint(), minimumSize: cell.hint(), maximumSize: cell.max || QtLayoutStruct.MAX, expansive: Boolean(cell.expansive), empty: Boolean(cell.empty), spacing: TomoVisPlotTab.SPACING }));
+    QtLayoutEngine.geomCalc(chain, 0, chain.length, 0, width);
+    this.cells.forEach((cell, i) => {
+      const box  = chain[i];
+      const item = Math.min(box.size, cell.max || QtLayoutStruct.MAX);
+      const top  = Math.trunc((TomoVisPlotTab.ROW_HEIGHT - cell.height) / 2);
+      cell.el.style.left   = `${box.pos + Math.trunc((box.size - item) / 2)}px`;
+      cell.el.style.top    = `${top}px`;
+      cell.el.style.width  = `${Math.max(item, cell.floor || 0)}px`;
+      cell.el.style.height = `${cell.height}px`;
+    });
   }
 
   activate() {

@@ -6,6 +6,13 @@ class FinalFinishChecks {
   static QT = {
     tabs    : [["Slicer", 9, 36, 63, 32], ["Plot", 72, 36, 51, 32], ["Profile", 123, 36, 70, 32], ["3D", 193, 36, 43, 32]],
     menubar : [["File", 6, 0, 33, 25], ["Data", 45, 0, 39, 25]],
+    plotRow : {
+      names : ["tab2Label1", "tab2ChkBox1", "tab2Label2", "tab2ChkBox2", "tab2Slider", "tab2Label3", "tab2ComboBox", "tab2Label4", "tab2ChkBox3", "tab2SpinBox", "tab2Label5", "tab2ChkBox4", "tab2AxesButton", "tab2PlotButton", "tab2ClearButton"],
+      tops  : [0, 12, 0, 12, 12, 0, 3, 0, 12, 5, 0, 12, 5, 5, 5],
+      x     : { 1100: [20, 96, 116, 206, 226, 365, 437, 570, 613, 633, 738, 808, 828, 914, 1000], 1244: [20, 96, 116, 206, 226, 437, 509, 648, 691, 711, 816, 886, 906, 992, 1078], 1404: [20, 96, 116, 206, 226, 450, 522, 661, 704, 724, 829, 899, 919, 1005, 1091], 1884: [20, 96, 116, 206, 226, 690, 762, 901, 944, 964, 1069, 1139, 1159, 1245, 1331] },
+      combo : { 1100: 127, 1244: 133, 1404: 133, 1884: 133 },
+      slider: { 1100: 200, 1244: 200, 1404: 213, 1884: 453 },
+    },
   };
 
   constructor(options) {
@@ -47,13 +54,14 @@ class FinalFinishChecks {
         page.ctx.layer.append(fusion.el);
         const chooser = fusion.el.getBoundingClientRect().width;
         fusion.el.remove();
-        return { slicer, slicerHint: QtFontMetrics.widest(names, QtFontMetrics.APP) + 30, chooser, chooserHint: QtFontMetrics.widest(titles, QtFontMetrics.APP) + 27 };
+        return { slicer, slicerHint: QtFontMetrics.widest(names, QtFontMetrics.APP, QtFontMetrics.boundingWidth) + 30, chooser, chooserHint: QtFontMetrics.widest(titles, QtFontMetrics.APP, QtFontMetrics.boundingWidth) + 30 };
       });
       const sources = ["js/tomovis_widgets.js", "js/tomovis_mpl.js", "js/tomovis_pg_export.js"].map((file) => this.source(file)).join("\n");
-      const copies  = (sources.match(/Math\.max\([^\n]*horizontalAdvance/g) || []).length;
+      const copies  = (sources.match(/Math\.max\([^\n]*(horizontalAdvance|boundingWidth)/g) || []).length;
+      const users   = (sources.match(/QtFontMetrics\.widest\(/g) || []).length;
 
-      R.equal([seen.slicer, seen.chooser], [seen.slicerHint, seen.chooserHint], "combo widths against the style sheet and Fusion hints");
-      R.equal([copies, sources.includes("comboHint"), sources.includes("COMBO_CHROME")], [1, false, false], "width-hint copies besides QtFontMetrics.widest");
+      R.equal([seen.slicer, seen.chooser], [seen.slicerHint, seen.chooserHint], "combo widths against Qt 5.15's bounding width plus 30");
+      R.equal([copies, users, sources.includes("comboHint"), sources.includes("COMBO_CHROME")], [0, 3, false, false], "inline width-hint copies, and the combo, spin box and Export list callers of QtFontMetrics.widest");
       return `Slicer combo ${seen.slicer} px, Fusion combo ${seen.chooser} px; QtFontMetrics.widest is the only copy`;
     });
   }
@@ -243,6 +251,32 @@ class FinalFinishChecks {
     });
   }
 
+  async plotRow() {
+    await this.run.check("LF-08", "the Plot row is laid out by Qt's grid algorithm with Qt's label widths and a 17 px 133x32 combo: every control at the original's x at 1100, 1244, 1404 and 1884 px", async () => {
+      await this.fresh(1180, 916);
+      await this.load();
+      const style = await this.page.addStyleTag({ content: " " });
+      const qt    = FinalFinishChecks.QT.plotRow;
+      const off   = [];
+      for (const [width, height, vw, vh] of [[1100, 880, 1180, 916], [1244, 880, 1280, 916], [1404, 880, 1440, 916], [1884, 1044, 1920, 1080]]) {
+        await style.evaluate((node, size) => { node.textContent = `.tv-window { width: ${size[0]}px !important; height: ${size[1]}px !important; min-height: 0 !important; flex: none !important; }`; }, [width, height]);
+        await this.page.setViewportSize({ width: vw, height: vh });
+        await this.page.waitForTimeout(300);
+        const got = await this.T((names) => {
+          const win  = document.querySelector(".tv-window").getBoundingClientRect();
+          const row  = document.querySelector("#tv-panel-plot .tv-plot__controls");
+          const kids = [...row.children].filter((e) => !e.classList.contains("tv-stretch") && !e.classList.contains("tv-plot__spacer"));
+          const top  = row.getBoundingClientRect().top;
+          return { x: kids.map((e) => Math.round(e.getBoundingClientRect().left - win.left)), tops: kids.map((e) => Math.round(e.getBoundingClientRect().top - top)), combo: Math.round(document.querySelector('[data-widget="tab2ComboBox"]').getBoundingClientRect().width), comboFont: getComputedStyle(document.querySelector('[data-widget="tab2ComboBox"]')).fontSize, slider: Math.round(document.querySelector('[data-widget="tab2Slider"]').getBoundingClientRect().width), height: Math.round(document.querySelector('[data-widget="tab2ComboBox"]').getBoundingClientRect().height) };
+        }, qt.names);
+        if (JSON.stringify([got.x, got.tops, got.combo, got.slider, got.height, got.comboFont]) !== JSON.stringify([qt.x[width], qt.tops, qt.combo[width], qt.slider[width], 32, "17px"])) off.push(`${width}: ${JSON.stringify(got)}`);
+      }
+      await style.evaluate((node) => node.remove());
+      R.assert(off.length === 0, off.join("\n"));
+      return "x, offsets, combo and slider widths equal the original at four window widths";
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -258,6 +292,7 @@ class FinalFinishChecks {
     if (this.wanted("tabs")) await this.tabsAndMenus();
     if (this.wanted("lookin")) await this.lookInPopup();
     if (this.wanted("computer")) await this.computerPlace();
+    if (this.wanted("row")) await this.plotRow();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
