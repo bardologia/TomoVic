@@ -56,6 +56,132 @@ class TomoVisInput {
   }
 }
 
+class QtFontMetrics {
+  static WINDOW  = { family: "'Noto Serif', serif", px: 14 };
+  static APP     = { family: "'Noto Sans', sans-serif", px: 17 };
+  static context = null;
+  static ratios  = new Map();
+
+  static css(font, px = font.px) {
+    return `${px}px ${font.family}`;
+  }
+
+  static measure(text, font, px = font.px) {
+    if (!QtFontMetrics.context) QtFontMetrics.context = document.createElement("canvas").getContext("2d");
+    QtFontMetrics.context.font = QtFontMetrics.css(font, px);
+    return QtFontMetrics.context.measureText(text);
+  }
+
+  static advance(text, font) {
+    let floored = 0;
+    let plain   = 0;
+    for (const ch of text) {
+      const width  = QtFontMetrics.measure(ch, font).width;
+      plain       += width;
+      floored     += Math.floor(width * 64 + 1e-6) / 64;
+    }
+    return floored + QtFontMetrics.measure(text, font).width - plain;
+  }
+
+  static horizontalAdvance(text, font) {
+    return Math.round(QtFontMetrics.advance(text, font));
+  }
+
+  static labelWidth(text, font) {
+    const m = QtFontMetrics.measure(text, font);
+    return Math.ceil(Math.max(m.width, m.actualBoundingBoxRight) - 1e-6);
+  }
+
+  static height(font) {
+    if (!QtFontMetrics.ratios.has(font.family)) {
+      const m = QtFontMetrics.measure("0", font, 1000);
+      QtFontMetrics.ratios.set(font.family, [m.fontBoundingBoxAscent / 1000, m.fontBoundingBoxDescent / 1000]);
+    }
+    const [ascent, descent] = QtFontMetrics.ratios.get(font.family);
+    return Math.ceil(ascent * font.px - 1e-6) + Math.ceil(descent * font.px - 1e-6);
+  }
+}
+
+class QtLocaleNumber {
+  static DECIMAL = ".";
+  static GROUP   = ",";
+
+  static cLocale(text) {
+    let idx = 0;
+    let l   = text.length;
+    while (idx < l && /\s/.test(text[idx])) idx += 1;
+    if (idx === l) return null;
+    while (idx < l && /\s/.test(text[l - 1])) l -= 1;
+
+    let out         = "";
+    let decimal     = -1;
+    let lastGroup   = -1;
+    let startDigits = -1;
+    let exponent    = -1;
+    while (idx < l) {
+      const ch = text[idx];
+      let c    = null;
+      if (ch >= "0" && ch <= "9") c = ch;
+      else if (ch === "+") c = "+";
+      else if (ch === "-" || ch === "−") c = "-";
+      else if (ch === QtLocaleNumber.DECIMAL) c = ".";
+      else if (ch === QtLocaleNumber.GROUP) c = ",";
+      else if (ch === "e" || ch === "E") c = "e";
+      else if (ch === ";") c = ";";
+      else if (ch === "%") c = "%";
+      else if (/[A-Za-z]/.test(ch)) c = ch.toLowerCase();
+      else break;
+
+      if (c === ".") {
+        if (decimal !== -1 || exponent !== -1) return null;
+        decimal = idx;
+      } else if (c === "e") {
+        exponent = idx;
+      }
+
+      if (startDigits === -1 && c >= "0" && c <= "9") {
+        startDigits = idx;
+      } else if (c === ",") {
+        if (decimal !== -1 || exponent !== -1) return null;
+        if (lastGroup !== -1 && idx - lastGroup !== 4) return null;
+        if (lastGroup === -1 && (startDigits === -1 || idx - startDigits > 3)) return null;
+        lastGroup = idx;
+        idx += 1;
+        continue;
+      } else if (c === "." || c === "e") {
+        if (lastGroup !== -1 && idx - lastGroup !== 4) return null;
+        lastGroup = -1;
+      }
+      out += c;
+      idx += 1;
+    }
+    if (lastGroup + 1 === idx) return null;
+    if (lastGroup !== -1 && idx - lastGroup !== 4) return null;
+    return idx === l ? out : null;
+  }
+
+  static toDouble(text) {
+    const c = QtLocaleNumber.cLocale(text);
+    if (c === null || c === "") return { ok: false, value: 0 };
+    if (c === "nan") return { ok: true, value: NaN };
+    if (c === "inf" || c === "+inf") return { ok: true, value: Infinity };
+    if (c === "-inf") return { ok: true, value: -Infinity };
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(c)) return { ok: false, value: 0 };
+    const value = Number(c);
+    if (!Number.isFinite(value)) return { ok: false, value };
+    if (value === 0 && /[1-9]/.test(c.split("e")[0])) return { ok: false, value: 0 };
+    return { ok: true, value };
+  }
+
+  static toInt(text) {
+    const c = QtLocaleNumber.cLocale(text);
+    if (c === null || !/^[+-]?\d+$/.test(c)) return { ok: false, value: 0 };
+    const value = Number(c);
+    if (value < -2147483648 || value > 2147483647) return { ok: false, value: 0 };
+    return { ok: true, value: value === 0 ? 0 : value };
+  }
+}
+
 class QtRegExpValidator {
   constructor(source) {
     this.source = source;
@@ -889,6 +1015,7 @@ class QtSliderView extends QtWidgetView {
 class QtSpinBoxView extends QtWidgetView {
   static REPEAT_DELAY  = 400;
   static REPEAT_PERIOD = 60;
+  static CHROME        = 23;
 
   build() {
     const root = TomoVisInput.el("span", "tv-spin");
@@ -910,10 +1037,13 @@ class QtSpinBoxView extends QtWidgetView {
     buttons.append(this.up, this.down);
     root.append(this.input, buttons);
 
+    this.double      = false;
     this.minimum     = 0;
     this.maximum     = 99;
     this.value       = 0;
     this.decimals    = 0;
+    this.prefix      = this.options.prefix || "";
+    this.suffix      = this.options.suffix || "";
     this.singleStep  = this.options.step || 1;
     this.wheelRest   = 0;
     this.repeatTimer = null;
@@ -931,6 +1061,7 @@ class QtSpinBoxView extends QtWidgetView {
       button.addEventListener("pointerleave", () => this.stopRepeat());
       button.addEventListener("pointercancel", () => this.stopRepeat());
     }
+    this.renderHint();
     return root;
   }
 
@@ -938,8 +1069,24 @@ class QtSpinBoxView extends QtWidgetView {
     return [this.input, this.up, this.down];
   }
 
-  format(value) {
+  textFromValue(value) {
     return this.decimals > 0 ? Number(value).toFixed(this.decimals) : String(Math.round(value));
+  }
+
+  format(value) {
+    return `${this.prefix}${this.textFromValue(value)}${this.suffix}`;
+  }
+
+  sizeHint(font) {
+    const fixed = `${this.prefix}${this.suffix} `;
+    const texts = [this.minimum, this.maximum].map((value) => this.textFromValue(value).slice(0, 18) + fixed);
+    return Math.max(...texts.map((text) => QtFontMetrics.horizontalAdvance(text, font))) + 2 + QtSpinBoxView.CHROME;
+  }
+
+  renderHint() {
+    const root = this.input.parentElement;
+    root.style.setProperty("--tv-spin-hint-window", `${this.sizeHint(QtFontMetrics.WINDOW)}px`);
+    root.style.setProperty("--tv-spin-hint-app", `${this.sizeHint(QtFontMetrics.APP)}px`);
   }
 
   apply(state, previous) {
@@ -947,7 +1094,7 @@ class QtSpinBoxView extends QtWidgetView {
     if ("minimum" in state) this.minimum = state.minimum;
     if ("maximum" in state) this.maximum = state.maximum;
     if ("singleStep" in state) this.singleStep = state.singleStep;
-    this.el.style.setProperty("--tv-spin-chars", String(Math.max(this.format(this.minimum).length, this.format(this.maximum).length)));
+    this.renderHint();
     if (!("value" in state)) return;
 
     const focused = document.activeElement === this.input;
@@ -977,29 +1124,119 @@ class QtSpinBoxView extends QtWidgetView {
     this.before = { text: this.input.value, start: this.input.selectionStart, end: this.input.selectionEnd };
   }
 
-  validate(text) {
-    const min  = this.minimum;
-    const max  = this.maximum;
-    const copy = text.trim();
+  stripped(text, pos) {
+    let middle  = text;
+    let changed = false;
+    let from    = 0;
+    let size    = middle.length;
+    if (this.prefix && middle.startsWith(this.prefix)) {
+      from    += this.prefix.length;
+      size    -= from;
+      changed  = true;
+    }
+    if (this.suffix && middle.endsWith(this.suffix)) {
+      size    -= this.suffix.length;
+      changed  = true;
+    }
+    if (changed) middle = middle.slice(from, from + Math.max(0, size));
+    const before = middle.length;
+    middle       = middle.trim();
+    return [middle, pos - (before - middle.length)];
+  }
+
+  interpretInt(copy) {
+    const min = this.minimum;
+    const max = this.maximum;
     if (max !== min && (copy === "" || (min < 0 && copy === "-") || (max >= 0 && copy === "+"))) return ["Intermediate", null];
+    if (copy.startsWith("-") && min >= 0) return ["Invalid", null];
 
-    const pattern = this.decimals > 0 ? /^[+-]?(\d+\.?\d*|\.\d+)$/ : /^[+-]?\d+$/;
-    if (!pattern.test(copy)) return ["Invalid", null];
-    if (this.decimals > 0 && copy.includes(".") && copy.length - copy.indexOf(".") - 1 > this.decimals) return ["Invalid", null];
+    let parsed = QtLocaleNumber.toInt(copy);
+    if (!parsed.ok && (max >= 1000 || min <= -1000)) {
+      const group = QtLocaleNumber.GROUP;
+      if (copy.includes(group) && !copy.includes(group + group)) parsed = QtLocaleNumber.toInt(copy.split(group).join(""));
+    }
+    return this.ranged(parsed);
+  }
 
-    const num = Number(copy);
+  interpretDouble(copy, pos) {
+    const min     = this.minimum;
+    const max     = this.maximum;
+    const plus    = max >= 0;
+    const minus   = min <= 0;
+    const decimal = QtLocaleNumber.DECIMAL;
+    const group   = QtLocaleNumber.GROUP;
+    const len     = copy.length;
+
+    if (len === 0) return [max !== min ? "Intermediate" : "Invalid", null, copy];
+    if (len === 1 && (copy === decimal || (plus && copy === "+") || (minus && copy === "-"))) return ["Intermediate", null, copy];
+    if (len === 2 && copy[1] === decimal && ((plus && copy[0] === "+") || (minus && copy[0] === "-"))) return ["Intermediate", null, copy];
+
+    if (copy[0] === group) return ["Invalid", null, copy];
+    if (len > 1) {
+      const dec = copy.indexOf(decimal);
+      if (dec !== -1) {
+        if (dec + 1 < copy.length && copy[dec + 1] === decimal && pos === dec + 1) copy = copy.slice(0, dec + 1) + copy.slice(dec + 2);
+        if (copy.length - dec > this.decimals + 1) return ["Invalid", null, copy];
+        for (let i = dec + 1; i < copy.length; i += 1) {
+          if (/\s/.test(copy[i]) || copy[i] === group) return ["Invalid", null, copy];
+        }
+      } else {
+        const last       = copy[len - 1];
+        const secondLast = copy[len - 2];
+        if ((last === group || /\s/.test(last)) && (secondLast === group || /\s/.test(secondLast))) return ["Invalid", null, copy];
+        if (/\s/.test(last) && (!/\s/.test(group) || /\s/.test(secondLast))) return ["Invalid", null, copy];
+      }
+    }
+
+    let parsed = QtLocaleNumber.toDouble(copy);
+    if (!parsed.ok) {
+      if (max < 1000 && min > -1000 && copy.includes(group)) return ["Invalid", null, copy];
+      if (copy.includes(group + group)) return ["Invalid", null, copy];
+      parsed = QtLocaleNumber.toDouble(copy.split(group).join(""));
+    }
+    return [...this.ranged(parsed), copy];
+  }
+
+  ranged(parsed) {
+    const min = this.minimum;
+    const max = this.maximum;
+    const num = parsed.value;
+    if (!parsed.ok) return ["Invalid", null];
     if (num >= min && num <= max) return ["Acceptable", num];
     if (max === min) return ["Invalid", null];
     if ((num >= 0 && num > max) || (num < 0 && num < min)) return ["Invalid", null];
     return ["Intermediate", null];
   }
 
+  validate(text, pos = text.length) {
+    let input = text;
+    let at    = pos;
+    if (this.prefix && !input.startsWith(this.prefix)) {
+      input  = this.prefix + input;
+      at    += this.prefix.length;
+    }
+    if (this.suffix && !input.endsWith(this.suffix)) input += this.suffix;
+
+    const [stripped, moved] = this.stripped(input, at);
+    let copy                = stripped;
+    let state;
+    let num;
+    if (this.double) [state, num, copy] = this.interpretDouble(copy, moved);
+    else [state, num] = this.interpretInt(copy);
+    const fixed = `${this.prefix}${copy}${this.suffix}`;
+    return [state, num, fixed, Math.max(0, Math.min(fixed.length, moved))];
+  }
+
   typed() {
-    const [state, num] = this.validate(this.input.value);
+    const [state, num, fixed, pos] = this.validate(this.input.value, this.input.selectionStart);
     if (state === "Invalid") {
       this.input.value = this.before.text;
       this.input.setSelectionRange(this.before.start, this.before.end);
       return;
+    }
+    if (fixed !== this.input.value) {
+      this.input.value = fixed;
+      this.input.setSelectionRange(pos, pos);
     }
     if (state === "Acceptable") this.commit(num, "key");
   }
@@ -1013,7 +1250,12 @@ class QtSpinBoxView extends QtWidgetView {
   }
 
   fixup() {
-    const [state, num] = this.validate(this.input.value);
+    const text       = this.input.value;
+    let [state, num] = this.validate(text);
+    if (state !== "Acceptable") {
+      const removed = text.split(QtLocaleNumber.GROUP).join("");
+      if (removed !== text) [state, num] = this.validate(removed);
+    }
     if (state === "Acceptable") this.commit(num, "commit");
     this.input.value = this.format(this.value);
   }
@@ -1075,9 +1317,11 @@ class QtSpinBoxView extends QtWidgetView {
 class QtDoubleSpinBoxView extends QtSpinBoxView {
   build() {
     const root = super.build();
+    this.double   = true;
     this.decimals = this.options.decimals === undefined ? 2 : this.options.decimals;
     this.maximum  = 99.99;
     root.classList.add("tv-spin--double");
+    this.renderHint();
     return root;
   }
 }

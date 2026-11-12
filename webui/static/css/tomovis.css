@@ -289,22 +289,27 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-slider:focus-visible .tv-slider__handle { box-shadow: 0 0 0 3px var(--focus); border-color: var(--accent); }
 
 .tv-spin {
+  --tv-spin-h: 29px;
+  position: relative;
   display: inline-flex;
   align-items: stretch;
-  flex: 0 1 auto;
-  height: var(--tv-field-h);
-  width: calc(var(--tv-spin-chars, 4) * 1ch + 42px);
+  flex: 0 0 auto;
+  height: var(--tv-spin-h);
+  width: var(--tv-spin-hint-window);
   border: 2px solid var(--line);
   border-radius: var(--r-input);
   background: var(--bg-1);
   font-family: var(--mono);
   font-size: 12.5px;
 }
+.tv-layer .tv-spin { --tv-spin-h: 33px; width: var(--tv-spin-hint-app); }
 .tv-spin:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+.tv-spin.is-invalid { border-color: var(--danger); }
 .tv-spin__input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0 6px;
+  margin: 1px 15px 1px 1px;
+  padding: 0 2px;
   border: 0;
   outline: none;
   background: transparent;
@@ -312,33 +317,39 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   font: inherit;
 }
 .tv-spin__buttons {
+  position: absolute;
+  top: 1px;
+  right: -1px;
+  bottom: 1px;
   display: flex;
   flex-direction: column;
-  width: 16px;
-  border-left: 2px solid var(--line);
+  width: 14px;
 }
 .tv-spin__up,
 .tv-spin__down {
   position: relative;
-  flex: 1 1 0;
+  width: 14px;
+  min-height: 0;
   padding: 0;
   border: 0;
+  border-left: 1px solid var(--line);
   background: transparent;
   cursor: default;
 }
-.tv-spin__up { border-bottom: 1px solid var(--line); }
+.tv-spin__up { flex: 0 0 round(down, calc((var(--tv-spin-h) - 6px) / 2), 1px); }
+.tv-spin__down { flex: 1 1 0; }
 .tv-spin__up::before,
 .tv-spin__down::before {
   content: "";
   position: absolute;
   left: 50%;
   top: 50%;
-  margin-left: -4px;
+  margin-left: -4.5px;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
 }
-.tv-spin__up::before { margin-top: -2.5px; border-bottom: 4px solid var(--ink-dim); }
-.tv-spin__down::before { margin-top: -1.5px; border-top: 4px solid var(--ink-dim); }
+.tv-spin__up::before { margin-top: -1.5px; border-bottom: 4px solid var(--ink-dim); }
+.tv-spin__down::before { margin-top: -2px; border-top: 4px solid var(--ink-dim); }
 .tv-spin__up:not(:disabled):hover,
 .tv-spin__down:not(:disabled):hover { background: var(--bg-2); }
 .tv-spin__up:disabled::before { border-bottom-color: var(--line); }
