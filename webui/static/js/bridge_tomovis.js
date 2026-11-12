@@ -164,9 +164,14 @@ class TomoVisBridge {
     const run     = dataset.origin === "run";
     if (heights.present && this.differs(heights.value, this.ctx.session.snapshot.attributes.z_range)) return { text: "TomoVis opened this file with its own axes.", actions: [{ label: "Use the dataset heights", run: () => this.useHeights(dataset) }] };
     if (!heights.present && !run) return { text: "Elevation is shown in samples.", actions: [{ label: "Add height range", run: () => this.complete(dataset, "height_range") }] };
-    if (!spacing.present && run) return { text: "This run has no pixel spacing; distances are shown in pixels.", actions: [] };
-    if (!spacing.present) return { text: "Distances are shown in pixels.", actions: [{ label: "Add pixel spacing", run: () => this.complete(dataset, "spacing") }] };
+    if (!spacing.present) return { text: this.spacingText(run), actions: run ? [] : [{ label: "Add pixel spacing", run: () => this.complete(dataset, "spacing") }] };
     return null;
+  }
+
+  spacingText(run) {
+    const shown = this.ctx.session.snapshot.attributes;
+    if (shown.x_res !== 1 || shown.y_res !== 1) return `TomoVis shows a pixel spacing of ${shown.x_res} m x ${shown.y_res} m that this dataset lacks (TomoVis keeps what earlier files set).`;
+    return run ? "This run has no pixel spacing; distances are shown in pixels." : "Distances are shown in pixels.";
   }
 
   async pass() {
