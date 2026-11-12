@@ -21,9 +21,10 @@
 }
 .tv-plot__controls { height: 39px; }
 .tv-profile__controls { height: 28px; }
-.tv-plot__controls .tv-label { flex: none; white-space: pre; }
-.tv-plot__controls .tv-slider { flex: 1 1 200px; width: auto; min-width: 120px; }
-.tv-plot__controls .tv-stretch { flex: 1 1 0; margin-left: -6px; }
+.tv-plot__controls > * { flex-shrink: 0; }
+.tv-plot__controls .tv-label { position: relative; flex: none; white-space: pre; }
+.tv-plot__controls .tv-slider { flex: 1 0 0; width: auto; min-width: 200px; }
+.tv-plot__controls .tv-stretch { flex: 1 0 0; margin-left: -6px; }
 .tv-plot__spacer { flex: none; width: 5px; }
 
 .tv-mpl {

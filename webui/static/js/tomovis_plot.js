@@ -64,6 +64,7 @@ class TomoVisAxesDialog {
 class TomoVisPlotTab {
   static SPIN_WIDTH   = 180;
   static BUTTON_WIDTH = 100;
+  static SLIDER_MIN   = 200;
 
   constructor(root, ctx) {
     this.root     = root;
@@ -73,10 +74,12 @@ class TomoVisPlotTab {
     root.classList.add("tv-plot");
     this.figureHost = TomoVisInput.el("div", "tv-plot__figure");
     this.row        = TomoVisInput.el("div", "tv-row tv-plot__controls");
+    this.stretch    = TomoVisInput.el("span", "tv-stretch");
     root.append(this.figureHost, this.row);
 
     this.figure = new MplFigureView(this.figureHost, ctx, "plot", { persistent: true });
     this.build();
+    this.observeRow();
     ctx.dialogs.register("axes", (request, context) => new TomoVisAxesDialog(context, request).run());
   }
 
@@ -112,8 +115,26 @@ class TomoVisPlotTab {
       this.bound("button", "tab2AxesButton", { text: "Axes", ...button }),
       this.bound("button", "tab2PlotButton", { text: "Plot", ...button }),
       this.bound("button", "tab2ClearButton", { text: "Clear", ...button }),
-      TomoVisInput.el("span", "tv-stretch"),
+      this.stretch,
     );
+  }
+
+  observeRow() {
+    const slider  = this.controls.tab2Slider.el;
+    this.rowWatch = new ResizeObserver(() => this.fitSlider());
+    this.rowWatch.observe(this.row);
+    for (const child of this.row.children) if (child !== slider && child !== this.stretch) this.rowWatch.observe(child);
+  }
+
+  fitSlider() {
+    const slider = this.controls.tab2Slider.el;
+    const style  = getComputedStyle(this.row);
+    const width  = this.row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (width <= 0) return;
+
+    let taken = parseFloat(style.columnGap) * (this.row.children.length - 1) + parseFloat(getComputedStyle(this.stretch).marginLeft);
+    for (const child of this.row.children) if (child !== slider && child !== this.stretch) taken += child.getBoundingClientRect().width;
+    slider.style.marginRight = `${Math.min(0, width - taken - TomoVisPlotTab.SLIDER_MIN)}px`;
   }
 
   activate() {
