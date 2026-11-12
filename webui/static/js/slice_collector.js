@@ -156,8 +156,13 @@ class SliceCollectorView {
     return tag;
   }
 
+  _broken(id) {
+    const dataset = this.datasets.get(id);
+    return !!dataset && dataset.state === "error";
+  }
+
   _extras(cube) {
-    return this._complete(cube.id) ? [] : [this._completeButton()];
+    return this._complete(cube.id) || this._broken(cube.id) ? [] : [this._completeButton()];
   }
 
   _openCompleter(id) {
@@ -239,7 +244,8 @@ class SliceCollectorView {
   }
 
   _onPick(id) {
-    if (this._complete(id)) this._togglePick(id);
+    if (this._broken(id)) Toast.show(this.datasets.get(id).error, "error");
+    else if (this._complete(id)) this._togglePick(id);
     else this._openCompleter(id);
   }
 
