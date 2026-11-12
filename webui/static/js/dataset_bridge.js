@@ -1062,6 +1062,9 @@ class DatasetBridge {
     this.pollTimer    = null;
 
     window.addEventListener("focus", () => this.refresh());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") this.refresh();
+    });
   }
 
   static sleep(ms) {

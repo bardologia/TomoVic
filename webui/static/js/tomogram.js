@@ -1859,6 +1859,7 @@ class TomogramView {
     this.pendingUse     = null;
     this.stale          = false;
     this.listing        = false;
+    this.regaining      = false;
     this.selectSeq      = 0;
 
     this.mapTitle   = this.topdown.closest(".cube-map").querySelector(".cube-panel-title");
@@ -1992,6 +1993,16 @@ class TomogramView {
 
   _onCurrent() {
     if (this.active) this._followCurrent();
+  }
+
+  async _cubeGone() {
+    if (this.regaining || !this.meta) return;
+    this.regaining = true;
+    await this.bridge.refresh();
+    this.regaining = false;
+
+    const current = this.bridge.state ? this.bridge.state.current : null;
+    if (this.active && this.meta && !this.polling && (!current || current.id === this.selectedId)) this.select(this.selectedId, true);
   }
 
   _onDataset(dataset) {
@@ -3301,6 +3312,7 @@ class TomogramView {
 
     try {
       const res = await fetch(url);
+      if (res.status === 404) this._cubeGone();
       if (!res.ok) return;
 
       const bitmap = await createImageBitmap(await res.blob());
