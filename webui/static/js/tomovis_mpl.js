@@ -144,7 +144,7 @@ class MplWindow extends MplModelessDialog {
     this.el.classList.add("tv-mpl-window");
     this.el.setAttribute("aria-modal", "false");
 
-    this.closeBox       = TomoVisInput.el("button", "tv-mpl-window__close", "×");
+    this.closeBox       = TomoVisInput.el("button", "tv-mpl-window__close", "\u00d7");
     this.closeBox.type  = "button";
     this.closeBox.title = "Close";
     this.closeBox.setAttribute("aria-label", "Close");
