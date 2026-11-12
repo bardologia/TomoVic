@@ -554,54 +554,22 @@ class TomoVisFileDialog {
   }
 
   openPopup() {
-    this.items = this.lookInItems();
-    const list = TomoVisInput.el("div", "tv-combo__popup tv-filedialog__lookinpopup");
-    list.setAttribute("role", "listbox");
-    this.options = this.items.map((item, i) => {
-      const row = TomoVisInput.el("div", "tv-combo__option");
-      row.setAttribute("role", "option");
-      if (item.target === null) row.classList.add("is-disabled");
-      if (item.icon) row.append(TomoVisInput.el("span", `tv-filedialog__icon ${item.icon}`));
-      row.append(TomoVisInput.el("span", "", item.label));
-      row.addEventListener("pointerenter", () => this.hot(i));
-      row.addEventListener("click", () => this.choose(i));
-      list.append(row);
-      return row;
+    const items = this.lookInItems();
+    const rows  = items.map((item) => ({ text: item.label, icon: item.icon ? `tv-filedialog__icon ${item.icon}` : null, enabled: item.target !== null }));
+    this.popup  = new QtComboPopup(this.lookIn, this.layer, rows, {
+      className : "tv-filedialog__lookinpopup",
+      capped    : false,
+      onPick    : (i) => this.choose(items[i]),
+      onClose   : () => { this.popup = null; },
     });
-    this.layer.append(list);
-    const rect = this.lookIn.getBoundingClientRect();
-    list.style.minWidth = `${rect.width}px`;
-    TomoVisInput.place(this.layer, list, rect.left, rect.bottom, { flipBottom: rect.top });
-    this.popup = list;
-    this.lookIn.classList.add("is-open");
-    this.lookIn.setAttribute("aria-expanded", "true");
-    this.hot(0);
-    this.outside = (event) => {
-      if (!list.contains(event.target) && !this.lookIn.contains(event.target)) this.closePopup();
-    };
-    document.addEventListener("pointerdown", this.outside, true);
-  }
-
-  hot(i) {
-    if (!this.popup || this.items[i].target === null) return;
-    this.hotIndex = i;
-    this.options.forEach((row, k) => row.classList.toggle("is-hot", k === i));
-    this.options[i].scrollIntoView({ block: "nearest" });
+    this.popup.open(0);
   }
 
   closePopup() {
-    if (!this.popup) return;
-    document.removeEventListener("pointerdown", this.outside, true);
-    this.popup.remove();
-    this.popup = null;
-    this.lookIn.classList.remove("is-open");
-    this.lookIn.setAttribute("aria-expanded", "false");
+    if (this.popup) this.popup.close();
   }
 
-  async choose(i) {
-    const item = this.items[i];
-    if (!item || item.target === null) return;
-    this.closePopup();
+  async choose(item) {
     if (item.target === this.dir) return;
     if (await this.navigate(item.target, true)) return;
     await TomoVisMessageBox.show({ level: "warning", title: this.title, text: `${item.target}${TomoVisFileDialog.NOT_FOUND}`, layer: this.layer });
@@ -620,14 +588,10 @@ class TomoVisFileDialog {
     const moves = { ArrowDown: 1, ArrowUp: -1 };
     if (event.key in moves) {
       event.preventDefault();
-      let i = this.hotIndex;
-      do {
-        i += moves[event.key];
-      } while (i >= 0 && i < this.items.length && this.items[i].target === null);
-      if (i >= 0 && i < this.items.length) this.hot(i);
+      this.popup.step(moves[event.key]);
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      this.choose(this.hotIndex);
+      this.popup.pick(this.popup.hot);
     } else if (event.key === "Escape" || event.key === "Tab") {
       if (event.key === "Escape") event.preventDefault();
       this.closePopup();

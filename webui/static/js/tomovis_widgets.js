@@ -1330,8 +1330,86 @@ class QtDoubleSpinBoxView extends QtSpinBoxView {
   }
 }
 
+class QtComboPopup {
+  static VISIBLE_ROWS = 10;
+
+  constructor(anchor, layer, items, { className = "", capped = true, onPick, onClose }) {
+    this.anchor  = anchor;
+    this.layer   = layer;
+    this.items   = items;
+    this.capped  = capped;
+    this.onPick  = onPick;
+    this.onClose = onClose;
+    this.hot     = -1;
+    this.list    = TomoVisInput.el("div", `tv-combo__popup tv-qt-scroll ${className}`.trim());
+    this.list.setAttribute("role", "listbox");
+    this.rows    = items.map((item, i) => this.row(item, i));
+    this.outside = (event) => {
+      if (!this.list.contains(event.target) && !this.anchor.contains(event.target)) this.close();
+    };
+  }
+
+  row(item, i) {
+    const row = TomoVisInput.el("div", "tv-combo__option");
+    row.setAttribute("role", "option");
+    row.classList.toggle("is-disabled", !item.enabled);
+    if (item.icon) row.append(TomoVisInput.el("span", item.icon));
+    row.append(document.createTextNode(item.text));
+    row.addEventListener("pointerenter", () => this.highlight(i, false));
+    row.addEventListener("click", () => this.pick(i));
+    this.list.append(row);
+    return row;
+  }
+
+  open(current) {
+    this.layer.append(this.list);
+    const rect = this.anchor.getBoundingClientRect();
+    this.list.style.minWidth = `${rect.width}px`;
+    if (this.capped) this.cap();
+    TomoVisInput.place(this.layer, this.list, rect.left, rect.bottom, { flipBottom: rect.top });
+    this.highlight(current, true);
+    this.anchor.setAttribute("aria-expanded", "true");
+    this.anchor.classList.add("is-open");
+    document.addEventListener("pointerdown", this.outside, true);
+  }
+
+  cap() {
+    const rowHeight = this.rows.length ? this.rows[0].getBoundingClientRect().height : 20;
+    const frame     = this.list.offsetHeight - this.list.clientHeight;
+    this.list.style.maxHeight = `${rowHeight * QtComboPopup.VISIBLE_ROWS + frame}px`;
+  }
+
+  highlight(i, scroll) {
+    if (!this.items[i] || !this.items[i].enabled) return;
+    this.hot = i;
+    this.rows.forEach((row, k) => row.classList.toggle("is-hot", k === i));
+    if (scroll) this.rows[i].scrollIntoView({ block: "nearest" });
+  }
+
+  step(offset) {
+    let i = this.hot;
+    do {
+      i += offset;
+    } while (i >= 0 && i < this.items.length && !this.items[i].enabled);
+    this.highlight(i, true);
+  }
+
+  pick(i) {
+    if (!this.items[i] || !this.items[i].enabled) return;
+    this.close();
+    this.onPick(i);
+  }
+
+  close() {
+    document.removeEventListener("pointerdown", this.outside, true);
+    this.list.remove();
+    this.anchor.setAttribute("aria-expanded", "false");
+    this.anchor.classList.remove("is-open");
+    this.onClose();
+  }
+}
+
 class QtComboBoxView extends QtWidgetView {
-  static VISIBLE_ROWS       = 10;
   static SEARCH_MS          = 400;
   static STYLE_SHEET_CHROME = 30;
   static FUSION_CHROME      = 27;
@@ -1350,7 +1428,6 @@ class QtComboBoxView extends QtWidgetView {
     this.items   = [...(this.options.items || [])];
     this.index   = this.items.length ? 0 : -1;
     this.popup   = null;
-    this.hot     = -1;
     this.search  = "";
     this.searchT = 0;
 
@@ -1432,7 +1509,7 @@ class QtComboBoxView extends QtWidgetView {
     const now = performance.now();
     this.search  = now - this.searchT < QtComboBoxView.SEARCH_MS ? this.search + ch.toLowerCase() : ch.toLowerCase();
     this.searchT = now;
-    const from   = this.popup ? this.hot : this.index;
+    const from   = this.popup ? this.popup.hot : this.index;
     const start  = this.search.length === 1 ? from + 1 : from;
     for (let k = 0; k < this.items.length; k += 1) {
       const i = (start + k) % this.items.length;
@@ -1457,78 +1534,42 @@ class QtComboBoxView extends QtWidgetView {
 
   openPopup() {
     if (this.popup || !this.enabled) return;
-    const layer = this.kit.layer;
-    const list  = TomoVisInput.el("div", "tv-combo__popup tv-qt-scroll");
-    list.setAttribute("role", "listbox");
-    this.rows = this.items.map((text, i) => {
-      const row = TomoVisInput.el("div", "tv-combo__option", text);
-      row.setAttribute("role", "option");
-      row.addEventListener("pointerenter", () => this.highlight(i, false));
-      row.addEventListener("click", () => {
-        this.closePopup();
-        this.choose(i, "click");
-      });
-      list.append(row);
-      return row;
+    const items = this.items.map((text) => ({ text, icon: null, enabled: true }));
+    const popup = new QtComboPopup(this.el, this.kit.layer, items, {
+      className : this.options.styleSheet ? "tv-combo__popup--qt" : "",
+      onPick    : (i) => this.choose(i, "click"),
+      onClose   : () => { this.popup = null; },
     });
-    if (this.options.styleSheet) list.classList.add("tv-combo__popup--qt");
-    layer.append(list);
-
-    const rect = this.el.getBoundingClientRect();
-    list.style.minWidth = `${rect.width}px`;
-    const rowHeight = this.rows.length ? this.rows[0].getBoundingClientRect().height : 20;
-    const frame     = list.offsetHeight - list.clientHeight;
-    list.style.maxHeight = `${rowHeight * QtComboBoxView.VISIBLE_ROWS + frame}px`;
-    TomoVisInput.place(layer, list, rect.left, rect.bottom, { flipBottom: rect.top });
-
-    this.popup = list;
-    this.highlight(this.index, true);
-    this.el.setAttribute("aria-expanded", "true");
-    this.el.classList.add("is-open");
-    this.outside = (event) => {
-      if (!list.contains(event.target) && !this.el.contains(event.target)) this.closePopup();
-    };
-    document.addEventListener("pointerdown", this.outside, true);
-  }
-
-  highlight(i, scroll) {
-    if (!this.popup) return;
-    this.hot = i;
-    this.rows.forEach((row, k) => row.classList.toggle("is-hot", k === i));
-    if (scroll && this.rows[i]) this.rows[i].scrollIntoView({ block: "nearest" });
+    this.popup = popup;
+    popup.open(this.index);
   }
 
   popupKey(event) {
-    const moves = { ArrowUp: -1, ArrowDown: 1, PageUp: -(QtComboBoxView.VISIBLE_ROWS - 1), PageDown: QtComboBoxView.VISIBLE_ROWS - 1 };
+    const popup = this.popup;
+    const moves = { ArrowUp: -1, ArrowDown: 1, PageUp: -(QtComboPopup.VISIBLE_ROWS - 1), PageDown: QtComboPopup.VISIBLE_ROWS - 1 };
     if (event.key in moves) {
       event.preventDefault();
-      this.highlight(Math.max(0, Math.min(this.items.length - 1, this.hot + moves[event.key])), true);
+      popup.highlight(Math.max(0, Math.min(this.items.length - 1, popup.hot + moves[event.key])), true);
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      this.highlight(event.key === "Home" ? 0 : this.items.length - 1, true);
+      popup.highlight(event.key === "Home" ? 0 : this.items.length - 1, true);
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      const chosen = this.hot;
-      this.closePopup();
+      const chosen = popup.hot;
+      popup.close();
       this.choose(chosen, "key");
     } else if (event.key === "Escape" || event.key === "Tab" || event.key === "F4") {
       event.preventDefault();
       event.stopPropagation();
-      this.closePopup();
+      popup.close();
     } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const found = this.keyboardSearch(event.key);
-      if (found >= 0) this.highlight(found, true);
+      if (found >= 0) popup.highlight(found, true);
     }
   }
 
   closePopup() {
-    if (!this.popup) return;
-    document.removeEventListener("pointerdown", this.outside, true);
-    this.popup.remove();
-    this.popup = null;
-    this.rows  = [];
-    this.el.setAttribute("aria-expanded", "false");
-    this.el.classList.remove("is-open");
+    if (this.popup) this.popup.close();
   }
 }
 

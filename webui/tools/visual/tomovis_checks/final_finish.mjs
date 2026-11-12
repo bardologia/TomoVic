@@ -53,6 +53,36 @@ class FinalFinishChecks {
     });
   }
 
+  async sharedPopup() {
+    await this.run.check("CR-01", "the Look in combo and the window combos share one popup class; the colormap list stops at 10 rows and Look in lists every place, as Qt does", async () => {
+      await this.fresh();
+      await this.load();
+      await this.page.click('[data-widget="tab1ComboBox"]');
+      const combo = await this.T(() => { const p = document.querySelector(".tv-combo__popup"); return { rows: p.querySelectorAll(".tv-combo__option").length, shown: Math.round(p.clientHeight / p.querySelector(".tv-combo__option").getBoundingClientRect().height), expanded: document.querySelector('[data-widget="tab1ComboBox"]').getAttribute("aria-expanded") }; });
+      await this.page.keyboard.press("Escape");
+
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, this.inputs);
+      await this.page.click(".tv-filedialog__lookin");
+      const look = await this.T(() => { const p = document.querySelector(".tv-filedialog__lookinpopup"); return { cls: p.classList.contains("tv-qt-scroll"), rows: p.querySelectorAll(".tv-combo__option").length, overflow: p.scrollHeight - p.clientHeight, disabled: [...p.querySelectorAll(".tv-combo__option.is-disabled")].map((o) => o.textContent) }; });
+      await this.page.keyboard.press("ArrowDown");
+      await this.page.keyboard.press("Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir !== d, this.inputs);
+      const moved = await this.T(() => [document.querySelector(".tv-filedialog").dataset.dir, Boolean(document.querySelector(".tv-filedialog__lookinpopup")), document.querySelector(".tv-filedialog__lookin").getAttribute("aria-expanded")]);
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      const dialogs = this.source("js/tomovis_dialogs.js");
+      R.equal([combo.rows, combo.shown, combo.expanded], [19, 10, "true"], "colormap popup");
+      R.equal([look.cls, look.overflow, look.disabled.includes("Recent Places") || look.rows >= 12], [true, 0, true], "Look in popup");
+      R.equal(moved, [path.dirname(this.inputs), false, "false"], "ArrowDown and Enter in Look in");
+      R.equal([dialogs.includes('"tv-combo__popup'), dialogs.includes("new QtComboPopup")], [false, true], "file dialog builds no popup of its own");
+      return `colormap ${combo.shown} of ${combo.rows} rows; Look in ${look.rows} rows, none hidden`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -62,6 +92,7 @@ class FinalFinishChecks {
     await H.openTomoVis(this.page);
 
     if (this.wanted("hints")) await this.widthHints();
+    if (this.wanted("popup")) await this.sharedPopup();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
