@@ -1161,8 +1161,8 @@ class DatasetBridge {
   }
 
   async use(id) {
-    const seq    = ++this.seq;
     const answer = await this._post("current", { id });
+    const seq    = ++this.seq;
     const before = this.state || { workspace: "", bridge_error: "" };
     this._apply({ ok: true, workspace: before.workspace, serial: answer.serial, set_by: answer.set_by, current: answer.current, bridge_error: before.bridge_error }, seq, true);
     return answer;
