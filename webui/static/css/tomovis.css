@@ -598,10 +598,16 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-menu__mark.is-check.is-on::after {
   content: "";
   position: absolute;
-  left: 3px;
-  top: -1px;
+.tv-menu__mark.is-check {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-radius: var(--r-input);
+}
+  left: 2.5px;
+  top: -0.5px;
   width: 4px;
-  height: 9px;
+  height: 7px;
   border: solid currentColor;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
