@@ -2237,7 +2237,7 @@ class PgViewBoxMenu {
     ctrl.min      = kit.local("line", {});
     ctrl.max      = kit.local("line", {});
     ctrl.auto     = kit.local("radio", { group, text: "Auto", onChange: () => view.enableAutoRange(axis, ctrl.percent.value * 0.01) });
-    ctrl.percent  = kit.local("spin", { onChange: (value) => {
+    ctrl.percent  = kit.local("spin", { suffix: "%", onChange: (value) => {
       ctrl.auto.set({ checked: true });
       view.enableAutoRange(axis, value * 0.01);
     } });
@@ -2275,9 +2275,7 @@ class PgViewBoxMenu {
     cell(ctrl.min.el, 2, 1);
     cell(ctrl.max.el, 3, 1);
     cell(ctrl.auto.el, 0, 2, 2);
-    const percent = TomoVisInput.el("span", "tv-pg-axisctrl__percent");
-    percent.append(ctrl.percent.el, TomoVisInput.el("span", "tv-label", "%"));
-    cell(percent, 2, 2, 2);
+    cell(ctrl.percent.el, 2, 2, 2);
     cell(ctrl.visible.el, 2, 3, 2);
     cell(ctrl.pan.el, 2, 4, 2);
     cell(ctrl.invert.el, 0, 5, 4);
@@ -2338,8 +2336,8 @@ class PgViewBoxMenu {
     const view  = this.view;
     const items = [
       { text: "View All", onTrigger: () => view.autoRange() },
-      { text: "X axis", submenu: [{ widget: this.axisWidget(0) }] },
-      { text: "Y axis", submenu: [{ widget: this.axisWidget(1) }] },
+      { text: "X axis", submenu: [{ widget: this.axisWidget(0), plain: true }] },
+      { text: "Y axis", submenu: [{ widget: this.axisWidget(1), plain: true }] },
       { text: "Mouse Mode", submenu: [
         { text: "3 button", checkable: true, radio: "mouse", checked: view.state.mouseMode === "pan", onTrigger: () => view.setMouseMode("pan") },
         { text: "1 button", checkable: true, radio: "mouse", checked: view.state.mouseMode === "rect", onTrigger: () => view.setMouseMode("rect") },

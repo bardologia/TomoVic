@@ -663,8 +663,10 @@ class PgColorMapMenu {
   }
 
   entryWidget(text, entry) {
-    const row = TomoVisInput.el("span", "tv-pg-cmapentry");
-    row.append(this.swatch(entry), TomoVisInput.el("span", "tv-pg-cmapentry__text", text));
+    const row   = TomoVisInput.el("span", "tv-pg-cmapentry");
+    const label = TomoVisInput.el("span", "tv-pg-cmapentry__text", text);
+    label.style.width = `${QtFontMetrics.labelWidth(text, QtFontMetrics.APP)}px`;
+    row.append(this.swatch(entry), label);
     row.addEventListener("click", () => {
       this.apply(entry);
       if (TomoVisMenu.root) TomoVisMenu.root.close();
@@ -691,7 +693,7 @@ class PgColorMapMenu {
         return { text: node.text, checkable: true, checked: this.editor.colorMode === node.mode, onTrigger: () => this.editor.setColorMode(node.mode) };
       }
       if (node.text === "None") return { text: "None", onTrigger: () => this.apply(PgColorMapMenu.data.maps[node.map]) };
-      return { widget: this.entryWidget(node.text, PgColorMapMenu.data.maps[node.map]) };
+      return { widget: this.entryWidget(node.text, PgColorMapMenu.data.maps[node.map]), plain: true };
     });
   }
 

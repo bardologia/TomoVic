@@ -1819,6 +1819,7 @@ class TomoVisMenu {
     this.el.replaceChildren();
     this.rows = this.items.map((item, i) => this.row(item, i));
     this.rows.forEach((row) => this.el.append(row));
+    this.el.classList.toggle("tv-menu--plain", this.items.length > 0 && this.items.every((item) => item.widget && item.plain));
   }
 
   row(item, i) {
@@ -1839,7 +1840,10 @@ class TomoVisMenu {
     if (item.checkable) mark.classList.add(item.radio ? "is-radio" : "is-check");
     if (item.checkable && item.checked) mark.classList.add("is-on");
 
-    if (item.widget) {
+    if (item.widget && item.plain) {
+      row.classList.add("tv-menu__item--plain");
+      row.append(item.widget);
+    } else if (item.widget) {
       row.classList.add("tv-menu__item--widget");
       row.append(mark, item.widget);
     } else {
