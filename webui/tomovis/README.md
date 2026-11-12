@@ -65,7 +65,7 @@ for it:
 
 A dataset id is the absolute path of a run directory. `open` is true when the current dataset's link is
 ready, a TomoVic page set it, and the window holds another dataset, none, or this one at an older
-`tomovis_revision`. The workspace folder (`--workspace PATH`, default `<repo root>/workspace`) holds one
+`tomovis_revision`. The workspace folder (`--workspace PATH`, default `<repo root>/workspace/port_<port>`) holds one
 run folder per import under `imports/`, the records and links of TomoVic runs under `linked/`, and
 `current.json`; run folders are never written. Every Piece of the Dataset payload also carries `note`,
 the reason a run lacks a piece that only preprocessing writes.

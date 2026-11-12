@@ -87,11 +87,11 @@ def test_the_script_catalog_lists_every_console_entry(server):
 
 
 def test_the_workspace_section_is_claimed_once(server):
-    """/api/workspace belongs to exactly one router, and the default workspace is <repo root>/workspace."""
+    """/api/workspace belongs to exactly one router, and the default workspace is <repo root>/workspace/port_<port>."""
     claimed = [section for sub in server.router.routers for section in sub.sections]
 
     assert claimed.count("/api/workspace") == 1
-    assert server.workspace.root == (server.paths.repo_root / "workspace").resolve()
+    assert server.workspace.root == (server.paths.repo_root / "workspace" / "port_0").resolve()
 
 
 def test_building_a_server_writes_no_workspace(server, tmp_path):

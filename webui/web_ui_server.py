@@ -117,7 +117,7 @@ class WebUIServer:
             root: Repository root override; discovered from this file when None.
             access_key: Secret a browser must present before the console answers it, empty to answer every request.
             unix_socket: Path of a Unix socket to listen on instead of host and port, None to listen on TCP.
-            workspace: Dataset bridge workspace folder; the project's workspace_dir when None.
+            workspace: Dataset bridge workspace folder; when None, this console's own folder under the project's workspace_dir (see ``_workspace_name``).
         """
 
         self.host        = host
@@ -153,7 +153,7 @@ class WebUIServer:
         self.launcher       = RunLauncher(self.paths, self.logger, self.resolver, self.processes)
         self.run_configs    = RunConfigReader(self.logger)
         self.tomovis        = TomoVisSessions(self.logger)
-        self.workspace      = DatasetWorkspace(self.paths.workspace_dir if workspace is None else workspace, self.cubes.roots, self.logger)
+        self.workspace      = DatasetWorkspace(self.paths.workspace_dir / self._workspace_name() if workspace is None else workspace, self.cubes.roots, self.logger)
         self.bridge         = DatasetBridge(self.workspace, self.cubes, self.slices, self.logger)
         self.import_watch   = TomoVisImportWatch(self.bridge, self.logger)
 
@@ -173,6 +173,20 @@ class WebUIServer:
             TomoVisRouter(self.tomovis, self.import_watch, self.logger),
             WorkspaceRouter(self.bridge),
         ], self.gate)
+
+    def _workspace_name(self) -> str:
+        """Names this console's default workspace folder after the address it listens on.
+
+        Several consoles may run on one project root, and each keeps its own
+        current dataset, so each gets its own folder: ``port_<port>`` on TCP,
+        ``socket_<socket file name>`` on a Unix socket. A console restarted on
+        the same address finds its datasets again.
+
+        Returns:
+            The folder name under the project's workspace_dir.
+        """
+
+        return f"socket_{self.unix_socket.name}" if self.unix_socket else f"port_{self.port}"
 
     def _report_ready(self) -> None:
         """Prints the startup banner with the URL, script count and interpreters."""
@@ -225,19 +239,19 @@ class WebUIServer:
     def serve(self) -> None:
         """Serves the console until interrupted, then stops the background workers.
 
-        Locks the dataset bridge workspace for this console, starts the
-        contention monitor, the progress watcher and the dataset bridge, runs
-        the HTTP server on a worker thread, and blocks in the detacher wait loop
-        until a keyboard interrupt or detach request arrives. A Unix socket is
-        removed again when the server stops.
+        Binds the listening socket, locks the dataset bridge workspace for
+        this console, starts the contention monitor, the progress watcher and
+        the dataset bridge, runs the HTTP server on a worker thread, and blocks
+        in the detacher wait loop until a keyboard interrupt or detach request
+        arrives. A Unix socket is removed again when the server stops.
 
         Raises:
             WorkspaceBusyError : If another console uses the same workspace.
         """
 
-        self.workspace.claim()
         server        = self._bind_unix_socket() if self.unix_socket else _Server((self.host, self.port), _Handler)
         server.router = self.router
+        self.workspace.claim()
 
         self._report_ready()
         self.contention.start()
