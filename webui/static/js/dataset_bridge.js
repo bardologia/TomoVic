@@ -1213,7 +1213,7 @@ class DatasetBridge {
   async stripEntries(base) {
     try {
       const payload = await this.datasets(base);
-      return { entries: payload.datasets.filter((dataset) => !dataset.under_base).map((dataset) => dataset.strip), datasets: payload.datasets, error: "" };
+      return { entries: payload.datasets.filter((dataset) => !dataset.under_base).map((dataset) => ({ ...dataset.strip, shared: true })), datasets: payload.datasets, error: "" };
     } catch (error) {
       return { entries: [], datasets: [], error: error.message };
     }
