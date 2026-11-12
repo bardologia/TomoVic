@@ -83,6 +83,49 @@ class FinalFinishChecks {
     });
   }
 
+  async textSizes() {
+    await this.run.check("NEW-5 NEW-6 DOC-01", "text is Qt's size in TomoVic's families: 14 px in the window, 17 px in combo boxes, popups, menus, message boxes and dialogs; the README says so", async () => {
+      await this.fresh();
+      await this.load();
+      const font = (sel) => this.T((s) => { const e = document.querySelector(s); const st = getComputedStyle(e); return `${st.fontSize}|${st.fontFamily.split(",")[0].replace(/"/g, "")}`; }, sel);
+      const seen = {};
+      for (const [key, sel] of Object.entries({ label: ".tv-slicer__label", button: '[data-widget="tab1SetButton"]', check: ".tv-plot__controls .tv-label", tab: ".tv-tab", menubar: ".tv-menubar__item", status: "#tv-status", line: '[data-widget="tab1QLineEdit1"]', spin: '[data-widget="tab1SpinBox"] .tv-spin__input', readout: "#tv-panel-plot .tv-mpl-toolbar__message", combo1: '[data-widget="tab1ComboBox"]', combo2: '[data-widget="tab2ComboBox"]' })) seen[key] = await font(sel);
+      await this.page.click('[data-widget="tab1ComboBox"]');
+      seen.popup = await font(".tv-combo__popup .tv-combo__option");
+      await this.page.keyboard.press("Escape");
+      await this.page.click('.tv-menubar__item[data-menu="file"]');
+      seen.menu     = await font(".tv-menu .tv-menu__text");
+      seen.shortcut = await font(".tv-menu .tv-menu__shortcut");
+      await this.page.keyboard.press("Escape");
+      await this.T(() => { window.TomoVisMessageBox.show({ level: "warning", title: "No data", text: "There is no data loaded to save.", layer: window.app.tomovisPage.ctx.layer }); });
+      seen.message = await font(".tv-messagebox__text");
+      seen.okWidth = await this.T(() => document.querySelector(".tv-messagebox .tv-button").getBoundingClientRect().width);
+      await this.page.keyboard.press("Escape");
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, this.inputs);
+      seen.dialogLabel = await font(".tv-filedialog .tv-label");
+      seen.dialogLine  = await font(".tv-filedialog__name");
+      seen.dialogCell  = await font(".tv-filedialog__cell--size");
+      const cells = await this.T(() => [...document.querySelectorAll(".tv-filedialog__cell--size")].filter((c) => c.textContent).map((c) => { const range = document.createRange(); range.selectNodeContents(c); return [c.textContent, range.getBoundingClientRect().right <= c.getBoundingClientRect().right]; }));
+      seen.cancelWidth = await this.T(() => document.querySelector(".tv-filedialog__cancel").getBoundingClientRect().width);
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      const readme = fs.readFileSync(path.join(REPO, "webui/tomovis/README.md"), "utf-8").split("\n").find((line) => line.includes("| Colours and fonts") || line.includes("| F-001, F-008")) || "";
+      const window14 = ["label", "button", "check", "tab", "menubar", "status", "line", "spin", "readout"].map((k) => seen[k].split("|")[0]);
+      const app17    = ["combo1", "combo2", "popup", "menu", "shortcut", "message", "dialogLabel", "dialogLine", "dialogCell"].map((k) => seen[k].split("|")[0]);
+      R.equal(window14, Array(9).fill("14px"), "window text sizes");
+      R.equal(app17, Array(9).fill("17px"), "application font sizes");
+      R.equal(["label", "button", "combo1", "menu", "message", "dialogCell"].map((k) => seen[k].split("|")[1]), Array(6).fill("Archivo"), "Archivo text");
+      R.equal(["line", "spin", "status", "shortcut", "readout", "dialogLine"].map((k) => seen[k].split("|")[1]), Array(6).fill("JetBrains Mono"), "monospace fields");
+      R.equal([seen.okWidth, seen.cancelWidth, cells.every(([, fits]) => fits)], [80, 80, true], "80 px buttons and Size texts inside their cells");
+      R.assert(readme.includes("14 px") && readme.includes("17 px") && !readme.includes("13 px") && !readme.includes("text sizes are TomoVic's"), `README colours and fonts row: ${readme.slice(0, 200)}`);
+      return `window ${window14[0]}, application ${app17[0]}; Size cells ${cells.map(([t]) => t).slice(0, 2).join(", ")}`;
+    });
+  }
+
   async elidedCells() {
     await this.run.check("CR-02", "text is measured only through QtFontMetrics; the file dialog elides with Qt's ElideMiddle rule, so the Size column and Look in show the original's texts", async () => {
       await this.fresh();
@@ -114,6 +157,7 @@ class FinalFinishChecks {
 
     if (this.wanted("hints")) await this.widthHints();
     if (this.wanted("popup")) await this.sharedPopup();
+    if (this.wanted("sizes")) await this.textSizes();
     if (this.wanted("elide")) await this.elidedCells();
 
     await opened.browser.close();

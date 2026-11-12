@@ -545,7 +545,7 @@ class FinalShellChecks {
       return Object.entries(seen).map(([k, v]) => `${k} ${v.size.join("x")}`).join(", ");
     });
 
-    await this.run.check("LS-15 port", "with TomoVic's font the boxes are sized to their text, wrap paths after '/', and keep the title bar as the window frame", async () => {
+    await this.run.check("LS-15 port", "with Archivo at Qt's 17 px the boxes are sized to their text, wrap paths after '/', and keep the title bar as the window frame", async () => {
       await this.fresh();
       const screen = await this.T(() => window.screen.availWidth);
       const soft   = Math.min(screen / 2, 500);
@@ -557,7 +557,7 @@ class FinalShellChecks {
       await H.shot(this.page, "ls15_critical", "final-shell", { element: ".tv-messagebox" });
       await this.page.keyboard.press("Escape");
 
-      R.assert(warn.size[0] < 300 && warn.size[0] === warn.label[2] + 73 && !warn.wrapped, `warning box not sized to its text: ${JSON.stringify(warn)}`);
+      R.assert(Math.abs(warn.size[0] - FinalShellChecks.BOXES.warning.qt.size[0]) <= 16 && warn.size[0] === warn.label[2] + 73 && !warn.wrapped, `warning box not sized to its 17 px text: ${JSON.stringify(warn)}`);
       R.equal([info.size[0], info.wrapped, info.breaks > 5, crit.size[0], crit.wrapped], [soft, true, true, soft, true], "long texts wrap at Qt's soft limit");
       R.assert(crit.label[3] > 2 * crit.lineHeight, `critical text not wrapped onto three or more lines: ${JSON.stringify(crit)}`);
       R.equal([warn.title, info.ok[0], info.size[1] - info.ok[1]], [true, soft - 91, 43], "title bar, OK button 11 px from the right and bottom");

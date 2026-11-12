@@ -178,7 +178,7 @@
   background: var(--bg-1);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--tv-label);
   line-height: 23px;
   resize: none;
   outline: none;
@@ -257,7 +257,7 @@
   white-space: pre-wrap;
 }
 .tv-script-slicer__error[hidden] { display: none; }
-.tv-script-slicer__figure { display: flex; }
+.tv-script-slicer__figure { --tv-label: var(--tv-app); display: flex; }
 .tv-script-slicer__figure[hidden] { display: none; }
 .tv-script-slicer__empty {
   display: flex;

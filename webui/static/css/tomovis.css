@@ -4,7 +4,8 @@
   --tv-pane:      #000;
   --tv-pg-ink:    rgb(150, 150, 150);
   --tv-figure:    #fff;
-  --tv-label:     13px;
+  --tv-label:     14px;
+  --tv-app:       17px;
   --tv-field-h:   28px;
   --tv-field-w:   90px;
   --tv-button-w:  100px;
@@ -156,13 +157,14 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   align-items: center;
   padding: 0 10px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--tv-label);
   color: var(--ink-dim);
   white-space: pre;
   overflow: hidden;
 }
 
 .tv-layer {
+  --tv-label: var(--tv-app);
   position: absolute;
   inset: 0;
   z-index: 20;
@@ -300,7 +302,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   border-radius: var(--r-input);
   background: var(--bg-1);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--tv-label);
 }
 .tv-layer .tv-spin { --tv-spin-h: 33px; width: var(--tv-spin-hint-app); }
 .tv-spin:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
@@ -367,7 +369,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   background: var(--bg-1);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: var(--tv-label);
+  font-size: var(--tv-app);
   white-space: nowrap;
   outline: none;
   user-select: none;
@@ -400,7 +402,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   border-radius: var(--r-input);
   box-shadow: 0 14px 34px var(--tv-shadow);
   font-family: var(--sans);
-  font-size: var(--tv-label);
+  font-size: var(--tv-app);
 }
 .tv-combo__option {
   padding: 3px 12px 3px 9px;
@@ -408,7 +410,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   color: var(--ink);
 }
 .tv-combo__option.is-hot { background: var(--accent); color: var(--on-accent); }
-.tv-combo__popup--qt { padding: 0; border-width: 1px; font-size: 17px; }
+.tv-combo__popup--qt { padding: 0; border-width: 1px; }
 .tv-combo__popup--qt .tv-combo__option { display: flex; align-items: center; height: 24px; padding: 0 12px 0 4px; }
 .tv-qt-scroll { scrollbar-color: auto; }
 .tv-qt-scroll::-webkit-scrollbar { width: 14px; height: 14px; }
@@ -436,7 +438,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   background: var(--bg-1);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--tv-label);
   outline: none;
 }
 .tv-line::placeholder { color: var(--ink-hint); }
@@ -451,7 +453,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   flex: 0 1 auto;
   min-width: 80px;
   height: var(--tv-field-h);
-  padding: 0 12px;
+  padding: 0 3px;
   border: 2px solid var(--line-strong);
   border-radius: var(--r-pill);
   background: var(--surface-2);
@@ -585,7 +587,6 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-menu__shortcut {
   padding-left: 26px;
   font-family: var(--mono);
-  font-size: 12px;
   color: var(--ink-faint);
   text-align: right;
 }
@@ -739,7 +740,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   align-items: center;
   gap: 8px;
   height: 27px;
-  padding: 0 6px;
+  padding: 0 2px 0 3px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -784,7 +785,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-filedialog__entryname { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .tv-filedialog__cell--size { text-align: right; }
 .tv-filedialog__cell--size,
-.tv-filedialog__cell--mtime { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+.tv-filedialog__cell--mtime { color: var(--ink-faint); }
 .tv-filedialog__icons {
   display: grid;
   grid-auto-flow: column;
