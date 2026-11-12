@@ -38,18 +38,18 @@ class TomoVisInput {
 
   static place(layer, node, clientX, clientY, { flipBottom = null, flipRight = null } = {}) {
     const origin = layer.getBoundingClientRect();
-    node.style.left = `${clientX - origin.left}px`;
-    node.style.top  = `${clientY - origin.top}px`;
+    node.style.left = "0px";
+    node.style.top  = "0px";
 
-    const rect   = node.getBoundingClientRect();
+    const size   = node.getBoundingClientRect();
     const view   = TomoVisInput.viewport();
     const right  = view.width - 4;
     const bottom = view.height - 4;
     let x = clientX;
     let y = clientY;
 
-    if (rect.right > right) x = flipRight !== null ? flipRight - rect.width : Math.max(4, right - rect.width);
-    if (rect.bottom > bottom) y = flipBottom !== null && flipBottom - rect.height >= 4 ? flipBottom - rect.height : Math.max(4, bottom - rect.height);
+    if (clientX + size.width > right) x = flipRight !== null ? flipRight - size.width : Math.max(4, right - size.width);
+    if (clientY + size.height > bottom) y = flipBottom !== null && flipBottom - size.height >= 4 ? flipBottom - size.height : Math.max(4, bottom - size.height);
 
     node.style.left = `${x - origin.left}px`;
     node.style.top  = `${y - origin.top}px`;
