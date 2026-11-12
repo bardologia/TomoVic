@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { TomoVisHarness as H, TomoVisCheckRun as R } from "./harness.mjs";
+import { TomoVisHarness as H, TomoVisCheckRun as R, REPO } from "./harness.mjs";
 
 const LONG_PATH = "/home/bard/Bard/code/TomoVic/logs/tomovis_port/final_verify/shell-verify/sessions/ui_session.hd5";
 
@@ -565,12 +565,35 @@ class FinalShellChecks {
     });
   }
 
+  async normalizeRgb() {
+    await this.run.check("SH-07 E-010", "Subtract with Frame, Time range or ROI on the RGB pane works in float32, where the original raised UFuncTypeError", async () => {
+      const seen = {};
+      for (const [op, mean] of [["Subtract", null], ["Subtract", "Frame"], ["Subtract", "Time range"], ["Subtract", "ROI"], ["Divide", "Frame"]]) {
+        await this.fresh();
+        await H.menu(this.page, "File", "Import", "npy");
+        await H.chooseFile(this.page, path.join(this.inputs, "npy_channels_3.npy"));
+        const pane = '.tv-slicer__pane[data-view="imv1_2"]';
+        await this.page.locator(`${pane} .tv-pg-btn`).nth(1).click();
+        await this.page.locator(".tv-menu .tv-menu__item", { hasText: "Normalization" }).click();
+        if (mean) await this.page.locator(`${pane} .tv-check`, { hasText: mean }).click();
+        const before = this.pageErrors.length;
+        await this.page.locator(`${pane} .tv-radio`, { hasText: op }).click();
+        await this.page.waitForTimeout(250);
+        const view = await this.T(() => { const iv = window.app.tomovisPage.views[0].views.imv1_2; return { dtype: iv.imageDisp ? iv.imageDisp.dtype : null, shape: iv.imageDisp ? iv.imageDisp.shape : null }; });
+        seen[`${op}${mean ? ` + ${mean}` : ""}`] = { ...view, errors: this.pageErrors.length - before };
+      }
+      R.assert(Object.values(seen).every((v) => v.dtype === "float32" && v.errors === 0), JSON.stringify(seen));
+      return Object.entries(seen).map(([k, v]) => `${k}: ${v.dtype}`).join(", ");
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
     this.context = opened.context;
     this.browser = opened.browser;
     this.page    = opened.page;
+    this.pageErrors = opened.errors;
     await H.openTomoVis(this.page);
 
     if (this.wanted("sessions")) await this.sessionsSurvive();
@@ -584,6 +607,7 @@ class FinalShellChecks {
     if (this.wanted("newfolder")) await this.newFolder();
     if (this.wanted("views")) await this.viewModes();
     if (this.wanted("messages")) await this.messageBoxes();
+    if (this.wanted("normalize")) await this.normalizeRgb();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

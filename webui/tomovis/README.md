@@ -52,12 +52,6 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   stay alive as children of the window. Not carried over: the list's right-click menu (Rename, Delete,
   Show hidden files, New Folder), resizing the columns and the sidebar, file name completion, and
   bookmarking folders by dragging them onto the sidebar.
-- **D-8.** A TomoVis window keeps its state until it is closed, however many other windows open. Each
-  page holds one session on the server and sends a heartbeat every 60 s, also while the tab is hidden.
-  The session ends when the page closes (its `pagehide` beacon) or when the page has sent nothing for
-  20 minutes, which only happens when the tab crashed, was killed, or was frozen by the browser that long.
-  A request on a dropped session opens a fresh window with the warning
-  `TomoVis session expired; a new window was opened.`
 - **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. The startup 3D check
   that `visualizer.py` prints when it is imported is printed once per window session: the browser's WebGL2
   probe stands in for `has_usable_opengl()`, so the line is `OpenGL context OK, version=(2, 0), profile=0`
@@ -71,6 +65,12 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   failing scene mouse callback is logged as `SceneCanvas._process_mouse_event for MouseEvent` after a
   chained `TypeError: SceneMouseEvent type '<type>' has no scale`, because vispy 0.17 raises while it builds
   the registry key from `repr(event)`; the rest of that mouse event's processing is skipped, as there.
+- **D-8.** A TomoVis window keeps its state until it is closed, however many other windows open. Each
+  page holds one session on the server and sends a heartbeat every 60 s, also while the tab is hidden.
+  The session ends when the page closes (its `pagehide` beacon) or when the page has sent nothing for
+  20 minutes, which only happens when the tab crashed, was killed, or was frozen by the browser that long.
+  A request on a dropped session opens a fresh window with the warning
+  `TomoVis session expired; a new window was opened.`
 - **matplotlib defaults.** TomoVis ran with matplotlib's default rcParams. In the console, the cube
   explorer's figure archiver changes the global rcParams (300 dpi, serif) whenever it saves. Every
   TomoVis figure operation therefore runs under `matplotlib.style.context("default")`, behind one
@@ -85,6 +85,7 @@ Crash fixes (the original printed a traceback and kept a half-applied state):
 | E-007 | Ctrl+F with no data: `chChanged` stops before `displayData` |
 | E-008 | D-3 |
 | E-009 | Set with a field that is not a number (`-`) does nothing |
+| E-010 | Normalization on an RGB (uint8) pane: pyqtgraph 0.14's `ImageView.normalize` keeps a uint8 copy for Subtract, so Subtract with Frame, Time range or ROI raised `UFuncTypeError: Cannot cast ufunc 'subtract' output from dtype('float64') to dtype('uint8')` and left the pane unchanged. `PgImageView.normalize` (`tomovis_pg_imageview.js`) computes every mode except Off in float32, so these combinations work and the levels follow each channel. The only other effect: Subtract with no mean source ticked returns float32 instead of uint8, with the same values. Divide was float32 in both already |
 | E-011 | X [m] / Plot (profile) / histogram equalization without a tomogram: state changes are kept and the draw is skipped. Plot (profile) does not switch tabs; in the mono branch it leaves the empty 0..1 axes the original's `add_subplot(111)` created, which renders when the Profile tab is first shown (a figure renders on its tab's first show, as a Qt canvas does on its first resize event) |
 | E-012 | A clipped ROI of length zero samples nothing instead of raising `ZeroDivisionError` in `Point.norm` |
 
