@@ -1481,8 +1481,8 @@ class QtComboBoxView extends QtWidgetView {
     this.label.textContent = this.index >= 0 && this.index < this.items.length ? this.items[this.index] : (this.state.text || "");
     if (this.sized === this.items) return;
     this.sized = this.items;
+    this.sizer.replaceChildren(...this.items.map((text) => TomoVisInput.el("span", "", text)));
     if (this.options.qtFont) this.label.parentElement.style.width = `${this.sizeHint()}px`;
-    else this.sizer.replaceChildren(...this.items.map((text) => TomoVisInput.el("span", "", text)));
   }
 
   sizeHint() {
