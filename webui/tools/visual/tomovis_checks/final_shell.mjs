@@ -587,6 +587,23 @@ class FinalShellChecks {
     });
   }
 
+  async readmeDocuments() {
+    await this.run.check("docs", "the package README lists E-010, the colours and fonts, the matplotlib version and the AVIF divergence", async () => {
+      const readme = fs.readFileSync(path.join(REPO, "webui/tomovis/README.md"), "utf-8");
+      const rows   = readme.split("\n").filter((line) => line.startsWith("| "));
+      const row    = (needle) => rows.find((line) => line.includes(needle)) || "";
+      const fonts  = row("Colours and fonts");
+      const mpl    = row("matplotlib version");
+      const avif   = row("Save as AVIF");
+      R.assert(row("| E-010 |").includes("UFuncTypeError") && row("| E-010 |").includes("float32"), "E-010 crash-fix row");
+      R.assert(["Fusion", "#efefef", "Archivo", "JetBrains Mono", "Serif", "Noto Sans"].every((word) => fonts.includes(word)), `colours and fonts row: ${fonts}`);
+      R.assert(["3.10.8", "3.11.2", "FreeType 2.6.1", "FreeType 2.14.3", "okabe_ito", "1 to 2 px"].every((word) => mpl.includes(word)), `matplotlib row: ${mpl}`);
+      R.assert(avif.includes("writes the file in the port") && avif.includes("does not support avif"), `AVIF row: ${avif}`);
+      R.assert(!/original (wrote|writes) AVIF/i.test(readme), "README still claims the original wrote AVIF");
+      return "rows present";
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -608,6 +625,7 @@ class FinalShellChecks {
     if (this.wanted("views")) await this.viewModes();
     if (this.wanted("messages")) await this.messageBoxes();
     if (this.wanted("normalize")) await this.normalizeRgb();
+    if (this.wanted("docs")) await this.readmeDocuments();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
