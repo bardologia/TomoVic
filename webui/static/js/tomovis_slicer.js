@@ -46,7 +46,7 @@ class TomoVisSlicerTab {
     this.slider  = kit.bound("slider", "tab1Slider", { minWidth: 400 });
     this.spinBox = kit.bound("spin", "tab1SpinBox", { maxWidth: 180 });
     this.play    = kit.bound("button", "tab1PlayButton", { icon: "/static/img/tomovis/play.png", ariaLabel: "Play" });
-    this.combo   = kit.bound("combo", "tab1ComboBox", { items: this.ctx.tables.colortables.names, qtFont: QtFontMetrics.APP });
+    this.combo   = kit.bound("combo", "tab1ComboBox", { items: this.ctx.tables.colortables.names, qtFont: QtFontMetrics.APP, styleSheet: true });
     this.slider.el.classList.add("tv-slicer__slider");
     this.play.el.classList.add("tv-slicer__play");
 

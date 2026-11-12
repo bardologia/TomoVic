@@ -87,6 +87,10 @@ class QtFontMetrics {
     return Math.round(QtFontMetrics.advance(text, font));
   }
 
+  static widest(texts, font) {
+    return Math.max(0, ...texts.map((text) => QtFontMetrics.horizontalAdvance(text, font)));
+  }
+
   static labelWidth(text, font) {
     const m = QtFontMetrics.measure(text, font);
     return Math.ceil(Math.max(m.width, m.actualBoundingBoxRight) - 1e-6);
@@ -1080,7 +1084,7 @@ class QtSpinBoxView extends QtWidgetView {
   sizeHint(font) {
     const fixed = `${this.prefix}${this.suffix} `;
     const texts = [this.minimum, this.maximum].map((value) => this.textFromValue(value).slice(0, 18) + fixed);
-    return Math.max(...texts.map((text) => QtFontMetrics.horizontalAdvance(text, font))) + 2 + QtSpinBoxView.CHROME;
+    return QtFontMetrics.widest(texts, font) + 2 + QtSpinBoxView.CHROME;
   }
 
   renderHint() {
@@ -1327,9 +1331,10 @@ class QtDoubleSpinBoxView extends QtSpinBoxView {
 }
 
 class QtComboBoxView extends QtWidgetView {
-  static VISIBLE_ROWS = 10;
-  static SEARCH_MS    = 400;
-  static CHROME       = 30;
+  static VISIBLE_ROWS       = 10;
+  static SEARCH_MS          = 400;
+  static STYLE_SHEET_CHROME = 30;
+  static FUSION_CHROME      = 27;
 
   build() {
     const root = TomoVisInput.el("span", "tv-combo");
@@ -1378,13 +1383,12 @@ class QtComboBoxView extends QtWidgetView {
     this.label.textContent = this.index >= 0 && this.index < this.items.length ? this.items[this.index] : (this.state.text || "");
     if (this.sized === this.items) return;
     this.sized = this.items;
-    this.sizer.replaceChildren(...this.items.map((text) => TomoVisInput.el("span", "", text)));
-    if (this.options.qtFont) this.label.parentElement.style.setProperty("--tv-combo-hint", `${this.sizeHint(this.options.qtFont)}px`);
+    if (this.options.qtFont) this.label.parentElement.style.width = `${this.sizeHint()}px`;
+    else this.sizer.replaceChildren(...this.items.map((text) => TomoVisInput.el("span", "", text)));
   }
 
-  sizeHint(font) {
-    const widths = this.items.map((text) => QtFontMetrics.horizontalAdvance(text, font));
-    return Math.max(0, ...widths) + QtComboBoxView.CHROME;
+  sizeHint() {
+    return QtFontMetrics.widest(this.items, this.options.qtFont) + (this.options.styleSheet ? QtComboBoxView.STYLE_SHEET_CHROME : QtComboBoxView.FUSION_CHROME);
   }
 
   get currentText() {
@@ -1467,7 +1471,7 @@ class QtComboBoxView extends QtWidgetView {
       list.append(row);
       return row;
     });
-    if (this.options.qtFont) list.classList.add("tv-combo__popup--qt");
+    if (this.options.styleSheet) list.classList.add("tv-combo__popup--qt");
     layer.append(list);
 
     const rect = this.el.getBoundingClientRect();

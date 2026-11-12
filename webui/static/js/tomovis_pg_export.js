@@ -756,10 +756,10 @@ class PgExportDialog {
 
   renderFormats() {
     this.list.replaceChildren();
-    const width = Math.max(...PgExportDialog.EXPORTERS.map((cls) => QtFontMetrics.horizontalAdvance(cls.NAME, QtFontMetrics.APP))) + PgExportDialog.LIST_ITEM_CHROME;
+    const width = QtFontMetrics.widest(PgExportDialog.EXPORTERS.map((cls) => cls.NAME), QtFontMetrics.APP) + PgExportDialog.LIST_ITEM_CHROME;
     PgExportDialog.EXPORTERS.forEach((cls, i) => {
       const row = TomoVisInput.el("div", `tv-pg-export__row${i === this.format ? " is-selected" : ""}`, cls.NAME);
-      row.style.minWidth = `${width}px`;
+      row.style.width = `${width}px`;
       row.addEventListener("click", () => {
         this.format = i;
         this.renderFormats();

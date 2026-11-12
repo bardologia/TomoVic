@@ -135,7 +135,6 @@
 
 .tv-mpl-chooser .tv-modal__body { display: grid; gap: 6px; }
 .tv-mpl-chooser .tv-label { display: flex; align-items: center; height: 24px; }
-.tv-mpl-chooser .tv-combo { width: 100%; }
 
 .tv-mpl-subplots > .tv-modal__title:empty::before { content: "\00a0"; }
 .tv-mpl-subplots .tv-modal__body { padding: 11px; }

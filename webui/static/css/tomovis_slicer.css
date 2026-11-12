@@ -31,7 +31,7 @@
 .tv-slicer__slider { width: 400px; }
 .tv-slicer__play { min-width: 0; width: 28px; height: 24px; padding: 0; }
 .tv-slicer__play .tv-button__icon { width: 16px; height: 16px; }
-.tv-slicer__slices > .tv-combo { width: var(--tv-combo-hint); height: 32px; padding: 0 20px 0 3px; font-size: 17px; }
+.tv-slicer__slices > .tv-combo { height: 32px; padding: 0 20px 0 3px; font-size: 17px; }
 .tv-slicer__slices > .tv-combo .tv-combo__arrow { right: 6px; }
 .tv-slicer__roi { align-items: baseline; }
 .tv-slicer__field { flex: 0 1 90px; width: 90px; }
@@ -235,7 +235,7 @@
   cursor: default;
   user-select: none;
 }
-.tv-pg-export__formats .tv-pg-export__row { width: max-content; padding: 0 3px; }
+.tv-pg-export__formats .tv-pg-export__row { padding: 0 3px; }
 .tv-pg-export__formats .tv-pg-export__row.is-selected,
 .tv-pg-export__item.is-selected .tv-pg-export__text { background: var(--accent); color: var(--on-accent); }
 .tv-pg-export__row[hidden] { display: none; }
