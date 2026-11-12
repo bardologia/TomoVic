@@ -202,7 +202,7 @@ class ArrayCheck:
             k, the number of Gaussians.
 
         Raises:
-            PieceError : If a file is missing, parameters.npy is not real, not (3k, azimuth, range) over the footprint, or k_max disagrees.
+            PieceError : If a file is missing or unreadable, parameters.npy is not real, not (3k, azimuth, range) over the footprint, or k_max is missing or disagrees.
         """
 
         root = Path(folder)
@@ -217,8 +217,13 @@ class ArrayCheck:
         if array.ndim != 3 or array.shape[0] == 0 or array.shape[0] % 3 or tuple(array.shape[1:]) != tuple(footprint):
             raise PieceError(f"parameters.npy must be 3k x azimuth x range with azimuth x range = {footprint[0]} x {footprint[1]}; it has shape {self.shape_text(array.shape)}.", "params")
 
-        k    = array.shape[0] // 3
-        meta = json.loads((root / "param_extraction_meta.json").read_text(encoding="utf-8"))
+        k = array.shape[0] // 3
+        try:
+            meta = json.loads((root / "param_extraction_meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise PieceError(f"Could not read param_extraction_meta.json: {self.reason(error)}.", "params") from error
+        if not isinstance(meta, dict) or "k_max" not in meta:
+            raise PieceError(f"param_extraction_meta.json in {root.name} names no k_max, so the number of Gaussians cannot be checked.", "params")
         if int(meta["k_max"]) != k:
             raise PieceError(f"param_extraction_meta.json says k_max = {meta['k_max']}, but parameters.npy holds {k} Gaussians.", "params")
         return k

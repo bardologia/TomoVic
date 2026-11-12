@@ -33,9 +33,19 @@ class PieceStore:
         check       : Validator of picked files.
         logger      : Console logger.
         PARAM_FILES : Files copied from a parameter run folder when present.
+        PROMPTS     : (piece, field) to the sentence shown when that path field is empty.
     """
 
     PARAM_FILES = ("parameters.npy", "param_extraction_meta.json", "fit_diagnostics.npz")
+    PROMPTS     = {
+        ("primary", "path")          : "Pick a .npy file for the Primary image.",
+        ("dem", "path")              : "Pick a .npy file for the DEM.",
+        ("geometry", "run")          : "Pick the TomoVic run to copy the acquisition geometry from.",
+        ("passes", "secondaries")    : "Pick the secondaries .npy file of the pass stack.",
+        ("passes", "interferograms") : "Pick the interferograms .npy file, or leave that field empty.",
+        ("polarimetry", "path")      : "Pick a .npy file for the Polarimetric primary.",
+        ("params", "path")           : "Pick a parameter run folder.",
+    }
 
     def __init__(self, workspace: DatasetWorkspace, check: ArrayCheck, logger: WebLogger) -> None:
         """Stores the collaborators.
@@ -58,13 +68,21 @@ class PieceStore:
     def text(self, fields: dict, key: str, piece: str) -> str:
         """Returns a path field, refusing a value that is not a non-empty string.
 
+        Args:
+            fields : Request fields of the piece.
+            key    : Name of the path field.
+            piece  : Piece key.
+
+        Returns:
+            The path as sent.
+
         Raises:
-            PieceError : If the field is missing or not a string.
+            PieceError : With the piece's prompt from PROMPTS if the field is missing, empty or not a string.
         """
 
         value = fields.get(key)
         if not isinstance(value, str) or not value:
-            raise PieceError(f"{key} must be a path.", piece)
+            raise PieceError(self.PROMPTS[(piece, key)], piece)
         return value
 
     def footprint(self, record: DatasetRecord, piece: str) -> tuple[int, int]:

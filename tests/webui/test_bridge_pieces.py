@@ -342,6 +342,10 @@ class Messages:
             "no_meta"         : lambda case: Messages.params_without_meta(case),
             "params_shape"    : lambda case: Messages.params_with(case, np.ones((4, N_AZ, N_RG), dtype=np.float32), 1, f"parameters.npy must be 3k x azimuth x range with azimuth x range = {N_AZ} x {N_RG}; it has shape 4 x {N_AZ} x {N_RG}."),
             "params_k_max"    : lambda case: Messages.params_with(case, np.ones((6, N_AZ, N_RG), dtype=np.float32), 3, "param_extraction_meta.json says k_max = 3, but parameters.npy holds 2 Gaussians."),
+            "params_no_k_max" : lambda case: Messages.params_meta(case, {"height_range": [0, 1]}, "param_extraction_meta.json in fit names no k_max, so the number of Gaussians cannot be checked."),
+            "params_bad_meta" : lambda case: Messages.params_meta(case, None, "Could not read param_extraction_meta.json: Expecting value: line 1 column 1 (char 0)."),
+            "empty_path"      : lambda case: ("passes", {"secondaries": "", "interferograms": None}, "Pick the secondaries .npy file of the pass stack."),
+            "empty_folder"    : lambda case: ("params", {"path": ""}, "Pick a parameter run folder."),
             "heights_text"    : lambda case: ("height_range", {"low": "a", "high": 3}, "Both heights must be numbers."),
             "heights_order"   : lambda case: ("height_range", {"low": 5, "high": 5}, "The lower height must be below the upper height."),
             "spacing"         : lambda case: ("spacing", {"azimuth": -1, "range": 0.5}, "Both spacings must be positive numbers of metres."),
@@ -369,6 +373,16 @@ class Messages:
         folder.mkdir()
         np.save(folder / "parameters.npy", parameters)
         (folder / "param_extraction_meta.json").write_text(json.dumps({"k_max": k_max}))
+        return "params", {"path": str(folder)}, message
+
+    @staticmethod
+    def params_meta(case, meta: dict | None, message: str) -> tuple:
+        """A parameter folder whose param_extraction_meta.json holds ``meta``, or is not JSON when None."""
+
+        folder = case.files / "fit"
+        folder.mkdir()
+        np.save(folder / "parameters.npy", np.ones((6, N_AZ, N_RG), dtype=np.float32))
+        (folder / "param_extraction_meta.json").write_text("" if meta is None else json.dumps(meta))
         return "params", {"path": str(folder)}, message
 
     @staticmethod
