@@ -77,3 +77,17 @@ def test_clearing_drops_every_entry_and_keeps_the_cache_usable():
     cache.put("c", 3)
     assert cache.get("c") == 3
     assert cache.size() == 1
+
+
+def test_discarding_drops_only_the_matching_keys():
+    """discard() removes the keys the predicate selects, counts them and keeps the rest in order."""
+    cache = LruCache(4)
+
+    cache.put("/runs/a|None", 1)
+    cache.put("/runs/a|tag", 2)
+    cache.put("/runs/ab|None", 3)
+
+    assert cache.discard(lambda key: key.startswith("/runs/a|")) == 2
+    assert cache.get("/runs/a|None") is None and cache.get("/runs/a|tag") is None
+    assert cache.get("/runs/ab|None") == 3
+    assert cache.discard(lambda key: False) == 0
