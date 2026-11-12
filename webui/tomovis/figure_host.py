@@ -102,13 +102,17 @@ class FigureMessages:
 
 
 class TomoVisCanvas(FigureCanvasWebAggCore):
-    """WebAgg core canvas that also writes GIF and AVIF, as TomoVis's matplotlib 3.11.2 Agg canvas did.
+    """WebAgg core canvas that also offers GIF and AVIF, as TomoVis's matplotlib 3.11.2 Agg canvas did.
 
     TomoVic runs matplotlib 3.10.8, whose Agg canvas has no GIF or AVIF
     writer, so the Qt Save dialog lost those two filters. ``print_gif`` and
     ``print_avif`` are copied from 3.11.2's FigureCanvasAgg and the two file
     types are added to this class only, leaving every other canvas of the
-    console unchanged.
+    console unchanged. Whether AVIF is written depends on Pillow's AVIF
+    plugin: the tomovis environment's Pillow 13.0.0 lacks it, so the
+    original raises the RuntimeError below and shows "Error saving file",
+    while the Dune environment's Pillow 12.1.1 has it, so the port writes
+    the file.
 
     Attributes:
         filetypes            : matplotlib 3.10.8's file types plus 'gif' and 'avif' with 3.11.2's descriptions.
