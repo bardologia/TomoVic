@@ -78,14 +78,15 @@ class SliceCollectorView {
 
     this._renderBasket();
 
-    this.bridge     = window.datasetBridge;
-    this.datasets   = new Map();
-    this.active     = false;
-    this.seenSerial = null;
-    this.rootError  = "";
-    this.mapTitle   = refs.mapWrap.closest(".sc-map").querySelector(".cube-panel-title");
+    this.bridge      = window.datasetBridge;
+    this.datasets    = new Map();
+    this.active      = false;
+    this.seenSerial  = null;
+    this.rootError   = "";
+    this.revealEntry = null;
+    this.mapTitle    = refs.mapWrap.closest(".sc-map").querySelector(".cube-panel-title");
 
-    this.bridge.mountIndicator(refs.datasetBar, { variant: "bar", page: "slices" });
+    this.indicator = this.bridge.mountIndicator(refs.datasetBar, { variant: "bar", page: "slices" });
     this.bridge.on("current", ({ state }) => this._onCurrent(state));
     this.bridge.on("dataset", ({ dataset }) => this._onDataset(dataset));
   }
@@ -101,7 +102,9 @@ class SliceCollectorView {
   }
 
   _onCurrent(state) {
-    if (this.active && state.serial !== this.seenSerial) this._refresh();
+    if (!this.active) return;
+    if (state.serial !== this.seenSerial) this._refresh();
+    else this._syncNotice();
   }
 
   _onDataset(dataset) {
@@ -113,6 +116,7 @@ class SliceCollectorView {
 
     if (!this._complete(dataset.id)) this.selected = this.selected.filter((id) => id !== dataset.id);
     this._renderStrip();
+    this._syncNotice();
     this._selectionChanged();
   }
 
@@ -128,10 +132,21 @@ class SliceCollectorView {
     this.seenSerial = state.serial;
     const current = state.current;
     const entry   = current ? this.cubes.find((cube) => cube.id === current.id) : null;
-    if (!entry || !current.tools.slices.ready || this.selected.includes(current.id)) return;
+    if (!entry) return;
 
-    this.selected.push(current.id);
-    if (this.runStrip) this.runStrip.reveal(entry);
+    this.revealEntry = entry;
+    if (current.tools.slices.ready && !this.selected.includes(current.id)) this.selected.push(current.id);
+  }
+
+  _syncNotice() {
+    const state   = this.bridge.state;
+    const current = state ? state.current : null;
+    const dataset = current ? this.datasets.get(current.id) : null;
+    if (!dataset || dataset.state !== "ready" || this._complete(dataset.id) || !dataset.tools.slices.actionable) {
+      this.indicator.setNotice(null);
+      return;
+    }
+    this.indicator.setNotice({ text: DatasetWords.title("slices", dataset), actions: [{ label: "Complete", run: () => this._openCompleter(dataset.id) }] });
   }
 
   _completeButton() {
@@ -183,6 +198,7 @@ class SliceCollectorView {
     this.selected = this.selected.filter((id) => this.cubes.some((c) => c.id === id) && this._complete(id));
     this._tickCurrent();
     this._renderStrip();
+    this._syncNotice();
     this._renderBasket();
 
     if (!this.cubes.length) {
@@ -217,6 +233,8 @@ class SliceCollectorView {
         extras   : (cube) => this._extras(cube),
       });
     }
+    if (this.revealEntry) this.runStrip.reveal(this.revealEntry);
+    this.revealEntry = null;
     this.runStrip.render(this.cubes);
   }
 
