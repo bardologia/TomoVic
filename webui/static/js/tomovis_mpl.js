@@ -416,7 +416,7 @@ class MplSubplotDialog {
 
   exportValues() {
     this.view.op("subplots_export").then((header) => {
-      if (header) new MplExportValuesWindow(this.ctx.layer, header.result.text).open();
+      if (header) this.view.showExportValues(header.result.text);
     }, (error) => this.ctx.session.raiseUnreported(error));
   }
 }
@@ -662,6 +662,7 @@ class MplFigureView {
     this.drawing    = Promise.resolve();
     this.frames     = 0;
     this.options    = null;
+    this.exported   = null;
 
     this.el      = TomoVisInput.el("div", "tv-mpl");
     this.toolbar = toolbar ? new MplToolbar(this) : null;
@@ -919,6 +920,12 @@ class MplFigureView {
     }
   }
 
+  showExportValues(text) {
+    if (this.exported) this.exported.close("Close");
+    this.exported = new MplExportValuesWindow(this.ctx.layer, text);
+    this.exported.open();
+  }
+
   async editParameters() {
     const listed = await this.op("options_axes");
     if (!listed) return;
@@ -955,6 +962,7 @@ class MplFigureView {
     document.removeEventListener("fullscreenchange", this.onFullScreen);
     for (const [topic, fn] of Object.entries(this.handlers)) this.ctx.bus.off(topic, fn);
     if (this.options) this.options.close();
+    if (this.exported) this.exported.close("Close");
     this.el.remove();
   }
 }
