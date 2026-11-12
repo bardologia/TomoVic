@@ -68,7 +68,6 @@
 .tv-mpl-tool:not(:disabled):hover { background: var(--surface-2); border-color: var(--line); }
 .tv-mpl-tool:not(:disabled):active { background: var(--bg-2); }
 .tv-mpl-tool.is-checked { background: var(--tv-checked); border-color: var(--accent); }
-.tv-mpl-tool:disabled { opacity: 0.4; }
 .tv-mpl-tool:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .tv-mpl-toolbar__sep {
   flex: none;
