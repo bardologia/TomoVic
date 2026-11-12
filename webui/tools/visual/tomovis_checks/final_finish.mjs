@@ -329,6 +329,51 @@ class FinalFinishChecks {
     });
   }
 
+  async exportParams() {
+    await this.run.check("NEW-7", "the Export parameter tree shows values as text with a 20x20 reset button, as pyqtgraph's items do, and swaps in the editor only for the selected row; check boxes and colour buttons stay shown", async () => {
+      await this.fresh();
+      await H.menu(this.page, "File", "Import", "hd5");
+      await H.chooseFile(this.page, FinalFinishChecks.REALISTIC);
+      const c = await this.T(() => { const iv = window.app.tomovisPage.views[0].views.imv1_1; const q = iv.view.mapViewToScene(60, 40); const r = iv.scene.el.getBoundingClientRect(); return { x: r.left + q.x, y: r.top + q.y }; });
+      await this.page.mouse.click(c.x, c.y, { button: "right" });
+      await this.page.locator(".tv-menu .tv-menu__item", { hasText: "Export..." }).click();
+      await this.page.waitForSelector(".tv-pg-export");
+      const rows = () => this.T(() => [...document.querySelectorAll(".tv-pg-export__param")].map((row) => {
+        const base   = row.getBoundingClientRect();
+        const editor = row.children[1];
+        const label  = row.querySelector(".tv-pg-export__display");
+        const reset  = row.querySelector(".tv-pg-export__default").getBoundingClientRect();
+        return { name: row.children[0].textContent, editor: !editor.hidden, label: label.hidden ? null : label.textContent, reset: [Math.round(reset.left - base.left), Math.round(reset.top - base.top), reset.width, reset.height], selected: row.classList.contains("is-selected") };
+      }));
+      const formats = {};
+      for (const name of ["CSV of original plot data", "Image File (PNG, TIF, JPG, ...)"]) {
+        await this.page.locator(".tv-pg-export__formats .tv-pg-export__row", { hasText: name }).click();
+        formats[name] = await rows();
+      }
+      await this.page.locator(".tv-pg-export__param", { hasText: "width" }).click({ position: { x: 30, y: 16 } });
+      const selected = await rows();
+      await this.page.locator('.tv-pg-export__param:has-text("width") .tv-spin__input').fill("450");
+      await this.page.keyboard.press("Enter");
+      await this.page.locator(".tv-pg-export__group").click();
+      const edited = await rows();
+      await this.page.locator('.tv-pg-export__param:has-text("width") .tv-pg-export__default').click();
+      const reset = await rows();
+      await this.page.locator(".tv-pg-export").screenshot({ path: path.join(this.out, "new7_export_params.png") });
+      await this.page.click('.tv-pg-export .tv-button:text-is("Close")');
+
+      const csv   = formats["CSV of original plot data"];
+      const image = formats["Image File (PNG, TIF, JPG, ...)"];
+      const brief = (list) => list.map((r) => [r.name, r.editor, r.label]);
+      R.equal(brief(csv), [["separator", false, "comma"], ["precision", false, "10"], ["columnMode", false, "(x,y) per plot"]], "CSV rows show text, as the original's display labels");
+      R.equal(brief(image), [["width", false, "900"], ["height", false, "340"], ["antialias", true, null], ["background", true, null], ["invertValue", true, null]], "Image rows: numbers as text, check boxes and colour button shown");
+      R.equal(image.map((r) => r.reset), Array(5).fill([215, 6, 20, 20]), "reset buttons 20x20 at the original's viewport x 215 and 6 px below the row top");
+      R.equal([selected[0].selected, selected[0].editor, selected[0].label, selected[1].editor], [true, true, null, false], "the selected width row shows its spin box");
+      R.equal([edited[0].label, edited[1].label, edited[0].editor], ["450", "170", false], "width edited to 450, height follows, editor hidden after deselecting");
+      R.equal([reset[0].label, reset[1].label], ["900", "340"], "reset puts width back to its default and height follows");
+      return `CSV ${csv.map((r) => r.label).join(", ")}; Image ${image[0].label}x${image[1].label}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -347,6 +392,7 @@ class FinalFinishChecks {
     if (this.wanted("row")) await this.plotRow();
     if (this.wanted("scrim")) await this.noDimming();
     if (this.wanted("axis")) await this.axisFields();
+    if (this.wanted("export")) await this.exportParams();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

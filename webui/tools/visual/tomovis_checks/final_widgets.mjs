@@ -168,6 +168,7 @@ class FinalWidgetsChecks {
       await this.closeMenus();
       await this.openExport();
       await this.pickFormat("Image File");
+      await this.page.locator(".tv-pg-export__param", { hasText: "width" }).click({ position: { x: 30, y: 16 } });
       columns.export = await this.spinColumns(".tv-pg-export__params .tv-spin");
       await this.closeExport();
       await this.setRoi();

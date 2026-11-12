@@ -492,6 +492,7 @@ class SlicerChecks {
       await exportBtn.click();
       await this.saveAs(path.join(this.exports, "roi_plot.svg"));
       await this.page.locator(".tv-pg-export__formats .tv-pg-export__row", { hasText: "Image File" }).click();
+      await this.page.locator(".tv-pg-export__param", { hasText: "width" }).click({ position: { x: 30, y: 16 } });
       await this.page.fill(".tv-pg-export__params .tv-spin__input >> nth=0", "800");
       await this.page.press(".tv-pg-export__params .tv-spin__input >> nth=0", "Enter");
       await exportBtn.click();

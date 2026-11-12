@@ -271,13 +271,22 @@
 }
 .tv-pg-export__param {
   display: grid;
-  grid-template-columns: 111px 82px;
+  grid-template-columns: 111px 82px 22px;
   align-items: center;
   width: 235px;
   height: 32px;
   padding-left: 20px;
+  cursor: default;
 }
+.tv-pg-export__param.is-selected { background: var(--accent); }
+.tv-pg-export__param.is-selected > .tv-label { color: var(--on-accent); }
 .tv-pg-export__param > .tv-label { padding: 0 4px; overflow: hidden; white-space: nowrap; }
+.tv-pg-export__param > :nth-child(2),
+.tv-pg-export__display { grid-area: 1 / 2; }
+.tv-pg-export__param > [hidden] { display: none; }
+.tv-pg-export__display { overflow: hidden; white-space: nowrap; color: var(--ink); user-select: none; }
+.tv-pg-export__default { justify-self: end; width: 20px; min-width: 0; height: 20px; padding: 0; border-width: 1px; border-radius: var(--r-input); }
+.tv-pg-export__defaulticon { display: block; width: 16px; height: 16px; }
 .tv-pg-export__param .tv-spin,
 .tv-pg-export__param .tv-line,
 .tv-pg-export__param .tv-combo { --tv-spin-h: 24px; width: 82px; height: 24px; }

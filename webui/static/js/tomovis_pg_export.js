@@ -205,7 +205,9 @@ class PgExporter {
   setValue(name, value) {
     const p = this.param(name);
     p.value = value;
-    if (p.view) p.view.set(p.type === "bool" ? { checked: value } : (p.type === "list" ? { index: p.limits.indexOf(value) } : { value }));
+    const state = { bool: { checked: value }, list: { index: p.limits ? p.limits.indexOf(value) : -1 }, str: { text: value } }[p.type] || { value };
+    if (p.view) p.view.set(state);
+    if (p.refresh) p.refresh();
   }
 
   parameterChanged() {}
@@ -597,6 +599,7 @@ class PgExportDialog {
   static VIEWBOX_MARGIN   = 0.5;
   static INDENT           = 20;
   static LIST_ITEM_CHROME = 6;
+  static DEFAULT_ICON     = "/static/img/tomovis/default.png";
   static lastDirectory    = null;
 
   static open(ctx, scene, view) {
@@ -774,59 +777,102 @@ class PgExportDialog {
 
   renderParams() {
     this.params.replaceChildren();
+    this.paramRows = [];
     if (!this.exporter.params) return;
-    const kit   = this.ctx.kit;
     const group = TomoVisInput.el("div", "tv-pg-export__group", "params");
+    group.addEventListener("pointerdown", () => this.selectParam(null));
     this.params.append(group);
     for (const p of this.exporter.params) {
-      const row = TomoVisInput.el("div", "tv-pg-export__param");
-      row.append(TomoVisInput.el("span", "tv-label", p.name));
-      let view;
-      if (p.type === "int" || p.type === "float") {
-        view = new PgSpinBoxView(kit, "doubleSpin", null, { integer: p.type === "int", decimals: p.type === "float" ? 3 : 0, onChange: (value) => {
-          p.value = value;
-          this.exporter.parameterChanged(p.name);
-        } });
-        view.set({ decimals: p.type === "float" ? 3 : 0, minimum: p.limits[0], maximum: 2147483647, value: p.value });
-      } else if (p.type === "bool") {
-        view = kit.local("checkbox", { onChange: (checked) => {
-          p.value = checked;
-          this.exporter.parameterChanged(p.name);
-        } });
-        view.set({ checked: p.value });
-        if (p.tip) view.el.title = p.tip;
-      } else if (p.type === "list") {
-        view = kit.local("combo", { items: p.limits, onChange: (index) => {
-          p.value = p.limits[index];
-          this.exporter.parameterChanged(p.name);
-        } });
-        view.set({ index: p.limits.indexOf(p.value) });
-      } else if (p.type === "str") {
-        view = kit.local("line", { onChange: (text) => {
-          p.value = text;
-        } });
-        view.set({ text: p.value });
-      } else if (p.type === "color") {
-        const button = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-pg-export__colorbtn"));
-        button.type = "button";
-        const paint = () => {
-          button.style.background = PgPen.css(p.value);
-        };
-        paint();
-        button.addEventListener("click", async () => {
-          const result = await this.ctx.dialogs.color({ initial: p.value.slice(), title: "Select Color", alpha: true, live: (color) => {
-            p.value = color.slice();
-            paint();
-          } });
-          p.value = result.color ? result.color.slice() : p.value;
-          paint();
-        });
-        view = { el: button, set: () => paint() };
-      }
-      p.view = view;
-      row.append(view.el);
+      if (!("default" in p)) p.default = PgExportDialog.copyValue(p.value);
+      const row     = TomoVisInput.el("div", "tv-pg-export__param");
+      const display = TomoVisInput.el("span", "tv-pg-export__display");
+      const reset   = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-button tv-pg-export__default"));
+      const icon    = TomoVisInput.el("img", "tv-pg-export__defaulticon");
+      icon.src = PgExportDialog.DEFAULT_ICON;
+      icon.alt = "";
+      reset.type = "button";
+      reset.setAttribute("aria-label", `Reset ${p.name} to its default`);
+      reset.append(icon);
+      reset.addEventListener("click", () => this.resetParam(p));
+      p.view    = this.paramView(p);
+      p.refresh = () => { display.textContent = this.displayText(p); };
+      p.refresh();
+      row.append(TomoVisInput.el("span", "tv-label", p.name), p.view.el, display, reset);
+      row.addEventListener("pointerdown", (event) => {
+        if (!reset.contains(event.target)) this.selectParam(row);
+      });
       this.params.append(row);
+      this.paramRows.push({ row, p, display, alwaysShown: p.type === "bool" || p.type === "color" });
     }
+    this.selectParam(null);
+  }
+
+  paramView(p) {
+    const kit = this.ctx.kit;
+    if (p.type === "int" || p.type === "float") {
+      const view = new PgSpinBoxView(kit, "doubleSpin", null, { integer: p.type === "int", decimals: p.type === "float" ? 3 : 0, onChange: (value) => this.paramChanged(p, value) });
+      view.set({ decimals: p.type === "float" ? 3 : 0, minimum: p.limits[0], maximum: 2147483647, value: p.value });
+      return view;
+    }
+    if (p.type === "bool") {
+      const view = kit.local("checkbox", { onChange: (checked) => this.paramChanged(p, checked) });
+      view.set({ checked: p.value });
+      if (p.tip) view.el.title = p.tip;
+      return view;
+    }
+    if (p.type === "list") {
+      const view = kit.local("combo", { items: p.limits, onChange: (index) => this.paramChanged(p, p.limits[index]) });
+      view.set({ index: p.limits.indexOf(p.value) });
+      return view;
+    }
+    if (p.type === "str") {
+      const view = kit.local("line", { onChange: (text) => this.paramChanged(p, text) });
+      view.set({ text: p.value });
+      return view;
+    }
+    const button = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-pg-export__colorbtn"));
+    const paint  = () => { button.style.background = PgPen.css(p.value); };
+    button.type = "button";
+    paint();
+    button.addEventListener("click", async () => {
+      const result = await this.ctx.dialogs.color({ initial: p.value.slice(), title: "Select Color", alpha: true, live: (color) => {
+        p.value = color.slice();
+        paint();
+      } });
+      p.value = result.color ? result.color.slice() : p.value;
+      paint();
+    });
+    return { el: button, set: () => paint() };
+  }
+
+  paramChanged(p, value) {
+    p.value = value;
+    this.exporter.parameterChanged(p.name);
+    p.refresh();
+  }
+
+  displayText(p) {
+    return p.type === "int" || p.type === "float" ? p.view.input.value : String(p.value);
+  }
+
+  selectParam(target) {
+    for (const entry of this.paramRows) {
+      const selected = entry.row === target;
+      const editor   = selected || entry.alwaysShown;
+      entry.row.classList.toggle("is-selected", selected);
+      entry.p.view.el.hidden = !editor;
+      entry.display.hidden   = editor;
+      if (selected && !entry.alwaysShown) (entry.p.view.input || entry.p.view.el).focus({ preventScroll: true });
+    }
+  }
+
+  resetParam(p) {
+    this.exporter.setValue(p.name, PgExportDialog.copyValue(p.default));
+    this.exporter.parameterChanged(p.name);
+  }
+
+  static copyValue(value) {
+    return Array.isArray(value) ? value.slice() : value;
   }
 
   paintSelectBox(ctx) {
