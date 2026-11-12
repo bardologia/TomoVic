@@ -1547,7 +1547,22 @@ class QtLineEditView extends QtWidgetView {
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && this.options.onReturn) this.options.onReturn(this.text, this);
     });
+    new ResizeObserver(() => this.revealCursor()).observe(input);
     return input;
+  }
+
+  revealCursor() {
+    const input = this.input;
+    const width = input.clientWidth;
+    if (width === 0) return;
+    const style  = getComputedStyle(input);
+    const inner  = width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const font   = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    if (!QtFontMetrics.context) QtFontMetrics.context = document.createElement("canvas").getContext("2d");
+    QtFontMetrics.context.font = font;
+    const cursorX = QtFontMetrics.context.measureText(input.value.slice(0, input.selectionEnd)).width;
+    if (cursorX - input.scrollLeft >= inner) input.scrollLeft = Math.ceil(cursorX - inner + 1);
+    else if (cursorX < input.scrollLeft) input.scrollLeft = Math.floor(cursorX);
   }
 
   focusables() {
@@ -1563,6 +1578,8 @@ class QtLineEditView extends QtWidgetView {
     if (focused && ((this.name && this.kit.pending(this.name)) || echo)) return;
     this.text        = state.text;
     this.input.value = state.text;
+    this.input.setSelectionRange(state.text.length, state.text.length);
+    this.revealCursor();
   }
 
   editing() {
