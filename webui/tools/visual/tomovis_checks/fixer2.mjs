@@ -282,7 +282,7 @@ class Fixer2Checks {
   }
 
   async colourTokens() {
-    await this.run.check("GL-10", "the scrim, list wells, shadows and colour picker cross take their colours from the TomoVis tokens", async () => {
+    await this.run.check("GL-10", "list wells, shadows and the colour picker cross take their colours from the TomoVis tokens, and the modal scrim is clear", async () => {
       await this.fresh(1440, 900);
       await H.menu(this.page, "File", "Import", "npy");
       await this.page.waitForSelector(".tv-filedialog[data-dir]");
@@ -296,7 +296,7 @@ class Fixer2Checks {
         return out;
       });
       await this.page.keyboard.press("Escape");
-      R.equal(styles.scrim, "rgba(5, 8, 11, 0.42)", "scrim");
+      R.equal(styles.scrim, "rgba(0, 0, 0, 0)", "scrim draws nothing, as Qt dims nothing behind a modal dialog");
       R.equal(styles.well, "rgba(0, 0, 0, 0.22)", "file list well");
       R.equal(styles.modal, "rgba(0, 0, 0, 0.5) 0px 26px 64px 0px", "modal shadow");
       R.equal(styles.cross, "linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0)), linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0))", "colour picker cross");

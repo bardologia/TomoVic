@@ -16,7 +16,6 @@
   --tv-surface:   #141b22;
   --tv-dialog:    #161d24;
   --tv-checked:   color-mix(in srgb, var(--accent) 18%, transparent);
-  --tv-scrim:     rgba(5, 8, 11, 0.42);
   --tv-well:      rgba(0, 0, 0, 0.22);
   --tv-shadow:    rgba(0, 0, 0, 0.45);
   --tv-shadow-2:  rgba(0, 0, 0, 0.5);
@@ -650,7 +649,6 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-modal__scrim {
   position: absolute;
   inset: 0;
-  background: var(--tv-scrim);
 }
 .tv-modal {
   position: absolute;

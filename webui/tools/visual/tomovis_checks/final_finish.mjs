@@ -277,6 +277,29 @@ class FinalFinishChecks {
     });
   }
 
+  async noDimming() {
+    await this.run.check("LS-15", "message boxes and the file dialog dim nothing behind them, as Qt does, and still refuse clicks on the window", async () => {
+      await this.fresh();
+      const point = await this.T(() => { const r = document.querySelector(".tv-slicer__label").getBoundingClientRect(); return { x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }; });
+      const pixel = async () => { const shot = await this.page.screenshot({ clip: { x: point.x, y: point.y, width: 1, height: 1 } }); return shot.toString("base64"); };
+      const before = await pixel();
+      await this.T(() => { window.TomoVisMessageBox.show({ level: "warning", title: "No data", text: "There is no data loaded to save.", layer: window.app.tomovisPage.ctx.layer }); });
+      await this.page.waitForSelector(".tv-messagebox");
+      const boxed = { pixel: await pixel(), top: await this.T((p) => document.elementFromPoint(p.x, p.y).className, point), scrim: await this.T(() => getComputedStyle(document.querySelector(".tv-modal__scrim")).backgroundColor) };
+      await this.page.keyboard.press("Escape");
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      const dialog = { pixel: await pixel(), top: await this.T((p) => document.elementFromPoint(p.x, p.y).className, point) };
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      const css = this.source("css/tomovis.css");
+      R.equal([boxed.pixel === before, dialog.pixel === before, boxed.scrim], [true, true, "rgba(0, 0, 0, 0)"], "window pixel unchanged behind the message box and the file dialog");
+      R.equal([boxed.top, dialog.top], ["tv-modal__scrim", "tv-modal__scrim"], "the clear scrim still takes the clicks");
+      R.equal(css.includes("--tv-scrim"), false, "scrim colour token gone");
+      return "nothing dimmed, clicks refused";
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -293,6 +316,7 @@ class FinalFinishChecks {
     if (this.wanted("lookin")) await this.lookInPopup();
     if (this.wanted("computer")) await this.computerPlace();
     if (this.wanted("row")) await this.plotRow();
+    if (this.wanted("scrim")) await this.noDimming();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];
