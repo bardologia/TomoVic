@@ -240,3 +240,55 @@ def test_a_deleted_import_source_gives_tomovis_its_own_import_error(served, tmp_
     assert answer["dialogs"][0]["title"] == "Import error"
     assert answer["snapshot"]["attributes"]["data_shape"] == [8, 12, 10]
     assert not client.dataset(dataset["id"])[1]["dataset"]["tomovis"]["ready"]
+
+
+def test_the_full_loop_with_an_added_height_range(served, tmp_path):
+    """Import npy_real, add its height range, load it in Cube; then a run made current is handed to the window, after which open is false."""
+
+    client = served.client
+    sid    = client.window()
+    client.load(sid, "openNpy", INPUTS / "npy_real.npy")
+    served.harness.settle()
+    imported = client.current(sid)["current"]
+    assert imported["tools"]["cube"]["missing"] == ["height_range"]
+
+    status, added = client.add(imported["id"], "height_range", {"low": -20, "high": 80})
+    assert status == 200 and added["ok"] and added["dataset"]["tools"]["cube"]["ready"]
+    assert client.load_cube(imported["id"])["state"] == "ready"
+    assert client.current(sid)["tomovis"]["open"]
+
+    request = client.trigger(sid, "openFUSAR")
+    attrs   = client.event(sid, {"type": "dialog_result", "token": request["token"], "accepted": True, "path": added["dataset"]["tomovis"]["link"]})["snapshot"]["attributes"]
+    assert attrs["z_range"] == [-20.0, 80.0]
+    assert not client.current(sid)["tomovis"]["open"]
+
+    run_dir = make_preproc_run(tmp_path / "runs", with_spacing=True)
+    client.request("GET", f"/api/cubes?base={tmp_path / 'runs'}")
+    status, used = client.use(str(run_dir))
+    assert status == 200 and client.current(sid)["tomovis"]["open"]
+
+    request = client.trigger(sid, "openFUSAR")
+    client.event(sid, {"type": "dialog_result", "token": request["token"], "accepted": True, "path": used["current"]["tomovis"]["link"]})
+    state = client.current(sid)
+    assert state["tomovis"]["held"]["id"] == str(run_dir.resolve()) and not state["tomovis"]["open"]
+
+
+def test_the_add_route_answers(served, tmp_path):
+    """POST add: 200 with the dataset, 400 with the piece for a refused piece or a run, 404 for an unknown id, 400 for a malformed body."""
+
+    client = served.client
+    sid    = client.window()
+    client.load(sid, "openNpy", INPUTS / "npy_real.npy")
+    served.harness.settle()
+    dataset_id = client.current()["current"]["id"]
+
+    status, answer = client.add(dataset_id, "spacing", {"azimuth": 0.5, "range": 0.75})
+    assert status == 200 and list(answer) == ["ok", "dataset"] and answer["dataset"]["pieces"]["spacing"]["value"] == [0.5, 0.75]
+
+    assert client.add(dataset_id, "height_range", {"low": 3, "high": 1}) == (400, {"ok": False, "error": "The lower height must be below the upper height.", "piece": "height_range"})
+    assert client.add(str(tmp_path / "x"), "dem", {"path": "/a.npy"}) == (404, {"ok": False, "error": f"unknown dataset: {tmp_path / 'x'}", "piece": "dem"})
+    assert client.request("POST", "/api/workspace/add", {"id": dataset_id})[0] == 400
+
+    run_dir = make_preproc_run(tmp_path / "runs")
+    client.request("GET", f"/api/cubes?base={tmp_path / 'runs'}")
+    assert client.add(str(run_dir), "dem", {"path": "/a.npy"}) == (400, {"ok": False, "error": "run_a is a TomoVic run; the bridge never writes into run folders.", "piece": "dem"})

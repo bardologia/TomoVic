@@ -25,7 +25,7 @@ from routers.workspace_router import WorkspaceRouter
 
 from tests.webui.conftest import FakeHandler, WEBUI_ROOT
 
-ROUTE_COUNT   = 93
+ROUTE_COUNT   = 94
 SECTION_COUNT = 24
 
 RESOLUTIONS = [
@@ -72,6 +72,7 @@ RESOLUTIONS = [
     ("POST", "/api/workspace/current",           WorkspaceRouter),
     ("GET",  "/api/workspace/datasets",          WorkspaceRouter),
     ("GET",  "/api/workspace/dataset",           WorkspaceRouter),
+    ("POST", "/api/workspace/add",               WorkspaceRouter),
 ]
 
 

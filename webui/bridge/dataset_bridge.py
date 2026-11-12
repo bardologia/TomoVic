@@ -13,9 +13,11 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from bridge.array_check       import ArrayCheck
 from bridge.cube_preparer     import CubePreparer, PreparationJob
 from bridge.dataset_record    import DatasetRecord
 from bridge.dataset_workspace import DatasetWorkspace
+from bridge.piece_store       import PieceStore
 from catalog_roots            import CatalogRoots
 from cube_explorer            import CubeExplorer, SliceCollector
 from lru_cache                import LruCache
@@ -58,6 +60,7 @@ class DatasetBridge:
         current       : {id, serial, set_by} of the current dataset.
         held          : TomoVis window sid to {id, name, tomovis_revision} of the dataset it opened.
         preparer      : Background preparation of imports.
+        store         : Writer of the pieces added to imports.
         bridge_error  : Last registration error of a TomoVis import, cleared by the next success.
         HELD_CAPACITY : Number of TomoVis windows whose held dataset is remembered.
     """
@@ -84,6 +87,7 @@ class DatasetBridge:
         self.current      = dict(self.pointer.EMPTY)
         self.held         = LruCache(self.HELD_CAPACITY)
         self.preparer     = CubePreparer(workspace, logger, self.prepared)
+        self.store        = PieceStore(workspace, ArrayCheck(), logger)
         self.bridge_error = ""
 
     def job(self, record: DatasetRecord, steps: tuple | None = None) -> PreparationJob:
@@ -338,6 +342,67 @@ class DatasetBridge:
 
             self.set_current(None if record is None else record.id, "tomovic")
             return {"ok": True, "serial": self.current["serial"], "set_by": self.current["set_by"], "current": None if record is None else self.payload(record)}
+
+    def refuse_busy(self, record: DatasetRecord, piece: str) -> None:
+        """Refuses an add while the dataset is being prepared or the Cube page is loading it.
+
+        Raises:
+            BridgeRefusal : 409 in either case.
+        """
+
+        if record.state == "preparing":
+            raise BridgeRefusal(f"{record.name} is still being prepared for the TomoVic tools.", 409, piece)
+        with self.cubes.lock:
+            loading = self.cubes.status["state"] == "loading" and self.cubes.status["id"] is not None and str(Path(self.cubes.status["id"]).resolve()) == record.id
+        if loading:
+            raise BridgeRefusal(f"The Cube page is still loading {record.name}. Add the piece when it is ready.", 409, piece)
+
+    def add(self, dataset_id: str, piece: str, fields: dict) -> dict:
+        """Answers POST /api/workspace/add: adds one piece to an import.
+
+        After a successful add the revision rises, the record is saved, the
+        Cube and Slices caches of the dataset are dropped, and when it is the
+        current dataset ``set_by`` becomes "tomovic" so TomoVis windows reopen it
+        with what changed. A channel choice or a rebuilt stand-in leaves the
+        dataset preparing.
+
+        Args:
+            dataset_id : Dataset id.
+            piece      : Piece key.
+            fields     : The piece's request fields.
+
+        Returns:
+            {ok, dataset}.
+
+        Raises:
+            BridgeRefusal : 404 for an unknown id, 400 for a run, 409 while busy.
+            PieceError    : 400 with the user's sentence when the piece is refused.
+        """
+
+        with self.lock:
+            record = self.record_of(dataset_id)
+            if record is None and dataset_id and not self.run_problem(dataset_id):
+                raise BridgeRefusal(f"{Path(dataset_id).name} is a TomoVic run; the bridge never writes into run folders.", 400, piece)
+            if record is None:
+                raise BridgeRefusal(f"unknown dataset: {dataset_id}", 404, piece)
+            if not record.imported:
+                raise BridgeRefusal(f"{record.name} is a TomoVic run; the bridge never writes into run folders.", 400, piece)
+            self.refuse_busy(record, piece)
+
+            steps            = self.store.add(record, piece, fields)
+            record.revision += 1
+            if steps:
+                record.state = "preparing"
+                record.stage = ""
+            record.save()
+            self.forget(record.id)
+            if steps:
+                self.preparer.submit(self.job(record, steps))
+            if self.current["id"] == record.id:
+                self.set_current(record.id, "tomovic")
+
+            self.logger.info(f"bridge: added the {piece} piece to {record.id}")
+            return {"ok": True, "dataset": self.payload(record)}
 
     def registered(self, kind: str, path: str) -> DatasetRecord:
         """Finds or creates the dataset a TomoVis import is (identity rules 1 to 4), preparing it when needed.

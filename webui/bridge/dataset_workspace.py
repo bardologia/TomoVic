@@ -391,13 +391,14 @@ class DatasetWorkspace:
         Args:
             run_dir   : Import run directory.
             changes   : Top-level keys to set.
-            artifacts : Artifact key to file name under data/ to set.
+            artifacts : Artifact key to file name under data/ to set, or to None to remove the artifact.
         """
 
         path   = Path(run_dir) / "data" / "dataset.json"
         layout = json.loads(path.read_text(encoding="utf-8"))
+        merged = {**layout["artifacts"], **artifacts}
         layout.update(changes)
-        layout["artifacts"].update(artifacts)
+        layout["artifacts"] = {key: name for key, name in merged.items() if name is not None}
         self.writer.json(path, layout)
 
     def write_height_range(self, run_dir: Path, height_range) -> None:

@@ -2,13 +2,14 @@
 
 Answers the current dataset (with what a TomoVis window holds and whether it
 should open the current dataset), the list of registered datasets with their
-Cube strip entries, one dataset's payload, and sets the current dataset from a
-TomoVic page. The payloads are described in webui/tomovis/README.md and in the
-bridge package.
+Cube strip entries and one dataset's payload, sets the current dataset from a
+TomoVic page, and adds a missing piece to a TomoVis import. The payloads are
+described in webui/tomovis/README.md and in the bridge package.
 """
 
 from __future__ import annotations
 
+from bridge.array_check    import PieceError
 from bridge.dataset_bridge import BridgeRefusal, DatasetBridge
 from routers.dispatch      import HttpExchange, RouteTable, SubRouter
 
@@ -38,6 +39,7 @@ class WorkspaceRouter(SubRouter):
         table.add("GET",  "/api/workspace/datasets", self.datasets)
         table.add("GET",  "/api/workspace/dataset",  self.dataset)
         table.add("POST", "/api/workspace/current",  self.use)
+        table.add("POST", "/api/workspace/add",      self.add)
 
     def handle(self, exchange: HttpExchange) -> bool:
         """Refuses POST bodies that are not JSON objects with 400, then dispatches through the route table."""
@@ -86,5 +88,26 @@ class WorkspaceRouter(SubRouter):
             result = self.bridge.use(dataset_id)
         except BridgeRefusal as refusal:
             self.refuse(exchange, refusal)
+            return
+        exchange.send_json(result)
+
+    def add(self, exchange: HttpExchange) -> None:
+        """Adds a piece to an import; 400 with the piece for a refused piece or a run, 404 for an unknown id, 409 while busy."""
+
+        body       = exchange.body
+        dataset_id = body.get("id")
+        piece      = body.get("piece")
+        if not isinstance(dataset_id, str) or not isinstance(piece, str):
+            exchange.send_json({"ok": False, "error": "id and piece must be strings"}, 400)
+            return
+
+        fields = {key: value for key, value in body.items() if key not in ("id", "piece")}
+        try:
+            result = self.bridge.add(dataset_id, piece, fields)
+        except BridgeRefusal as refusal:
+            self.refuse(exchange, refusal)
+            return
+        except PieceError as error:
+            exchange.send_json({"ok": False, "error": str(error), "piece": error.piece}, 400)
             return
         exchange.send_json(result)
