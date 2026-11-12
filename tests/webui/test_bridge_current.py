@@ -202,3 +202,27 @@ def test_a_vanished_current_dataset_becomes_none_at_start(tmp_path):
 
     assert second.bridge.current["id"] is None and second.bridge.current["serial"] == 2
     assert second.bridge.datasets_payload("")["datasets"] == []
+
+
+def test_a_folder_deleted_while_the_console_runs_leaves_the_lists(tmp_path):
+    """Deleting or moving a dataset folder while the bridge runs drops it from every answer instead of failing, and clears it as current."""
+
+    harness = BridgeHarness(tmp_path)
+    kept    = harness.imported("npy", INPUTS / "npy_real.npy")
+    gone    = harness.imported("hd5", INPUTS / "fusar_two_key_elev.hd5")
+    run_dir = make_preproc_run(tmp_path / "runs")
+    harness.open_runs_root(tmp_path / "runs")
+    harness.bridge.use(str(run_dir))
+    harness.bridge.use(gone.id)
+
+    shutil.rmtree(gone.id)
+    run_dir.rename(tmp_path / "runs" / "moved")
+
+    current = harness.bridge.current_payload(None)
+    assert current["current"] is None and current["set_by"] is None
+    assert [dataset["id"] for dataset in harness.bridge.datasets_payload("")["datasets"]] == [kept.id]
+
+    with pytest.raises(BridgeRefusal) as refusal:
+        harness.bridge.use(gone.id)
+    assert refusal.value.status == 400
+    assert not Path(gone.id).exists()

@@ -121,15 +121,21 @@ class DatasetBridge:
         self.workspace.ensure()
         self.pointer.write(dataset_id, self.current["serial"], set_by)
 
+    def prune(self) -> None:
+        """Forgets the datasets whose folder was deleted or moved, and clears the current dataset when it was one of them."""
+
+        self.workspace.prune()
+        if self.current["id"] is not None and self.workspace.record(self.current["id"]) is None:
+            self.logger.warning(f"bridge: the current dataset {self.current['id']} no longer exists; no dataset is current")
+            self.set_current(None, None)
+
     def start(self) -> None:
         """Reads the workspace, registers the runs roots, resubmits interrupted preparations and starts the preparer."""
 
         with self.lock:
             records      = self.workspace.scan()
             self.current = self.pointer.read()
-            if self.current["id"] is not None and self.workspace.record(self.current["id"]) is None:
-                self.logger.warning(f"bridge: the current dataset {self.current['id']} no longer exists; no dataset is current")
-                self.set_current(None, None)
+            self.prune()
 
             self.workspace.register_roots()
             for record in records:
@@ -209,6 +215,7 @@ class DatasetBridge:
         """
 
         with self.lock:
+            self.prune()
             record  = None if self.current["id"] is None else self.workspace.record(self.current["id"])
             payload = {
                 "ok"           : True,
@@ -234,6 +241,7 @@ class DatasetBridge:
 
         root, _ = CatalogRoots.resolve(base) if base else (None, "")
         with self.lock:
+            self.prune()
             records  = sorted(self.workspace.records.values(), key=lambda record: record.opened_at, reverse=True)
             datasets = []
             for record in records:
@@ -280,6 +288,7 @@ class DatasetBridge:
         """
 
         with self.lock:
+            self.prune()
             record = self.record_of(dataset_id)
             if record is not None:
                 return {"ok": True, "dataset": self.payload(record)}
@@ -327,6 +336,7 @@ class DatasetBridge:
         """
 
         with self.lock:
+            self.prune()
             record = None
             if dataset_id is not None:
                 record = self.record_of(dataset_id)
@@ -380,6 +390,7 @@ class DatasetBridge:
         """
 
         with self.lock:
+            self.prune()
             record = self.record_of(dataset_id)
             if record is None and dataset_id and not self.run_problem(dataset_id):
                 raise BridgeRefusal(f"{Path(dataset_id).name} is a TomoVic run; the bridge never writes into run folders.", 400, piece)
@@ -448,6 +459,7 @@ class DatasetBridge:
         """
 
         with self.lock:
+            self.prune()
             record = self.registered(kind, path)
             self.held.put(sid, {"id": record.id, "name": record.name, "tomovis_revision": record.tomovis_revision})
             if self.current["id"] != record.id:

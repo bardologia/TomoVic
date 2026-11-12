@@ -138,11 +138,30 @@ class DatasetWorkspace:
             found.append(DatasetRecord.load(path, self.writer))
 
         for record in found:
-            if not (Path(record.id) / "data" / "dataset.json").is_file():
+            if self.gone(record):
                 self.logger.warning(f"bridge: the dataset folder {record.id} was deleted; it is left out of the dataset lists")
                 continue
             self.records[record.id] = record
         return list(self.records.values())
+
+    def prune(self) -> None:
+        """Drops from the index the datasets whose folder was deleted or moved while the console runs."""
+
+        for record in [record for record in self.records.values() if self.gone(record)]:
+            self.logger.warning(f"bridge: the dataset folder {record.id} was deleted or moved; it is left out of the dataset lists")
+            del self.records[record.id]
+
+    def gone(self, record: DatasetRecord) -> bool:
+        """Says whether a dataset lost its record file or its data/dataset.json.
+
+        Args:
+            record : Dataset record.
+
+        Returns:
+            True when the record file or the dataset folder's data/dataset.json no longer exists.
+        """
+
+        return not record.path.is_file() or not (Path(record.id) / "data" / "dataset.json").is_file()
 
     def add_root(self, run_dir: Path) -> None:
         """Lets the Cube and Slices pages open a run folder outside the runs roots the user opened."""
