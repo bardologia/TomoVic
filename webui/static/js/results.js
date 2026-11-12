@@ -10,10 +10,11 @@ class ResultsView {
     this.pathForm  = document.getElementById("results-path-form");
     this.pathInput = document.getElementById("results-path-input");
 
-    this.root      = null;
-    this.activeRel = null;
-    this.expanded  = new Set();
-    this.loaded    = false;
+    this.root          = null;
+    this.activeRel     = null;
+    this.expanded      = new Set();
+    this.loaded        = false;
+    this.pendingFolder = null;
 
     this.sources     = ResultsSources.all();
     this.catalog     = null;
@@ -63,6 +64,15 @@ class ResultsView {
     this.figureEl.setAttribute("name", ResultsView.FIGURES[value]);
   }
 
+  showFolder(path) {
+    this.pathInput.value = path;
+    if (this.loaded) {
+      this.open(path);
+      return;
+    }
+    this.pendingFolder = path;
+  }
+
   enter() {
     if (this.loaded) {
       this.loadCatalog();
@@ -74,7 +84,11 @@ class ResultsView {
     this.loadCatalog();
 
     const recents = this._recents();
-    if (recents.length) {
+    if (this.pendingFolder) {
+      const path = this.pendingFolder;
+      this.pendingFolder = null;
+      this.open(path);
+    } else if (recents.length) {
       this.pathInput.value = recents[0];
       this.open(recents[0]);
     } else {
