@@ -1,0 +1,16 @@
+.page--tomovis > .tvb-caption {
+  position: absolute;
+  top: 0;
+  left: var(--tv-pad-x);
+  right: var(--tv-pad-x);
+  height: var(--tv-pad-y);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 3;
+}
+.tvb-caption[hidden] { display: none; }
+@media (max-height: 911.98px), (max-width: 900px) {
+  .page--tomovis > .tvb-caption { display: none; }
+}

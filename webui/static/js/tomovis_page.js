@@ -315,6 +315,7 @@ class TomoVisPage extends TomoVisPageBase {
     this.current    = -1;
     this.savedTitle = null;
     this.shell      = null;
+    this.bridge     = new TomoVisBridge(this, root.querySelector("#tvb-caption"));
   }
 
   enter() {
@@ -356,6 +357,7 @@ class TomoVisPage extends TomoVisPageBase {
     ctx.dialogs.activate();
     ctx.tables = await this.tables();
     await ctx.session.open({ kind: "window", webgl2: this.webgl2 });
+    this.bridge.attach(ctx);
     this.statusEl.textContent = "";
 
     this.views = [
@@ -373,9 +375,11 @@ class TomoVisPage extends TomoVisPageBase {
     this.shortcuts.attach();
     this.switchView(this.tabs.current);
     this.ctx.bus.emit("page", { active: true });
+    this.bridge.shown();
   }
 
   hidden() {
+    this.bridge.hidden();
     this.shortcuts.detach();
     if (TomoVisMenu.root) TomoVisMenu.root.close();
     const view = this.views[this.current];
@@ -397,6 +401,7 @@ class TomoVisPage extends TomoVisPageBase {
   async expired() {
     Toast.show("TomoVis session expired; a new window was opened.", "warn");
     await this.ctx.session.open({ kind: "window", webgl2: this.webgl2 });
+    this.bridge.check("expired");
   }
 
   report(text) {
@@ -410,6 +415,7 @@ class TomoVisScriptsPage extends TomoVisPageBase {
     this.slicerRoot = root.querySelector("#tv-script-slicer");
     this.volumeRoot = root.querySelector("#tv-script-volume");
     this.views      = [];
+    this.bridge     = new TomoVisScriptsBridge(this, document.getElementById("tvs-dataset-bar"));
   }
 
   async start() {
@@ -429,6 +435,7 @@ class TomoVisScriptsPage extends TomoVisPageBase {
     this.ctx.dialogs.activate();
     this.views.forEach((view) => view.activate());
     this.ctx.bus.emit("page", { active: true });
+    this.bridge.shown();
   }
 
   hidden() {
