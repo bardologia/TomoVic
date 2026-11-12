@@ -68,20 +68,72 @@ APP = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
 
 class VispyCallbackErrors:
-    """Replaces vispy's callback error logger with one marker line per failing callback.
+    """Replaces vispy's callback error logger with the lines vispy logs, in a form the browser port can share.
 
-    vispy's EventEmitter catches every exception raised by a callback and logs
-    it to stderr; the original app keeps running. The marker line printed here
-    (``ERROR: Invoking <Class>.<method> for <EventClass>: <Type>: <message>``)
-    lands in the recorded stdout, so the record shows which callback failed and
-    the browser port can be checked against it. Failures of
-    ``SceneCanvas.on_draw`` are left out: they come from this recording
-    environment, whose vispy cannot upload 3D textures without PyOpenGL.
+    vispy's EventEmitter catches every exception raised by a callback and hands
+    it to ``_handle_exception``, which keeps a registry on the emitter keyed by
+    ``repr(callback) + repr(event)``. Under the emitters' default "reminders"
+    policy the first failure logs the traceback at WARNING and then
+    ``ERROR: Invoking <callback> for <EventClass>``; later failures with the
+    same key log only ``ERROR: Invoking <callback> repeat <n>`` when n is a
+    power of two. The lines printed here follow that policy and land in the
+    recorded stdout. The callback is named ``<Class>.<method>``, because the
+    bound method's repr carries a memory address, and the traceback is reduced
+    to its first and last lines, because the port's frames are JavaScript.
+    Failures of ``SceneCanvas.on_draw`` are left out: they come from this
+    recording environment, whose vispy cannot upload 3D textures without
+    PyOpenGL.
     """
 
     @staticmethod
-    def handle(ignore_callback_errors, print_callback_errors, obj, cb_event=None, node=None) -> None:
-        """Prints the marker line for the exception being handled."""
+    def traceback(error_type, error) -> str:
+        """Returns the header and the last line of the traceback vispy logs at WARNING.
+
+        Args:
+            error_type : Exception class.
+            error      : Exception instance.
+
+        Returns:
+            The two-line WARNING entry.
+        """
+
+        return f"WARNING: Traceback (most recent call last):\n{error_type.__name__}: {error}"
+
+    @classmethod
+    def report(cls, obj, key: str, name: str, event_name: str, policy: str) -> None:
+        """Prints what ``_handle_exception`` logs for a failing callback under the emitter's print policy.
+
+        Args:
+            obj        : Emitter that holds the error registry, as in vispy.
+            key        : Registry key, ``repr(callback) + repr(event)`` in vispy.
+            name       : Callback name for the printed lines.
+            event_name : Event class name, ``str(event)`` in vispy.
+            policy     : The emitter's ``print_callback_errors``: "first", "reminders", "always" or "never".
+        """
+
+        error_type, error, _ = sys.exc_info()
+        if policy == "never":
+            return
+        if not hasattr(obj, "_vispy_err_registry"):
+            obj._vispy_err_registry = {}
+        registry   = obj._vispy_err_registry
+        this_print = "full"
+        if policy in ("first", "reminders"):
+            if key in registry:
+                registry[key] += 1
+                count      = registry[key]
+                this_print = None if policy == "first" or count != 2 ** int(np.log2(count)) else count
+            else:
+                registry[key] = 1
+        if this_print == "full":
+            print(cls.traceback(error_type, error))
+            print(f"ERROR: Invoking {name} for {event_name}")
+        elif this_print is not None:
+            print(f"ERROR: Invoking {name} repeat {this_print}")
+
+    @classmethod
+    def handle(cls, ignore_callback_errors, print_callback_errors, obj, cb_event=None, node=None) -> None:
+        """Prints vispy's lines for the exception being handled by an emitter or a node draw."""
 
         error_type, error, _ = sys.exc_info()
         if cb_event is None:
@@ -92,7 +144,7 @@ class VispyCallbackErrors:
         name  = f"{owner}.{cb.__name__}" if owner else getattr(cb, "__name__", repr(cb))
         if name == "SceneCanvas.on_draw":
             return
-        print(f"ERROR: Invoking {name} for {type(event).__name__}: {error_type.__name__}: {error}")
+        cls.report(obj, repr(cb) + repr(event), name, str(event), print_callback_errors)
 
     @classmethod
     def install(cls) -> None:
@@ -235,8 +287,10 @@ class VispyTimerTicks:
     """Fires a fly camera's timer callback the way vispy's timer emitter does.
 
     vispy's EventEmitter catches an exception raised by a callback, logs it and
-    keeps the timer running; the tick prints one marker line per failure so the
-    record shows which ticks failed.
+    keeps the timer running. The timer emits a plain ``Event`` whose repr does
+    not change between ticks, so every failure shares one registry key on the
+    timer's ``timeout`` emitter and the "reminders" policy of
+    ``VispyCallbackErrors.report`` applies across ticks and steps.
 
     Attributes:
         camera : vispy FlyCamera whose ``on_timer`` is fired.
@@ -254,11 +308,12 @@ class VispyTimerTicks:
     def tick(self, dt: float, count: int) -> None:
         """Fires ``count`` timer events of interval ``dt`` seconds."""
 
+        emitter = self.camera._timer.events.timeout
         for _ in range(count):
             try:
                 self.camera.on_timer(types.SimpleNamespace(dt=dt))
-            except Exception as error:
-                print(f"ERROR: Invoking FlyCamera.on_timer for TimerEvent: {type(error).__name__}: {error}")
+            except Exception:
+                VispyCallbackErrors.report(emitter, repr(self.camera.on_timer) + "Event", "FlyCamera.on_timer", "Event", emitter.print_callback_errors)
 
 
 class WindowScene:

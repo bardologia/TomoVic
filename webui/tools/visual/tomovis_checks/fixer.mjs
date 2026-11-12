@@ -241,11 +241,14 @@ class FixerChecks {
       await this.page.waitForTimeout(1200);
       const lines  = await this.T(async () => (await (await fetch("/api/server-log?limit=400")).json()).lines);
       const errors = lines.filter((l) => l.message.startsWith("TomoVis: ERROR: Invoking FlyCamera.on_timer"));
+      const traces = lines.filter((l) => l.message.startsWith("TomoVis: WARNING: Traceback (most recent call last):"));
       const info   = lines.filter((l) => l.message.startsWith("TomoVis: ") && !l.message.startsWith("TomoVis: ERROR:") && l.level === "INFO");
       R.assert(errors.length > 0, "no fly timer error in the server log");
       R.equal([...new Set(errors.map((l) => l.level))], ["ERROR"], "levels of the error lines");
+      R.assert(traces.length > 0, "no traceback entry before the fly timer error");
+      R.equal([...new Set(traces.map((l) => l.level))], ["WARN"], "levels of the traceback entries");
       await this.clickTab(0);
-      return `${errors.length} error lines at ERROR, ${info.length} other TomoVis lines at INFO`;
+      return `${errors.length} error lines at ERROR after a traceback at WARNING, ${info.length} other TomoVis lines at INFO`;
     });
   }
 

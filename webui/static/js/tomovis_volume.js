@@ -53,14 +53,15 @@ class TomoVisVolume {
     this.initAxisEvents();
   }
 
-  timerError(error) {
+  timerError(error, count) {
     if (!(error instanceof VispyPyError)) throw error;
-    this.print([`ERROR: Invoking FlyCamera.on_timer for TimerEvent: ${error.line}`]);
+    if (count === 1) this.print([`WARNING: ${error.traceback}`, "ERROR: Invoking FlyCamera.on_timer for Event"]);
+    else if (VispyPyError.reminder(count)) this.print([`ERROR: Invoking FlyCamera.on_timer repeat ${count}`]);
   }
 
   initCameras() {
     const fov  = 60.0;
-    const fail = (error) => this.timerError(error);
+    const fail = (error, count) => this.timerError(error, count);
     this.flyCamera       = new VispyFlyCamera({ fov, name: "Fly", timerError: fail });
     this.turntableCamera = new VispyTurntableCamera({ fov, name: "Turntable" });
     this.arcballCamera   = new VispyArcballCamera({ fov, name: "Arcball" });

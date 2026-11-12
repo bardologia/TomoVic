@@ -310,12 +310,17 @@ class VolumeChecks {
       await this.page.waitForTimeout(250);
       await this.page.keyboard.up("w");
       await this.page.waitForTimeout(900);
-      const errors = (await this.logLines(1)).filter((l) => l.startsWith("ERROR: Invoking FlyCamera.on_timer"));
-      R.assert(errors.length > 0, "no fly timer error logged before the fly camera was attached");
-      R.equal(errors[0], "ERROR: Invoking FlyCamera.on_timer for TimerEvent: TypeError: unsupported operand type(s) for *: 'float' and 'NoneType'", "timer error text");
+      const lines   = await this.logLines(1);
+      const first   = lines.findIndex((l) => l.startsWith("WARNING: Traceback (most recent call last):"));
+      const errors  = lines.filter((l) => l.startsWith("ERROR: Invoking FlyCamera.on_timer"));
+      const repeats = errors.slice(1).map((l) => Number(l.split(" repeat ")[1]));
+      R.assert(first >= 0, "no traceback logged before the first timer error");
+      R.assert(lines[first].endsWith("\nTypeError: unsupported operand type(s) for *: 'float' and 'NoneType'"), "traceback ends with the TypeError");
+      R.equal(lines[first + 1], "ERROR: Invoking FlyCamera.on_timer for Event", "first timer error line");
+      R.equal(repeats, repeats.map((_, i) => 2 ** (i + 1)), "later failures logged at powers of two only (vispy's reminders)");
       const s = await this.state();
       R.equal([s.fly.scale, s.camera], [null, "Turntable"], "fly camera untouched");
-      return `${errors.length} timer errors logged while W was held and the speed decayed`;
+      return `traceback and first error, then repeats ${repeats.join(", ")} while W was held and the speed decayed`;
     });
 
     await this.run.check("F-102", "shader probes: GPU pixels equal a CPU ray cast for MIP, translucent and additive", async () => {

@@ -9,6 +9,19 @@ class VispyPyError extends Error {
   get line() {
     return `${this.pyType}: ${this.message}`;
   }
+
+  get traceback() {
+    const frames = String(this.stack).split("\n").filter((frame) => frame.trim().startsWith("at ")).map((frame) => `  ${frame.trim()}`).reverse();
+    return ["Traceback (most recent call last):", ...frames, this.line].join("\n");
+  }
+
+  chain(next) {
+    return `${this.traceback}\n\nDuring handling of the above exception, another exception occurred:\n\n${next.traceback}`;
+  }
+
+  static reminder(count) {
+    return count === 2 ** Math.floor(Math.log2(count));
+  }
 }
 
 class VispyPyFormat {
@@ -911,6 +924,7 @@ class VispyTimer {
     this.onError  = onError;
     this.handle   = null;
     this.last     = 0;
+    this.errors   = 0;
   }
 
   get running() {
@@ -934,7 +948,8 @@ class VispyTimer {
     try {
       this.callback({ dt });
     } catch (error) {
-      this.onError(error);
+      this.errors += 1;
+      this.onError(error, this.errors);
     }
   }
 
@@ -965,7 +980,7 @@ class VispyFlyCamera extends VispyCameraBase {
       L: [+1, 5], J: [-1, 5], Q: [+1, 6], E: [-1, 6],
       Space: [0, 1, 2, 3],
     };
-    this.timer = new VispyTimer(0.01, (event) => this.onTimer(event), (error) => (timerError ? timerError(error) : null));
+    this.timer = new VispyTimer(0.01, (event) => this.onTimer(event), (error, count) => (timerError ? timerError(error, count) : null));
   }
 
   get stateProps() {
@@ -1354,7 +1369,8 @@ class VispySceneCanvas {
       fn(event);
     } catch (error) {
       if (!(error instanceof VispyPyError)) throw error;
-      this.print(`ERROR: Invoking ${label}: ${error.line}`);
+      this.print(`WARNING: ${error.traceback}`);
+      this.print(`ERROR: Invoking ${label}`);
     }
   }
 
@@ -1386,13 +1402,20 @@ class VispySceneCanvas {
     if (picked === null) return;
 
     const sceneEvent = new VispySceneMouseEvent(event, picked);
-    const label      = `${picked.camera ? picked.camera.constructor.name.replace(/^Vispy/, "") : "ViewBox"}.viewbox_mouse_event for SceneMouseEvent`;
-    if (picked === this.mouseHandler) {
-      if (event.type === "mouse_release") this.mouseHandler = null;
-      this.invoke((e) => picked.mouseEvent(e), sceneEvent, label);
-    } else {
-      this.invoke((e) => picked.mouseEvent(e), sceneEvent, label);
-      if (sceneEvent.handled && event.type === "mouse_press") this.mouseHandler = picked;
+    try {
+      if (picked === this.mouseHandler) {
+        if (event.type === "mouse_release") this.mouseHandler = null;
+        picked.mouseEvent(sceneEvent);
+      } else {
+        picked.mouseEvent(sceneEvent);
+        if (sceneEvent.handled && event.type === "mouse_press") this.mouseHandler = picked;
+      }
+    } catch (error) {
+      if (!(error instanceof VispyPyError)) throw error;
+      const escaped = new VispyPyError("TypeError", `SceneMouseEvent type '${event.type}' has no scale`);
+      this.print(`WARNING: ${error.chain(escaped)}`);
+      this.print("ERROR: Invoking SceneCanvas._process_mouse_event for MouseEvent");
+      return;
     }
     event.handled = sceneEvent.handled;
   }
@@ -2122,7 +2145,7 @@ ${snippet.after}
     this.failures.set(visual, count);
     const name = visual instanceof VispyVolumeVisual ? "Volume" : "XYZAxis";
     if (count === 1) canvas.print(`ERROR: Drawing node ${name}: ${error.line}`);
-    else if (count === 2 ** Math.floor(Math.log2(count))) canvas.print(`ERROR: Drawing node ${name} repeat ${count}`);
+    else if (VispyPyError.reminder(count)) canvas.print(`ERROR: Drawing node ${name} repeat ${count}`);
   }
 
   translucentState() {

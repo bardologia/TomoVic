@@ -93,13 +93,22 @@ class VispyRecordComparer {
 }
 
 class VispyScenarioPlayer {
+  static TRACEBACK = "WARNING: Traceback (most recent call last):";
+
+  static lines(entries) {
+    return entries.flatMap((entry) => {
+      const rows = String(entry).split("\n");
+      return rows[0] === VispyScenarioPlayer.TRACEBACK ? [rows[0], rows[rows.length - 1]] : rows;
+    });
+  }
+
   constructor(sandbox, scenario) {
     this.sandbox  = sandbox;
     this.scenario = scenario;
     this.printed  = [];
     const ctx     = sandbox.context;
     const data    = Float32Array.from(scenario.volume);
-    const print   = (lines) => this.printed.push(...lines);
+    const print   = (lines) => this.printed.push(...VispyScenarioPlayer.lines(lines));
 
     if (scenario.kind === "window") {
       this.volume = new ctx.TomoVisVolume({}, sandbox.colormaps, print);
@@ -117,7 +126,7 @@ class VispyScenarioPlayer {
     const tab   = Object.create(ctx.TomoVisVolumeTab.prototype);
     const radio = () => ({ checked: false, set(state) { if ("checked" in state) this.checked = state.checked; } });
     tab.volume                    = this.volume;
-    tab.print                     = (...lines) => this.printed.push(...lines.map(String));
+    tab.print                     = (...lines) => this.printed.push(...VispyScenarioPlayer.lines(lines));
     tab.turntableCameraTab4Button = radio();
     tab.flyCameraTab4Button       = radio();
     tab.arcballCameraTab4Button   = radio();

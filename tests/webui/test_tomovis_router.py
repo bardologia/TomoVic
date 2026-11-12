@@ -305,15 +305,16 @@ def test_log_lines_reach_the_console_log(server):
 
 
 def test_log_lines_keep_vispy_error_levels(server):
-    """Browser lines carrying vispy's "ERROR:" or "WARNING:" level are logged at that level, others at info (D-7, F-153)."""
+    """Browser lines carrying vispy's "ERROR:" or "WARNING:" level, the multi-line traceback entry included, are logged at that level, others at info (D-7, F-153)."""
 
     client, logger, _ = server
     sid               = client.session()
-    lines             = ["ERROR: Invoking FlyCamera.on_timer for TimerEvent: TypeError: x", "WARNING: y", "ISO threshold: 2.0", "Camera: ERROR"]
+    traceback         = "WARNING: Traceback (most recent call last):\n  at VispyFlyCamera.onTimer (tomovis_vispy.js:1:1)\nTypeError: x"
+    lines             = [traceback, "ERROR: Invoking FlyCamera.on_timer for Event", "ERROR: Invoking FlyCamera.on_timer repeat 2", "WARNING: y", "ISO threshold: 2.0", "Camera: ERROR"]
 
     assert client.post("log", {"sid": sid, "lines": lines})[0] == 200
     levels = {record["message"]: record["level"] for record in logger.recent()}
-    assert [levels["TomoVis: " + line] for line in lines] == ["ERROR", "WARN", "INFO", "INFO"]
+    assert [levels["TomoVis: " + line] for line in lines] == ["WARN", "ERROR", "ERROR", "WARN", "INFO", "INFO"]
 
 
 def test_scripts_routes(server):
