@@ -71,6 +71,7 @@ class TomoVisSessionError extends Error {
 
 class TomoVisSession {
   static BUSY_DELAY_MS = 250;
+  static HEARTBEAT_MS  = 60000;
   static ROOT          = "/api/tomovis";
 
   constructor(bus) {
@@ -87,6 +88,7 @@ class TomoVisSession {
     this.dialogSink = null;
     this.onExpired  = null;
     this.closed     = false;
+    this.heartbeat  = null;
   }
 
   get sid() {
@@ -104,9 +106,19 @@ class TomoVisSession {
 
     const decoded = await this._binary(`${TomoVisSession.ROOT}/session`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, webgl2: this.webgl2 }) });
     this._sid = decoded.header.sid;
+    this._beat();
     this._applyWindow(decoded);
     this._pump();
     return this._snapshot;
+  }
+
+  _beat() {
+    clearInterval(this.heartbeat);
+    this.heartbeat = setInterval(() => this._post("alive", { sid: this._sid }), TomoVisSession.HEARTBEAT_MS);
+  }
+
+  _post(route, body) {
+    navigator.sendBeacon(`${TomoVisSession.ROOT}/${route}`, new Blob([JSON.stringify(body)], { type: "application/json" }));
   }
 
   send(event, { coalesce } = {}) {
@@ -166,7 +178,9 @@ class TomoVisSession {
   close() {
     if (!this._sid || this.closed) return;
     this.closed = true;
-    navigator.sendBeacon(`${TomoVisSession.ROOT}/close`, new Blob([JSON.stringify({ sid: this._sid })], { type: "application/json" }));
+    clearInterval(this.heartbeat);
+    this.heartbeat = null;
+    this._post("close", { sid: this._sid });
     this._drop("TomoVis session closed");
   }
 

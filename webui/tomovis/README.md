@@ -25,7 +25,7 @@ The server runs the copied slots in the original order with the original numpy c
 | `scripts.py` | server halves of `Scripts/SlicerMatplotlib.py` and `Scripts/VolumeRendering.py` |
 | `events.py` | event validation and dispatch, snapshot controls |
 | `envelope.py` | TVE1 binary responses |
-| `session_store.py` | page sessions (LRU of 4, one lock per page) |
+| `session_store.py` | page sessions, each kept until its page closes it or stops sending heartbeats; one lock per page |
 
 The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
 
@@ -39,6 +39,12 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
 - **D-3.** Imports are atomic. A read failure shows the critical message `Import error` /
   `Could not import file:\n<error>` and keeps the previous cube. Files are always closed.
 - **D-4.** File dialogs browse the server, and every save writes on the server.
+- **D-8.** A TomoVis window keeps its state until it is closed, however many other windows open. Each
+  page holds one session on the server and sends a heartbeat every 60 s, also while the tab is hidden.
+  The session ends when the page closes (its `pagehide` beacon) or when the page has sent nothing for
+  20 minutes, which only happens when the tab crashed, was killed, or was frozen by the browser that long.
+  A request on a dropped session opens a fresh window with the warning
+  `TomoVis session expired; a new window was opened.`
 - **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. Lines the browser
   posts to `log` keep vispy's level: `ERROR: ...` lines are logged at error, `WARNING: ...` at warning, the
   rest at info (`TomoVisConsole.relay`). A browser-side vispy callback error is logged as vispy's
@@ -83,6 +89,7 @@ use `application/octet-stream` and are TVE1 envelopes. Errors come back as JSON 
 |---|---|---|
 | POST `session` | `{kind: "window" \| "scripts", webgl2: bool}` | envelope `{sid, snapshot}` (`snapshot` is null for scripts); 400 for a bad kind |
 | POST `close` | `{sid}` | `{ok: true}` |
+| POST `alive` | `{sid}` (the page's heartbeat, sent with `sendBeacon` every 60 s) | `{ok: true}`; 404 unknown session |
 | POST `event` | `{sid, seq, event}` | envelope, header below; 404 unknown session, 400 invalid event, 409 stale dialog token |
 | POST `figure` | `{sid, seq, figure, op, ...}` | envelope `{seq, figure, messages, result, dialogs}`; 404 unknown figure |
 | GET `tables` | | `{colortables: {names[19], tables[19][256][3], default: 9, blue_red_yellow: 4}, plot_colormaps: {names[71], default: "jet"}}` |

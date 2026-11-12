@@ -1,16 +1,21 @@
 """Per-page TomoVis sessions: one copied window, or the script figures, per browser page.
 
-The store is a small LRU under a lock; every request on one entry holds the
-entry's own lock, so the events of one page run strictly in order while other
-pages proceed. Each window holds one cube, so the capacity bounds the memory
-the TomoVis page can take on the console host.
+A TomoVis window keeps its cube, ROI, plots and controls until the user
+closes it, however many other windows open. The store therefore keeps a
+session until its page closes it (the page's close beacon), and drops a
+session only when its page has sent no request and no heartbeat for
+``IDLE_LIMIT`` seconds, which happens only when the page is gone without
+closing (a crashed or killed tab). An open page sends a heartbeat every
+minute, also while it is hidden. Every request on one entry holds the
+entry's own lock, so the events of one page run strictly in order while
+other pages proceed.
 """
 
 from __future__ import annotations
 
 import secrets
 import threading
-from collections import OrderedDict
+import time
 
 from tomovis.figure_host import TomoVisFigure
 from tomovis.window      import TomoVisWindow
@@ -27,6 +32,7 @@ class TomoVisSessionEntry:
         window  : The TomoVis window, None for a scripts session.
         figures : Figure id to TomoVisFigure for figures outside the window (export window, script figure).
         scripts : Loaded script data keyed by script name.
+        seen    : time.monotonic() of the page's last request or heartbeat, in seconds.
     """
 
     def __init__(self, sid: str, kind: str, window: TomoVisWindow | None) -> None:
@@ -44,6 +50,7 @@ class TomoVisSessionEntry:
         self.window  = window
         self.figures = {}
         self.scripts = {}
+        self.seen    = time.monotonic()
 
     def figure(self, name: str) -> TomoVisFigure:
         """Returns a figure of this session by id.
@@ -58,35 +65,44 @@ class TomoVisSessionEntry:
 
 
 class TomoVisSessions:
-    """LRU store of page sessions.
+    """Store of page sessions, kept until their page closes or stops sending heartbeats.
 
     Attributes:
-        CAPACITY : Default maximum number of live sessions.
-        KINDS    : Session kinds the store opens.
-        logger   : Console logger.
-        capacity : Maximum number of live sessions of this store.
-        entries  : Session id to entry, least recently used first.
-        lock     : Guards ``entries``.
+        IDLE_LIMIT : Default seconds without a request or heartbeat after which a session's page counts as gone.
+        KINDS      : Session kinds the store opens.
+        logger     : Console logger.
+        idle_limit : Seconds without a request or heartbeat after which this store drops a session.
+        entries    : Session id to entry.
+        lock       : Guards ``entries``.
     """
 
-    CAPACITY = 4
-    KINDS    = ("window", "scripts")
+    IDLE_LIMIT = 1200.0
+    KINDS      = ("window", "scripts")
 
-    def __init__(self, logger: WebLogger, capacity: int = CAPACITY) -> None:
+    def __init__(self, logger: WebLogger, idle_limit: float = IDLE_LIMIT) -> None:
         """Creates an empty store.
 
         Args:
-            logger   : Console logger.
-            capacity : Maximum number of sessions kept.
+            logger     : Console logger.
+            idle_limit : Seconds without a request or heartbeat after which a session is dropped.
         """
 
-        self.logger   = logger
-        self.capacity = capacity
-        self.entries  = OrderedDict()
-        self.lock     = threading.Lock()
+        self.logger     = logger
+        self.idle_limit = idle_limit
+        self.entries    = {}
+        self.lock       = threading.Lock()
+
+    def dropGone(self) -> None:
+        """Drops the sessions whose page sent nothing for longer than the idle limit; the caller holds ``lock``."""
+
+        now  = time.monotonic()
+        gone = [sid for sid, entry in self.entries.items() if now - entry.seen > self.idle_limit]
+        for sid in gone:
+            del self.entries[sid]
+            self.logger.info(f"TomoVis: closed the page session {sid[:8]}, whose page sent nothing for {self.idle_limit:.0f} s")
 
     def create(self, kind: str, webgl2: bool) -> TomoVisSessionEntry:
-        """Opens a session, dropping the least recently used one beyond the capacity.
+        """Opens a session after dropping the sessions whose page is gone.
 
         Args:
             kind   : "window" or "scripts".
@@ -109,22 +125,20 @@ class TomoVisSessions:
         entry = TomoVisSessionEntry(sid, kind, window)
 
         with self.lock:
+            self.dropGone()
             self.entries[sid] = entry
-            while len(self.entries) > self.capacity:
-                dropped, _ = self.entries.popitem(last=False)
-                self.logger.info(f"TomoVis: closed the least recently used page session {dropped[:8]}")
         return entry
 
     def get(self, sid: str) -> TomoVisSessionEntry:
-        """Returns a session and marks it most recently used.
+        """Returns a session and records that its page is alive.
 
         Raises:
             KeyError : If the session does not exist (closed or dropped).
         """
 
         with self.lock:
-            entry = self.entries[sid]
-            self.entries.move_to_end(sid)
+            entry      = self.entries[sid]
+            entry.seen = time.monotonic()
             return entry
 
     def close(self, sid: str) -> None:

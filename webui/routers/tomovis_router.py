@@ -1,10 +1,11 @@
 """API routes of the TomoVis page (/api/tomovis).
 
-Opens and closes page sessions, applies window events and figure operations
-and answers with TVE1 envelopes, serves the colour tables, the prepared 3D
-volume, the session metadata and directory listings, writes exported files
-on the server, records browser-side prints, and runs the two standalone
-scripts' server halves. The API is documented in webui/tomovis/README.md.
+Opens and closes page sessions and keeps them alive on the page's
+heartbeat, applies window events and figure operations and answers with
+TVE1 envelopes, serves the colour tables, the prepared 3D volume, the
+session metadata and directory listings, writes exported files on the
+server, records browser-side prints, and runs the two standalone scripts'
+server halves. The API is documented in webui/tomovis/README.md.
 """
 
 from __future__ import annotations
@@ -65,6 +66,7 @@ class TomoVisRouter(SubRouter):
 
         table.add("POST", "/api/tomovis/session",       self.session)
         table.add("POST", "/api/tomovis/close",         self.close)
+        table.add("POST", "/api/tomovis/alive",         self.alive)
         table.add("POST", "/api/tomovis/event",         self.event)
         table.add("POST", "/api/tomovis/figure",        self.figure)
         table.add("GET",  "/api/tomovis/tables",        self.tables)
@@ -130,6 +132,13 @@ class TomoVisRouter(SubRouter):
         sid = exchange.body.get("sid")
         if isinstance(sid, str):
             self.sessions.close(sid)
+        exchange.send_json({"ok": True})
+
+    def alive(self, exchange: HttpExchange) -> None:
+        """Records a page's heartbeat (sendBeacon every minute) so its session is kept; 404 for an unknown session."""
+
+        if self.entry(exchange, exchange.body.get("sid")) is None:
+            return
         exchange.send_json({"ok": True})
 
     def event(self, exchange: HttpExchange) -> None:

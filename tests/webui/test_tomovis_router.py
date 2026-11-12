@@ -2,7 +2,7 @@
 
 A threaded HTTP server with the console's request handler and a router
 holding only the TomoVis sub-router serves every route once or more: page
-sessions and their LRU, window events with the TVE1 envelope, figure
+sessions and their lifetime, window events with the TVE1 envelope, figure
 operations, tables, the 3D volume, metadata, directory listings, written
 exports, HDF5 export, browser log lines and both scripts, plus the 400, 404
 and 409 answers.
@@ -14,6 +14,7 @@ import io
 import json
 import struct
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -338,19 +339,26 @@ def test_scripts_routes(server):
     assert client.post("script/slicer", {"sid": client.session(), "path": "x"})[0] == 400
 
 
-def test_close_and_least_recently_used_eviction(server):
-    """Closing drops a session; a fifth session drops the least recently used one."""
+def test_sessions_live_until_closed_or_gone(server):
+    """Opening more pages never drops an open page's session; close drops it, and a session whose page sent nothing for the idle limit is dropped at the next open."""
 
-    client, _, _ = server
-    first        = client.session()
-    others       = [client.session() for _ in range(3)]
+    client, _, sessions = server
+    first               = client.session()
+    others              = [client.session() for _ in range(8)]
+    sync                = {"seq": 1, "event": {"type": "sync"}}
 
-    assert client.post("event", {"sid": first, "seq": 1, "event": {"type": "sync"}})[0] == 200
+    assert all(client.post("event", {"sid": sid, **sync})[0] == 200 for sid in [first, *others])
+    assert client.post("close", {"sid": first})[0] == 200
+    assert client.post("event", {"sid": first, **sync})[0] == 404
+    assert client.post("close", {"sid": "unknown"})[0] == 200
 
+    sessions.idle_limit = 0.4
+    time.sleep(0.25)
+    assert client.post("alive", {"sid": others[0]})[0] == 200
+    time.sleep(0.25)
     client.session()
 
-    assert client.post("event", {"sid": others[0], "seq": 1, "event": {"type": "sync"}})[0] == 404
-    assert client.post("event", {"sid": first, "seq": 1, "event": {"type": "sync"}})[0] == 200
-    assert client.post("close", {"sid": first})[0] == 200
-    assert client.post("event", {"sid": first, "seq": 1, "event": {"type": "sync"}})[0] == 404
-    assert client.post("close", {"sid": "unknown"})[0] == 200
+    assert client.post("event", {"sid": others[0], **sync})[0] == 200
+    assert client.post("event", {"sid": others[1], **sync})[0] == 404
+    assert client.post("alive", {"sid": others[1]})[0] == 404
+
