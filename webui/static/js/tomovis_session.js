@@ -150,6 +150,18 @@ class TomoVisSession {
     return Api.get(`${TomoVisSession.ROOT}/fs?${query.toString()}`);
   }
 
+  computer() {
+    return Api.get(`${TomoVisSession.ROOT}/computer`);
+  }
+
+  makeFolder(path) {
+    return Api.post(`${TomoVisSession.ROOT}/mkdir`, { sid: this._sid, path });
+  }
+
+  renameEntry(path, old, name) {
+    return Api.post(`${TomoVisSession.ROOT}/rename`, { sid: this._sid, path, old, new: name });
+  }
+
   writeFile(path, blob, kind) {
     const type = kind === "image" ? "image/png" : "application/octet-stream";
     const body = blob.type === type ? blob : new Blob([blob], { type });

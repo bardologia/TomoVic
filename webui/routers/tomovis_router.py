@@ -3,9 +3,10 @@
 Opens and closes page sessions and keeps them alive on the page's
 heartbeat, applies window events and figure operations and answers with
 TVE1 envelopes, serves the colour tables, the prepared 3D volume, the
-session metadata and directory listings, writes exported files on the
-server, records browser-side prints, and runs the two standalone scripts'
-server halves. The API is documented in webui/tomovis/README.md.
+session metadata and directory listings, creates and renames folders for
+the file dialog, writes exported files on the server, records
+browser-side prints, and runs the two standalone scripts' server halves.
+The API is documented in webui/tomovis/README.md.
 """
 
 from __future__ import annotations
@@ -73,6 +74,9 @@ class TomoVisRouter(SubRouter):
         table.add("GET",  "/api/tomovis/volume",        self.volume)
         table.add("GET",  "/api/tomovis/metadata",      self.metadata)
         table.add("GET",  "/api/tomovis/fs",            self.fs)
+        table.add("GET",  "/api/tomovis/computer",      self.computer)
+        table.add("POST", "/api/tomovis/mkdir",         self.mkdir)
+        table.add("POST", "/api/tomovis/rename",        self.rename)
         table.add("POST", "/api/tomovis/write",         self.write)
         table.add("POST", "/api/tomovis/export_hdf5",   self.export_hdf5)
         table.add("POST", "/api/tomovis/log",           self.log)
@@ -269,6 +273,33 @@ class TomoVisRouter(SubRouter):
             exchange.send_json({"ok": False, "error": str(error)}, 400)
             return
         exchange.send_json(listing)
+
+    def computer(self, exchange: HttpExchange) -> None:
+        """Answers with the file dialog's "Computer" place: the root."""
+
+        exchange.send_json(self.lister.computer())
+
+    def mkdir(self, exchange: HttpExchange) -> None:
+        """Creates "New Folder" (or "New Folder2", ...) for the file dialog's Create New Folder; a folder that cannot be made answers ok false, which QFileDialog ignores."""
+
+        if self.entry(exchange, exchange.body.get("sid")) is None:
+            return
+        path = exchange.body.get("path")
+        if not isinstance(path, str):
+            exchange.send_json({"ok": False, "error": "path must be a string"}, 400)
+            return
+        exchange.send_json(self.lister.mkdir(path))
+
+    def rename(self, exchange: HttpExchange) -> None:
+        """Renames a file dialog entry in place; a refused name answers 200 with ok false and QFileSystemModel's message."""
+
+        body = exchange.body
+        if self.entry(exchange, body.get("sid")) is None:
+            return
+        if not all(isinstance(body.get(key), str) for key in ("path", "old", "new")):
+            exchange.send_json({"ok": False, "error": "path, old and new must be strings"}, 400)
+            return
+        exchange.send_json(self.lister.rename(body["path"], body["old"], body["new"]))
 
     def write(self, exchange: HttpExchange) -> None:
         """Writes an exported image (PNG body) or text file (raw body) on the server."""

@@ -258,6 +258,47 @@ def test_directory_listing(server, tmp_path):
     assert json.loads(client.request("GET", "fs")[1])["path"] == listing["home"]
 
 
+def test_directory_listing_type_column_and_computer(server, tmp_path):
+    """The Type column reads as Qt 5.15's file dialog does; the root's parent is the Computer place, which lists the root as a Drive."""
+
+    client, _, _ = server
+    for name in ("a.npy", "b.HD5", "c", "d.tar.gz"):
+        (tmp_path / name).write_text("x")
+    (tmp_path / "sub.d").mkdir()
+
+    listing = json.loads(client.request("GET", f"fs?path={tmp_path}")[1])
+    root    = json.loads(client.request("GET", "fs?path=/")[1])
+    place   = json.loads(client.request("GET", "computer")[1])
+
+    assert [(entry["name"], entry["type"]) for entry in listing["entries"]] == [("sub.d", "Folder"), ("a.npy", "npy File"), ("b.HD5", "HD5 File"), ("c", "File"), ("d.tar.gz", "gz File")]
+    assert listing["writable"] is True and listing["computer"] is False
+    assert root["parent"] == "" and root["writable"] is False
+    assert place["computer"] is True and [(entry["name"], entry["dir"], entry["type"]) for entry in place["entries"]] == [("/", True, "Drive")]
+
+
+def test_new_folder_and_rename(server, tmp_path):
+    """Create New Folder names folders as QFileDialog does; a rename onto an existing or invalid name answers QFileSystemModel's message."""
+
+    client, _, _ = server
+    sid          = client.session("scripts")
+    made         = [json.loads(client.post("mkdir", {"sid": sid, "path": str(tmp_path)})[1])["name"] for _ in range(3)]
+
+    assert made == ["New Folder", "New Folder2", "New Folder3"]
+    assert json.loads(client.post("rename", {"sid": sid, "path": str(tmp_path), "old": "New Folder", "new": "renamed"})[1])["entry"]["name"] == "renamed"
+    assert json.loads(client.post("mkdir", {"sid": sid, "path": str(tmp_path)})[1])["name"] == "New Folder"
+
+    status, raw = client.post("rename", {"sid": sid, "path": str(tmp_path), "old": "New Folder2", "new": "renamed"})
+    refused     = json.loads(raw)
+    assert status == 200 and refused == {"ok": False, "title": "Invalid filename", "text": "<b>The name \"renamed\" cannot be used.</b><p>Try using another name, with fewer characters or no punctuation marks."}
+    assert not json.loads(client.post("rename", {"sid": sid, "path": str(tmp_path), "old": "New Folder2", "new": "a/b"})[1])["ok"]
+    assert not json.loads(client.post("rename", {"sid": sid, "path": str(tmp_path), "old": "New Folder2", "new": ""})[1])["ok"]
+    assert json.loads(client.post("rename", {"sid": sid, "path": str(tmp_path), "old": "New Folder2", "new": "New Folder2"})[1])["ok"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["New Folder", "New Folder2", "New Folder3", "renamed"]
+    assert json.loads(client.post("mkdir", {"sid": sid, "path": "relative"})[1])["ok"] is False
+    assert client.post("mkdir", {"sid": sid, "path": 3})[0] == 400
+    assert client.post("mkdir", {"sid": "unknown", "path": str(tmp_path)})[0] == 404
+
+
 def test_write_route(server, tmp_path):
     """PNG is written as sent, JPEG re-encoded, raw bytes as is; unknown extensions and relative paths are refused."""
 

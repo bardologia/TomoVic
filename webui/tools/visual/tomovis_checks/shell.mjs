@@ -28,7 +28,7 @@ class ShellChecks {
   async waitDir(dir) {
     const ok = await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog") && document.querySelector(".tv-filedialog").dataset.dir === d, dir, { timeout: 10000 }).then(() => true).catch(() => false);
     if (ok) return;
-    const state = await this.page.evaluate(() => [...document.querySelectorAll(".tv-filedialog")].map((d) => ({ dir: d.dataset.dir, listing: d.dataset.listing, lookin: d.querySelector(".tv-filedialog__lookin").value, title: d.querySelector(".tv-modal__title").textContent, modals: window.TomoVisModal.stack.length })));
+    const state = await this.page.evaluate(() => [...document.querySelectorAll(".tv-filedialog")].map((d) => ({ dir: d.dataset.dir, listing: d.dataset.listing, lookin: d.querySelector(".tv-filedialog__lookin").dataset.path, title: d.querySelector(".tv-modal__title").textContent, modals: window.TomoVisModal.stack.length })));
     throw new Error(`file dialog did not list ${dir}: ${JSON.stringify(state)}`);
   }
 
@@ -214,12 +214,12 @@ class ShellChecks {
     await this.run.check("F-010", "Import > npy chooser lists only *.npy and folders; Cancel is inert", async () => {
       const before = await H.snapshot(this.page);
       await H.menu(this.page, "File", "Import", "npy");
-      await this.waitDialog(".tv-filedialog");
-      await this.page.fill(".tv-filedialog__lookin", this.inputs);
-      await this.page.press(".tv-filedialog__lookin", "Enter");
+      await this.waitDialog(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
       await this.waitDir(this.inputs);
       await this.page.waitForTimeout(400);
-      const look   = await this.page.inputValue(".tv-filedialog__lookin");
+      const look   = await this.page.getAttribute(".tv-filedialog__lookin", "data-path");
       const names  = await this.page.$$eval(".tv-filedialog tbody tr", (rows) => rows.map((r) => [r.classList.contains("is-dir"), r.querySelector(".tv-filedialog__cell--name").textContent]));
       const title  = await this.modalTitle();
       const filter = await this.page.textContent(".tv-filedialog .tv-filedialog__filter .tv-combo__text");
@@ -239,11 +239,11 @@ class ShellChecks {
 
     await this.run.check("F-010 nav", "file dialog navigation: Parent, Back, Forward, typed directory", async () => {
       await H.menu(this.page, "File", "Import", "hd5");
-      await this.waitDialog(".tv-filedialog");
-      await this.page.fill(".tv-filedialog__lookin", this.inputs);
-      await this.page.press(".tv-filedialog__lookin", "Enter");
+      await this.waitDialog(".tv-filedialog[data-dir]");
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
       await this.waitDir(this.inputs);
-      const look = () => this.page.inputValue(".tv-filedialog__lookin");
+      const look = () => this.page.getAttribute(".tv-filedialog__lookin", "data-path");
       await this.page.click(".tv-filedialog__parent");
       await this.page.waitForFunction((dir) => document.querySelector(".tv-filedialog").dataset.dir && document.querySelector(".tv-filedialog").dataset.dir !== dir, this.inputs);
       const parent = await look();

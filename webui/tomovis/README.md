@@ -21,7 +21,7 @@ The server runs the copied slots in the original order with the original numpy c
 | `figure_options.py` | `SubplotTool` (SubplotToolQt on stand-in spin boxes), `FigureOptionsEditor` (figure_edit) |
 | `exporters.py` | writers for pyqtgraph Export dialog files, the HDF5 exporter and the Matplotlib Window exporter |
 | `qt_image_writer.py` | `QImage.save` for the 16 image formats QImageWriter offered (Qt 5.15.15): its PBM/PGM/XBM/XPM/WBMP/ICO/ICNS writers, mono dithering and smooth scaling, and Pillow with Qt's settings for BMP, JPEG, PPM, TIFF and WebP |
-| `directory_lister.py` | listing for the file dialog |
+| `directory_lister.py` | listing for the file dialog with Qt's Type column and the Computer place, Create New Folder and the in-place rename |
 | `scripts.py` | server halves of `Scripts/SlicerMatplotlib.py` and `Scripts/VolumeRendering.py` |
 | `events.py` | event validation and dispatch, snapshot controls |
 | `envelope.py` | TVE1 binary responses |
@@ -42,7 +42,16 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   within one run of TomoVis, a dialog opened without a folder of its own starts in the last folder any
   dialog of the page browsed to, also when that dialog was cancelled or its save failed. The first dialog
   of a page starts in the server user's home folder, where the original starts in the folder TomoVis was
-  launched from. A reload starts over, as a new start of TomoVis does.
+  launched from. A reload starts over, as a new start of TomoVis does. The dialog is Qt's non-native
+  QFileDialog at its 645x436 size: a Look in drop-down (the folder, its ancestors, Computer, then Recent
+  Places), Back, Forward, Parent Directory, Create New Folder (`New Folder`, `New Folder2`, ... renamed in
+  place), List View and Detail View, the Computer and home places, and the columns Name, Size, Type and
+  Date Modified (`M/d/yy h:mm AP`). Recent Places and the view mode live in the browser's `localStorage`
+  and are written when a dialog closes. Qt keeps them in `QtProject.conf` and writes them when a dialog is
+  destroyed, which for TomoVis's four import dialogs happens only when the window closes, because they
+  stay alive as children of the window. Not carried over: the list's right-click menu (Rename, Delete,
+  Show hidden files, New Folder), resizing the columns and the sidebar, file name completion, and
+  bookmarking folders by dragging them onto the sidebar.
 - **D-8.** A TomoVis window keeps its state until it is closed, however many other windows open. Each
   page holds one session on the server and sends a heartbeat every 60 s, also while the tab is hidden.
   The session ends when the page closes (its `pagehide` beacon) or when the page has sent nothing for
@@ -103,7 +112,10 @@ use `application/octet-stream` and are TVE1 envelopes. Errors come back as JSON 
 | GET `tables` | | `{colortables: {names[19], tables[19][256][3], default: 9, blue_red_yellow: 4}, plot_colormaps: {names[71], default: "jet"}}` |
 | GET `volume?sid=&serial=` | | envelope `{serial, shape, dtype: "float32"}` with blob `volume`; 404 for a stale serial |
 | GET `metadata?sid=` | | `getCurrentMetadata()` |
-| GET `fs?path=&pattern=*.npy&pattern=...` | empty path means home | `{ok, path, parent, home, entries: [{name, dir, size, mtime}]}`; `{ok: false, error}` for a folder that is missing or cannot be read; 400 for a relative path |
+| GET `fs?path=&pattern=*.npy&pattern=...` | empty path means home | `{ok, path, computer: false, parent, home, writable, entries: [{name, dir, size, mtime, type}]}` (`parent` is `""`, meaning Computer, for `/`); `{ok: false, error}` for a folder that is missing or cannot be read; 400 for a relative path |
+| GET `computer` | | the Computer place: `{ok, path: null, computer: true, parent: null, home, writable: false, entries: [/ as a "Drive"]}` |
+| POST `mkdir` | `{sid, path}` | `{ok, name, entry}` with the first free name of `New Folder`, `New Folder2`, ...; `{ok: false, error}` when it cannot be made |
+| POST `rename` | `{sid, path, old, new}` | `{ok, entry}`; `{ok: false, title: "Invalid filename", text}` (QFileSystemModel's rich text) for an empty, taken or invalid name |
 | POST `write?sid=&path=&kind=image\|bytes` | body `image/png` or `application/octet-stream` | `{ok, path}`; 400 `{ok: false, error}` (unknown image extension, missing directory, relative path) |
 | POST `export_hdf5` | `{sid, path, name, column_mode, curves: [{x, y, name?}]}` | `{ok, path}` |
 | POST `log` | `{sid, lines: [str]}` | `{ok: true}` |

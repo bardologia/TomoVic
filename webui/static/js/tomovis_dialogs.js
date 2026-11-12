@@ -134,21 +134,64 @@ class TomoVisMessageBox {
     question    : '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#5b8def"/><text x="16" y="22.5" text-anchor="middle" font-size="18" font-weight="700" font-family="sans-serif" fill="#fff">?</text></svg>',
   };
 
-  static show({ level = "information", title = "", text = "", buttons = ["OK"], escape = null, defaultButton = null, layer = null } = {}) {
+  static richText(text) {
+    const box   = TomoVisInput.el("div", "tv-messagebox__text is-rich");
+    let target  = box;
+    let bold    = null;
+    for (const part of text.split(/(<\/?b>|<p>)/)) {
+      if (part === "<b>") {
+        bold = TomoVisInput.el("b");
+        target.append(bold);
+      } else if (part === "</b>") {
+        bold = null;
+      } else if (part === "<p>") {
+        target = TomoVisInput.el("p");
+        box.append(target);
+      } else if (part) {
+        (bold || target).append(document.createTextNode(part));
+      }
+    }
+    return box;
+  }
+
+  static show({ level = "information", title = "", text = "", rich = false, buttons = ["OK"], escape = null, defaultButton = null, layer = null } = {}) {
     const modal = new TomoVisModal({ title, className: "tv-messagebox", buttons, layer, escape: escape || (buttons.length === 1 ? buttons[0] : buttons[buttons.length - 1]), defaultButton });
     const icon  = TomoVisInput.el("div", `tv-messagebox__icon is-${level}`);
     icon.innerHTML = TomoVisMessageBox.ICONS[level];
     modal.el.dataset.level = level;
-    modal.body.append(icon, TomoVisInput.el("div", "tv-messagebox__text", text));
+    modal.body.append(icon, rich ? TomoVisMessageBox.richText(text) : TomoVisInput.el("div", "tv-messagebox__text", text));
     return modal.open();
   }
 }
 
 class TomoVisFileDialog {
-  static COLUMNS = [["name", "Name"], ["size", "Size"], ["mtime", "Date Modified"]];
+  static COMPUTER    = "computer:";
+  static HISTORY_KEY = "tomovis.fileDialogHistory";
+  static VIEW_KEY    = "tomovis.fileDialogViewMode";
+  static VIEWS       = ["Detail", "List"];
+  static COLUMNS     = [["name", "Name", 347], ["size", "Size", 81], ["type", "Type", 87], ["mtime", "Date Modified", 144]];
+  static NOT_FOUND   = "\nDirectory not found.\nPlease verify the correct directory name was given.";
 
   static open(request) {
     return new TomoVisFileDialog(request).run();
+  }
+
+  static stored(key, valid, fallback) {
+    let value;
+    try {
+      value = JSON.parse(window.localStorage.getItem(key));
+    } catch (error) {
+      return fallback;
+    }
+    return valid(value) ? value : fallback;
+  }
+
+  static store(key, value) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      return;
+    }
   }
 
   static parseFilter(filter) {
@@ -190,8 +233,39 @@ class TomoVisFileDialog {
   }
 
   static formatTime(seconds) {
-    const date = new Date(seconds * 1000);
-    return date.toLocaleString(undefined, { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const date  = new Date(seconds * 1000);
+    const hours = date.getHours();
+    return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear() % 100).padStart(2, "0")} ${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${hours < 12 ? "AM" : "PM"}`;
+  }
+
+  static context = null;
+
+  static elideMiddle(text, width, context) {
+    if (context.measureText(text).width <= width) return text;
+    const cut = (keep) => `${text.slice(0, Math.ceil(keep / 2))}\u2026${text.slice(text.length - Math.floor(keep / 2))}`;
+    let low  = 0;
+    let high = text.length;
+    while (low < high) {
+      const keep = Math.ceil((low + high) / 2);
+      if (context.measureText(cut(keep)).width <= width) low = keep;
+      else high = keep - 1;
+    }
+    return cut(low);
+  }
+
+  static elide(nodes) {
+    const over = nodes.filter((node) => node.scrollWidth > node.clientWidth);
+    if (!over.length) return;
+    if (!TomoVisFileDialog.context) TomoVisFileDialog.context = document.createElement("canvas").getContext("2d");
+    const context = TomoVisFileDialog.context;
+    const widths  = over.map((node) => {
+      const style = getComputedStyle(node);
+      return { font: style.font, width: node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+    });
+    over.forEach((node, i) => {
+      context.font     = widths[i].font;
+      node.textContent = TomoVisFileDialog.elideMiddle(node.textContent, widths[i].width, context);
+    });
   }
 
   constructor({ mode = "open", title = "", filters = [], selected_filter = null, directory = null, file = null, session = null, layer = null, place }) {
@@ -205,16 +279,23 @@ class TomoVisFileDialog {
     this.session  = session || TomoVisDialogs.current.ctx.session;
     this.kit      = TomoVisDialogs.current.ctx.kit;
     this.layer    = layer || TomoVisDialogs.current.ctx.layer;
+    this.recent   = TomoVisFileDialog.stored(TomoVisFileDialog.HISTORY_KEY, (v) => Array.isArray(v) && v.every((p) => typeof p === "string"), []);
+    this.viewMode = TomoVisFileDialog.stored(TomoVisFileDialog.VIEW_KEY, (v) => TomoVisFileDialog.VIEWS.includes(v), "Detail");
     this.dir      = null;
     this.home     = null;
     this.parent   = null;
+    this.writable = false;
     this.entries  = [];
+    this.view     = [];
+    this.rows     = [];
     this.selected = -1;
     this.history  = [];
     this.future   = [];
     this.sortKey  = "name";
     this.sortAsc  = true;
     this.ticket   = 0;
+    this.popup    = null;
+    this.editor   = null;
   }
 
   async run() {
@@ -228,36 +309,74 @@ class TomoVisFileDialog {
     }
     this.nameField.focus();
     const result = await opened;
+    this.closePopup();
+    this.remember();
     return result || { accepted: false, path: null, filter: this.filter };
   }
 
   build() {
-    const body = this.modal.body;
+    this.modal.body.append(this.buildTop(), this.buildMiddle(), this.buildForm());
+    this.modal.escape = { accepted: false, path: null, filter: this.filter };
+    this.updateAccept();
+    this.updateNav();
+    this.updateViewButtons();
+  }
 
+  buildTop() {
     const top = TomoVisInput.el("div", "tv-filedialog__top");
-    top.append(TomoVisInput.el("label", "tv-label", "Look in:"));
-    this.lookIn = TomoVisInput.el("input", "tv-line tv-filedialog__lookin");
-    this.lookIn.type       = "text";
-    this.lookIn.spellcheck = false;
-    this.lookInEdited = false;
-    this.lookIn.addEventListener("input", () => { this.lookInEdited = true; });
-    this.lookIn.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
+    this.lookIn = TomoVisInput.el("div", "tv-combo tv-filedialog__lookin");
+    this.lookIn.tabIndex = 0;
+    this.lookIn.setAttribute("role", "combobox");
+    this.lookIn.setAttribute("aria-haspopup", "listbox");
+    this.lookInIcon = TomoVisInput.el("span", "tv-filedialog__icon is-dir");
+    this.lookInText = TomoVisInput.el("span", "tv-combo__text");
+    this.lookIn.append(this.lookInIcon, this.lookInText, TomoVisInput.el("span", "tv-combo__arrow"));
+    this.lookIn.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
       event.preventDefault();
-      this.lookInEdited = false;
-      this.navigate(this.lookIn.value.trim(), true);
+      this.lookIn.focus();
+      if (this.popup) this.closePopup();
+      else this.openPopup();
     });
-    this.backButton    = this.toolButton("Back", "tv-filedialog__back", () => this.back());
-    this.forwardButton = this.toolButton("Forward", "tv-filedialog__forward", () => this.forward());
-    this.parentButton  = this.toolButton("Parent Directory", "tv-filedialog__parent", () => this.toParent());
-    top.append(this.lookIn, this.backButton, this.forwardButton, this.parentButton);
+    this.lookIn.addEventListener("keydown", (event) => this.lookInKey(event));
+
+    this.backButton      = this.toolButton("Back", "tv-filedialog__back", () => this.back());
+    this.forwardButton   = this.toolButton("Forward", "tv-filedialog__forward", () => this.forward());
+    this.parentButton    = this.toolButton("Parent Directory", "tv-filedialog__parent", () => this.toParent());
+    this.newFolderButton = this.toolButton("Create New Folder", "tv-filedialog__newfolder", () => this.newFolder());
+    this.listButton      = this.toolButton("List View", "tv-filedialog__listmode", () => this.setView("List"));
+    this.detailButton    = this.toolButton("Detail View", "tv-filedialog__detailmode", () => this.setView("Detail"));
+    top.append(TomoVisInput.el("label", "tv-label", "Look in:"), this.lookIn, this.backButton, this.forwardButton, this.parentButton, this.newFolderButton, this.listButton, this.detailButton);
+    return top;
+  }
+
+  toolButton(label, className, action) {
+    const button = TomoVisInput.el("button", `tv-button tv-button--tool ${className}`);
+    button.type = "button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.addEventListener("click", action);
+    return button;
+  }
+
+  buildMiddle() {
+    const middle = TomoVisInput.el("div", "tv-filedialog__split");
+    this.sidebar = TomoVisInput.el("div", "tv-filedialog__sidebar");
+    this.sidebar.setAttribute("role", "listbox");
 
     this.listWrap = TomoVisInput.el("div", "tv-filedialog__list");
-    this.table    = TomoVisInput.el("table", "tv-filedialog__table");
+    this.listWrap.tabIndex = 0;
+    this.listWrap.addEventListener("keydown", (event) => this.listKey(event));
+
+    this.table = TomoVisInput.el("table", "tv-filedialog__table");
+    const columns = TomoVisInput.el("colgroup");
     const head    = TomoVisInput.el("thead");
     const headRow = TomoVisInput.el("tr");
     this.headers  = {};
-    for (const [key, label] of TomoVisFileDialog.COLUMNS) {
+    for (const [key, label, width] of TomoVisFileDialog.COLUMNS) {
+      const col = TomoVisInput.el("col");
+      col.style.width = `${width}px`;
+      columns.append(col);
       const th = TomoVisInput.el("th", `tv-filedialog__col--${key}`, label);
       th.addEventListener("click", () => this.sortBy(key));
       this.headers[key] = th;
@@ -265,12 +384,16 @@ class TomoVisFileDialog {
     }
     head.append(headRow);
     this.tbody = TomoVisInput.el("tbody");
-    this.table.append(head, this.tbody);
-    this.table.tabIndex = 0;
-    this.table.addEventListener("keydown", (event) => this.listKey(event));
-    this.listWrap.append(this.table);
+    this.table.append(columns, head, this.tbody);
+    this.icons = TomoVisInput.el("div", "tv-filedialog__icons");
+    this.listWrap.append(this.table, this.icons);
 
-    const grid = TomoVisInput.el("div", "tv-filedialog__grid");
+    middle.append(this.sidebar, TomoVisInput.el("div", "tv-filedialog__handle"), this.listWrap);
+    return middle;
+  }
+
+  buildForm() {
+    const form = TomoVisInput.el("div", "tv-filedialog__form");
     this.nameField = TomoVisInput.el("input", "tv-line tv-filedialog__name");
     this.nameField.type       = "text";
     this.nameField.spellcheck = false;
@@ -294,23 +417,8 @@ class TomoVisFileDialog {
     cancel.type = "button";
     cancel.addEventListener("click", () => this.modal.close({ accepted: false, path: null, filter: this.filter }));
 
-    const nameLabel   = TomoVisInput.el("label", "tv-label", this.mode === "save" ? "File name:" : "File name:");
-    const filterLabel = TomoVisInput.el("label", "tv-label", "Files of type:");
-    grid.append(nameLabel, this.nameField, this.acceptButton, filterLabel, this.filterCombo.el, cancel);
-
-    body.append(top, this.listWrap, grid);
-    this.modal.escape = { accepted: false, path: null, filter: this.filter };
-    this.updateAccept();
-    this.updateNav();
-  }
-
-  toolButton(label, className, action) {
-    const button = TomoVisInput.el("button", `tv-button tv-button--tool ${className}`);
-    button.type = "button";
-    button.title = label;
-    button.setAttribute("aria-label", label);
-    button.addEventListener("click", action);
-    return button;
+    form.append(TomoVisInput.el("label", "tv-label", "File name:"), this.nameField, this.acceptButton, TomoVisInput.el("label", "tv-label", "Files of type:"), this.filterCombo.el, cancel);
+    return form;
   }
 
   patterns() {
@@ -320,31 +428,158 @@ class TomoVisFileDialog {
   async navigate(path, record) {
     this.ticket  += 1;
     const ticket  = this.ticket;
-    const listing = await this.session.listDir(path, this.patterns());
+    const listing = path === TomoVisFileDialog.COMPUTER ? await this.session.computer() : await this.session.listDir(path, this.patterns());
     if (ticket !== this.ticket) return false;
-    if (!listing || listing.ok === false || listing.error) {
-      this.lookIn.classList.add("is-invalid");
-      setTimeout(() => this.lookIn.classList.remove("is-invalid"), 900);
-      if (this.dir !== null) this.lookIn.value = this.dir;
-      return false;
-    }
+    if (!listing || listing.ok === false || listing.error) return false;
 
-    if (record && this.dir !== null && this.dir !== listing.path) {
+    const location = listing.computer ? TomoVisFileDialog.COMPUTER : listing.path;
+    if (record && this.dir !== null && this.dir !== location) {
       this.history.push(this.dir);
       this.future = [];
     }
-    this.dir     = listing.path;
-    this.parent  = listing.parent;
-    this.home    = listing.home;
-    this.entries = listing.entries;
+    this.dir      = location;
+    this.parent   = listing.parent;
+    this.home     = listing.home;
+    this.writable = listing.writable;
+    this.entries  = listing.entries;
     this.selected = -1;
-    this.place.lastVisited = listing.path;
-    if (!this.lookInEdited) this.lookIn.value = this.dir;
+    if (!listing.computer) this.place.lastVisited = listing.path;
+
     this.modal.el.dataset.dir     = this.dir;
     this.modal.el.dataset.listing = `${this.dir}|${this.filter}`;
+    this.renderPlaces();
+    this.renderLookIn();
     this.renderList();
     this.updateNav();
     return true;
+  }
+
+  places() {
+    return [{ label: "Computer", target: TomoVisFileDialog.COMPUTER, icon: "is-computer" }, { label: TomoVisFileDialog.split(this.home).name || "/", target: this.home, icon: "is-dir" }];
+  }
+
+  renderPlaces() {
+    this.sidebar.replaceChildren(...this.places().map((place) => {
+      const row = TomoVisInput.el("div", "tv-filedialog__place");
+      row.setAttribute("role", "option");
+      row.classList.toggle("is-selected", place.target === this.dir);
+      row.append(TomoVisInput.el("span", `tv-filedialog__icon ${place.icon}`), TomoVisInput.el("span", "tv-filedialog__placename", place.label));
+      row.addEventListener("click", () => this.navigate(place.target, true));
+      return row;
+    }));
+  }
+
+  renderLookIn() {
+    const computer = this.dir === TomoVisFileDialog.COMPUTER;
+    this.lookInIcon.className = `tv-filedialog__icon ${computer ? "is-computer" : (this.dir === "/" ? "is-drive" : "is-dir")}`;
+    this.lookIn.title         = computer ? "" : this.dir;
+    this.lookIn.dataset.path  = this.dir;
+    this.lookInText.textContent = computer ? "Computer" : this.dir;
+    TomoVisFileDialog.elide([this.lookInText]);
+  }
+
+  lookInItems() {
+    const items = [];
+    if (this.dir !== TomoVisFileDialog.COMPUTER) {
+      let path = this.dir;
+      for (;;) {
+        items.push({ label: path, target: path, icon: path === "/" ? "is-drive" : "is-dir" });
+        if (path === "/") break;
+        path = TomoVisFileDialog.split(path).dir;
+      }
+    }
+    items.push({ label: "Computer", target: TomoVisFileDialog.COMPUTER, icon: "is-computer" });
+
+    const recent = [];
+    for (const path of this.recent) {
+      if (!recent.includes(path)) recent.unshift(path);
+    }
+    if (recent.length) {
+      items.push({ label: "Recent Places", target: null, icon: null });
+      recent.forEach((path) => items.push({ label: path, target: path, icon: "is-dir" }));
+    }
+    return items;
+  }
+
+  openPopup() {
+    this.items = this.lookInItems();
+    const list = TomoVisInput.el("div", "tv-combo__popup tv-filedialog__lookinpopup");
+    list.setAttribute("role", "listbox");
+    this.options = this.items.map((item, i) => {
+      const row = TomoVisInput.el("div", "tv-combo__option");
+      row.setAttribute("role", "option");
+      if (item.target === null) row.classList.add("is-disabled");
+      if (item.icon) row.append(TomoVisInput.el("span", `tv-filedialog__icon ${item.icon}`));
+      row.append(TomoVisInput.el("span", "", item.label));
+      row.addEventListener("pointerenter", () => this.hot(i));
+      row.addEventListener("click", () => this.choose(i));
+      list.append(row);
+      return row;
+    });
+    this.layer.append(list);
+    const rect = this.lookIn.getBoundingClientRect();
+    list.style.minWidth = `${rect.width}px`;
+    TomoVisInput.place(this.layer, list, rect.left, rect.bottom, { flipBottom: rect.top });
+    this.popup = list;
+    this.lookIn.classList.add("is-open");
+    this.lookIn.setAttribute("aria-expanded", "true");
+    this.hot(0);
+    this.outside = (event) => {
+      if (!list.contains(event.target) && !this.lookIn.contains(event.target)) this.closePopup();
+    };
+    document.addEventListener("pointerdown", this.outside, true);
+  }
+
+  hot(i) {
+    if (!this.popup || this.items[i].target === null) return;
+    this.hotIndex = i;
+    this.options.forEach((row, k) => row.classList.toggle("is-hot", k === i));
+    this.options[i].scrollIntoView({ block: "nearest" });
+  }
+
+  closePopup() {
+    if (!this.popup) return;
+    document.removeEventListener("pointerdown", this.outside, true);
+    this.popup.remove();
+    this.popup = null;
+    this.lookIn.classList.remove("is-open");
+    this.lookIn.setAttribute("aria-expanded", "false");
+  }
+
+  async choose(i) {
+    const item = this.items[i];
+    if (!item || item.target === null) return;
+    this.closePopup();
+    if (item.target === this.dir) return;
+    if (await this.navigate(item.target, true)) return;
+    await TomoVisMessageBox.show({ level: "warning", title: this.title, text: `${item.target}${TomoVisFileDialog.NOT_FOUND}`, layer: this.layer });
+    this.lookIn.focus();
+  }
+
+  lookInKey(event) {
+    if (!this.popup) {
+      if (event.key === " " || event.key === "Enter" || (event.altKey && event.key === "ArrowDown")) {
+        event.preventDefault();
+        this.openPopup();
+      }
+      return;
+    }
+    event.stopPropagation();
+    const moves = { ArrowDown: 1, ArrowUp: -1 };
+    if (event.key in moves) {
+      event.preventDefault();
+      let i = this.hotIndex;
+      do {
+        i += moves[event.key];
+      } while (i >= 0 && i < this.items.length && this.items[i].target === null);
+      if (i >= 0 && i < this.items.length) this.hot(i);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      this.choose(this.hotIndex);
+    } else if (event.key === "Escape" || event.key === "Tab") {
+      if (event.key === "Escape") event.preventDefault();
+      this.closePopup();
+    }
   }
 
   async back() {
@@ -364,13 +599,78 @@ class TomoVisFileDialog {
   }
 
   toParent() {
-    if (this.parent) this.navigate(this.parent, true);
+    if (this.parent === null) return;
+    this.navigate(this.parent === "" ? TomoVisFileDialog.COMPUTER : this.parent, true);
+  }
+
+  async newFolder() {
+    if (this.dir === TomoVisFileDialog.COMPUTER || !this.writable) return;
+    const made = await this.session.makeFolder(this.dir);
+    if (!made.ok || !(await this.navigate(this.dir, false))) return;
+    const index = this.view.findIndex((entry) => entry.name === made.name);
+    this.select(index);
+    this.edit(index);
+  }
+
+  edit(i) {
+    const entry = this.view[i];
+    const label = this.rows[i].querySelector(".tv-filedialog__entryname");
+    const input = TomoVisInput.el("input", "tv-line tv-filedialog__editor");
+    input.type       = "text";
+    input.spellcheck = false;
+    input.value      = entry.name;
+    label.style.flex = "1 1 auto";
+    label.replaceChildren(input);
+    this.editor = input;
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      this.editor = null;
+      label.style.flex  = "";
+      label.textContent = entry.name;
+      if (commit) this.rename(entry.name, input.value);
+      else this.listWrap.focus({ preventScroll: true });
+    };
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        finish(event.key === "Enter");
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus({ preventScroll: true });
+    input.select();
+  }
+
+  async rename(old, name) {
+    const answer = await this.session.renameEntry(this.dir, old, name);
+    if (!answer.ok) await TomoVisMessageBox.show({ level: "information", title: answer.title, text: answer.text, rich: true, layer: this.layer });
+    if (!(await this.navigate(this.dir, false))) return;
+    const kept = answer.ok ? answer.entry.name : old;
+    this.select(this.view.findIndex((entry) => entry.name === kept));
+    this.listWrap.focus({ preventScroll: true });
+  }
+
+  setView(mode) {
+    if (mode === this.viewMode) return;
+    this.viewMode = mode;
+    this.updateViewButtons();
+    this.renderList();
+  }
+
+  updateViewButtons() {
+    this.listButton.classList.toggle("is-checked", this.viewMode === "List");
+    this.detailButton.classList.toggle("is-checked", this.viewMode === "Detail");
+    this.modal.el.dataset.view = this.viewMode;
   }
 
   updateNav() {
-    this.backButton.disabled    = this.history.length === 0;
-    this.forwardButton.disabled = this.future.length === 0;
-    this.parentButton.disabled  = !this.parent;
+    this.backButton.disabled      = this.history.length === 0;
+    this.forwardButton.disabled   = this.future.length === 0;
+    this.parentButton.disabled    = this.parent === null;
+    this.newFolderButton.disabled = this.dir === TomoVisFileDialog.COMPUTER || !this.writable;
   }
 
   changeFilter(index) {
@@ -389,34 +689,56 @@ class TomoVisFileDialog {
   }
 
   sorted() {
-    const sign = this.sortAsc ? 1 : -1;
-    const key  = this.sortKey;
+    const sign   = this.sortAsc ? 1 : -1;
+    const key    = this.sortKey;
+    const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
     return [...this.entries].sort((a, b) => {
       if (a.dir !== b.dir) return a.dir ? -1 : 1;
-      if (key === "name") return sign * a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-      const diff = (a[key] || 0) - (b[key] || 0);
-      return diff !== 0 ? sign * diff : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      if (key === "name") return sign * byName(a, b);
+      const diff = key === "type" ? a.type.localeCompare(b.type) : (a[key] || 0) - (b[key] || 0);
+      return diff !== 0 ? sign * diff : byName(a, b);
     });
+  }
+
+  icon(entry) {
+    if (entry.type === "Drive") return "tv-filedialog__icon is-drive";
+    return entry.dir ? "tv-filedialog__icon is-dir" : "tv-filedialog__icon is-file";
   }
 
   renderList() {
     this.view = this.sorted();
+    const detail = this.viewMode === "Detail";
+    this.table.hidden = !detail;
+    this.icons.hidden = detail;
     this.tbody.replaceChildren();
+    this.icons.replaceChildren();
     this.rows = this.view.map((entry, i) => {
-      const row  = TomoVisInput.el("tr", entry.dir ? "is-dir" : "is-file");
-      const name = TomoVisInput.el("td", "tv-filedialog__cell--name");
-      name.append(TomoVisInput.el("span", entry.dir ? "tv-filedialog__icon is-dir" : "tv-filedialog__icon is-file"), TomoVisInput.el("span", "", entry.name));
-      row.append(name, TomoVisInput.el("td", "tv-filedialog__cell--size", entry.dir ? "" : TomoVisFileDialog.formatSize(entry.size)), TomoVisInput.el("td", "tv-filedialog__cell--mtime", TomoVisFileDialog.formatTime(entry.mtime)));
+      const name = TomoVisInput.el("span", "tv-filedialog__entryname", entry.name);
+      let row;
+      if (detail) {
+        row = TomoVisInput.el("tr", entry.dir ? "is-dir" : "is-file");
+        const cell = TomoVisInput.el("td", "tv-filedialog__cell--name");
+        const wrap = TomoVisInput.el("span", "tv-filedialog__namecell");
+        wrap.append(TomoVisInput.el("span", this.icon(entry)), name);
+        cell.append(wrap);
+        row.append(cell, TomoVisInput.el("td", "tv-filedialog__cell--size", entry.dir ? "" : TomoVisFileDialog.formatSize(entry.size)), TomoVisInput.el("td", "tv-filedialog__cell--type", entry.type), TomoVisInput.el("td", "tv-filedialog__cell--mtime", TomoVisFileDialog.formatTime(entry.mtime)));
+        this.tbody.append(row);
+      } else {
+        row = TomoVisInput.el("div", `tv-filedialog__item ${entry.dir ? "is-dir" : "is-file"}`);
+        row.append(TomoVisInput.el("span", this.icon(entry)), name);
+        this.icons.append(row);
+      }
       row.addEventListener("click", () => this.select(i));
       row.addEventListener("dblclick", () => this.openEntry(i));
-      this.tbody.append(row);
       return row;
     });
     for (const [key, th] of Object.entries(this.headers)) {
       th.classList.toggle("is-sorted", key === this.sortKey);
       th.classList.toggle("is-desc", key === this.sortKey && !this.sortAsc);
     }
-    this.listWrap.scrollTop = 0;
+    this.listWrap.scrollTop  = 0;
+    this.listWrap.scrollLeft = 0;
+    if (detail) TomoVisFileDialog.elide([...this.tbody.querySelectorAll(".tv-filedialog__entryname, td:not(.tv-filedialog__cell--name)")]);
   }
 
   select(i) {
@@ -427,14 +749,14 @@ class TomoVisFileDialog {
       this.nameField.value = entry.name;
       this.updateAccept();
     }
-    if (this.rows[i]) this.rows[i].scrollIntoView({ block: "nearest" });
+    if (this.rows[i]) this.rows[i].scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   openEntry(i) {
     const entry = this.view[i];
     if (!entry) return;
     if (entry.dir) {
-      this.navigate(TomoVisFileDialog.joinPath(this.dir, entry.name), true);
+      this.navigate(entry.type === "Drive" ? "/" : TomoVisFileDialog.joinPath(this.dir, entry.name), true);
       return;
     }
     this.nameField.value = entry.name;
@@ -442,7 +764,7 @@ class TomoVisFileDialog {
   }
 
   listKey(event) {
-    if (!this.rows || this.rows.length === 0) return;
+    if (this.editor || !this.rows || this.rows.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 1 : -1;
@@ -460,10 +782,14 @@ class TomoVisFileDialog {
     this.acceptButton.disabled = this.nameField.value.trim() === "";
   }
 
+  base() {
+    return this.dir === TomoVisFileDialog.COMPUTER ? "/" : this.dir;
+  }
+
   resolveTyped(text) {
     if (text === "~") return this.home;
     if (text.startsWith("~/")) return TomoVisFileDialog.joinPath(this.home, text.slice(2));
-    return TomoVisFileDialog.joinPath(this.dir, text);
+    return TomoVisFileDialog.joinPath(this.base(), text);
   }
 
   async lookup(path) {
@@ -504,6 +830,12 @@ class TomoVisFileDialog {
     }
 
     this.modal.close({ accepted: true, path, filter: this.filter });
+  }
+
+  remember() {
+    if (this.dir !== null && this.dir !== TomoVisFileDialog.COMPUTER && !this.recent.includes(this.dir)) this.recent.push(this.dir);
+    TomoVisFileDialog.store(TomoVisFileDialog.HISTORY_KEY, this.recent);
+    TomoVisFileDialog.store(TomoVisFileDialog.VIEW_KEY, this.viewMode);
   }
 }
 
