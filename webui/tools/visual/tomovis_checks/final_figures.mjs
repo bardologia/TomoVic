@@ -377,6 +377,7 @@ class FinalFiguresChecks {
       await this.page.waitForSelector(".tv-script-slicer__figure:not([hidden]) .tv-mpl-canvas");
       await H.waitIdle(this.page);
       const wrap = this.page.locator(".tv-script-slicer__figure .tv-mpl-canvaswrap");
+      await wrap.scrollIntoViewIfNeeded();
       const box  = await wrap.boundingBox();
       await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       await H.waitIdle(this.page);
