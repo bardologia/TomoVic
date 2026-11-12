@@ -3,11 +3,14 @@
 The store is a small LRU under a lock; every request on one entry holds the
 entry's own lock, so the events of one page run strictly in order while other
 pages proceed. Each window holds one cube, so the capacity bounds the memory
-the TomoVis page can take on the console host.
+the TomoVis page can take on the console host. A closed or dropped session
+releases its window at once instead of waiting for the cyclic garbage
+collector, because a window's signal connections form reference cycles.
 """
 
 from __future__ import annotations
 
+import gc
 import secrets
 import threading
 from collections import OrderedDict
@@ -108,11 +111,15 @@ class TomoVisSessions:
             window.drain()
         entry = TomoVisSessionEntry(sid, kind, window)
 
+        dropped = []
         with self.lock:
             self.entries[sid] = entry
             while len(self.entries) > self.capacity:
-                dropped, _ = self.entries.popitem(last=False)
-                self.logger.info(f"TomoVis: closed the least recently used page session {dropped[:8]}")
+                dropped.append(self.entries.popitem(last=False)[1])
+
+        for old in dropped:
+            self.logger.info(f"TomoVis: closed the least recently used page session {old.sid[:8]}")
+            self.release(old)
         return entry
 
     def get(self, sid: str) -> TomoVisSessionEntry:
@@ -127,8 +134,26 @@ class TomoVisSessions:
             self.entries.move_to_end(sid)
             return entry
 
+    def release(self, entry: TomoVisSessionEntry) -> None:
+        """Frees a session that left the store: its window, figures and script data, then collects the cycles they formed.
+
+        Runs outside the store lock. It waits for a request still running on
+        the entry, so that request finishes with the window it started with.
+
+        Args:
+            entry : Entry already removed from ``entries``.
+        """
+
+        with entry.lock:
+            entry.window = None
+            entry.figures.clear()
+            entry.scripts.clear()
+        gc.collect()
+
     def close(self, sid: str) -> None:
-        """Drops a session; an unknown id is ignored, as a page may close twice."""
+        """Drops a session and releases it; an unknown id is ignored, as a page may close twice."""
 
         with self.lock:
-            self.entries.pop(sid, None)
+            entry = self.entries.pop(sid, None)
+        if entry is not None:
+            self.release(entry)
