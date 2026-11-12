@@ -15,6 +15,12 @@
   --tv-surface:   #141b22;
   --tv-dialog:    #161d24;
   --tv-checked:   color-mix(in srgb, var(--accent) 18%, transparent);
+  --tv-scrim:     rgba(5, 8, 11, 0.42);
+  --tv-well:      rgba(0, 0, 0, 0.22);
+  --tv-shadow:    rgba(0, 0, 0, 0.45);
+  --tv-shadow-2:  rgba(0, 0, 0, 0.5);
+  --tv-scrollbar: rgba(200, 215, 225, 0.35);
+  --tv-splitter:  grey;
 }
 
 .page--tomovis {
@@ -381,10 +387,10 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   backdrop-filter: var(--frost);
   border: 2px solid var(--line-strong);
   border-radius: var(--r-input);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 14px 34px var(--tv-shadow);
   font-family: var(--sans);
   font-size: var(--tv-label);
-  scrollbar-color: rgba(200, 215, 225, 0.35) transparent;
+  scrollbar-color: var(--tv-scrollbar) transparent;
 }
 .tv-combo__option {
   padding: 3px 12px 3px 9px;
@@ -498,7 +504,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   backdrop-filter: var(--frost);
   border: 2px solid var(--line-strong);
   border-radius: var(--r-input);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 38px var(--tv-shadow);
   outline: none;
   user-select: none;
 }
@@ -556,7 +562,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
 .tv-modal__scrim {
   position: absolute;
   inset: 0;
-  background: rgba(5, 8, 11, 0.42);
+  background: var(--tv-scrim);
 }
 .tv-modal {
   position: absolute;
@@ -569,7 +575,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   backdrop-filter: var(--frost);
   border: 2px solid var(--line-strong);
   border-radius: var(--r-card);
-  box-shadow: 0 26px 64px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 26px 64px var(--tv-shadow-2);
   outline: none;
 }
 .tv-modal__title {
@@ -616,8 +622,8 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   overflow: auto;
   border: 2px solid var(--line);
   border-radius: var(--r-input);
-  background: rgba(0, 0, 0, 0.22);
-  scrollbar-color: rgba(200, 215, 225, 0.35) transparent;
+  background: var(--tv-well);
+  scrollbar-color: var(--tv-scrollbar) transparent;
 }
 .tv-filedialog__table { width: 100%; border-collapse: collapse; outline: none; }
 .tv-filedialog__table th {
@@ -699,7 +705,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100vw - 1100px) / 2 + 2
   height: 15px;
   margin: -7px 0 0 -7px;
   pointer-events: none;
-  background: linear-gradient(#000, #000) center / 15px 2px no-repeat, linear-gradient(#000, #000) center / 2px 15px no-repeat;
+  background: linear-gradient(var(--tv-pane), var(--tv-pane)) center / 15px 2px no-repeat, linear-gradient(var(--tv-pane), var(--tv-pane)) center / 2px 15px no-repeat;
 }
 .tv-colordialog__arrow {
   position: absolute;

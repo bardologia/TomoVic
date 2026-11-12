@@ -92,7 +92,7 @@
   position: relative;
   z-index: 2;
   flex: 0 0 2px;
-  background: grey;
+  background: var(--tv-splitter);
   cursor: row-resize;
   touch-action: none;
 }
@@ -168,7 +168,7 @@
   min-height: 60px;
   border: 2px solid var(--line);
   border-radius: var(--r-input);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--tv-well);
 }
 .tv-pg-plotopts .tv-spin { width: 92px; }
 
@@ -206,9 +206,9 @@
 .tv-pg-export__params {
   border: 2px solid var(--line);
   border-radius: var(--r-input);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--tv-well);
   overflow: auto;
-  scrollbar-color: rgba(200, 215, 225, 0.35) transparent;
+  scrollbar-color: var(--tv-scrollbar) transparent;
 }
 .tv-pg-export__tree { height: 96px; }
 .tv-pg-export__formats { height: 112px; }
@@ -241,7 +241,7 @@
 .tv-pg-export__buttons { display: flex; gap: 6px; }
 .tv-pg-export__buttons .tv-button { flex: 1 1 0; min-width: 0; }
 
-.tv-pg-mplwindow { box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45); }
+.tv-pg-mplwindow { box-shadow: 0 18px 44px var(--tv-shadow); }
 .tv-pg-mplwindow .tv-modal__title { display: flex; align-items: center; gap: 10px; padding-right: 6px; }
 .tv-pg-mplwindow__close {
   margin-left: auto;

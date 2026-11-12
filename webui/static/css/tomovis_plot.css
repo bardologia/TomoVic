@@ -168,7 +168,7 @@
 .tv-mpl-form .tv-spin { justify-self: stretch; width: auto; }
 
 .tv-mpl-options { width: 470px; }
-.tv-mpl-options .tv-modal__body { max-height: calc(100vh - 160px); overflow: auto; scrollbar-color: rgba(200, 215, 225, 0.35) transparent; }
+.tv-mpl-options .tv-modal__body { max-height: calc(100vh - 160px); overflow: auto; scrollbar-color: var(--tv-scrollbar) transparent; }
 .tv-mpl-tabs {
   display: flex;
   align-items: flex-end;
