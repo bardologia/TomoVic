@@ -185,6 +185,8 @@ class TomoVisBridge {
         this.later(TomoVisBridge.RETRY_MS);
         return;
       }
+      this.render(state);
+      this.paint({ text: `Opening ${state.current.name} in TomoVis.`, actions: [] });
       state = await this.open(state.current);
     }
 
