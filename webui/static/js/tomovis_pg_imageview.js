@@ -421,13 +421,17 @@ class PgRoiPlot {
 }
 
 class PgNormalizePanel {
+  static COLUMNS = 7;
+
   constructor(ctx, imageView) {
     this.ctx       = ctx;
     this.imageView = imageView;
     const kit      = ctx.kit;
     const group    = `tv-pg-norm-${Math.random().toString(36).slice(2)}`;
-    this.el        = TomoVisInput.el("fieldset", "tv-pg-normgroup");
-    this.el.append(TomoVisInput.el("legend", "tv-pg-normgroup__title", "Normalization"));
+    this.el        = TomoVisInput.el("div", "tv-pg-normgroup");
+    this.el.setAttribute("role", "group");
+    this.el.setAttribute("aria-label", "Normalization");
+    this.el.append(TomoVisInput.el("span", "tv-pg-normgroup__title", "Normalization"));
     const grid     = TomoVisInput.el("div", "tv-pg-normgroup__grid");
     this.el.append(grid);
 
@@ -463,7 +467,17 @@ class PgNormalizePanel {
     cell(this.blur[1].el, 4, 2);
     cell(right("T"), 5, 2);
     cell(this.blur[2].el, 6, 2);
+    this.grid      = grid;
     this.el.hidden = true;
+    new ResizeObserver(() => this.layoutColumns()).observe(grid);
+  }
+
+  layoutColumns() {
+    const space = this.grid.clientWidth;
+    if (space <= 0) return;
+    const chain = Array.from({ length: PgNormalizePanel.COLUMNS }, () => new QtLayoutStruct({ empty: false }));
+    QtLayoutEngine.geomCalc(chain, 0, chain.length, 0, space, 0);
+    this.grid.style.gridTemplateColumns = chain.map((column) => `${column.size}px`).join(" ");
   }
 
   operation() {
