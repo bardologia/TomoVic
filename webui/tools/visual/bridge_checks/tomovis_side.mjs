@@ -466,11 +466,12 @@ class TomoVisSideChecks {
       await this.use(gone.id);
       const dialogs = await this.dialogs();
       await this.T(() => window.dispatchEvent(new Event("focus")));
-      const cap   = await this.waitNotice("file moved or deleted");
+      const cap   = await this.waitNotice("gone.npy was moved or deleted");
       const state = await this.current();
       await this.page.waitForTimeout(800);
       await this.shot("tv11_deleted");
       R.equal([state.current.tomovis.ready, state.tomovis.open], [false, false], "a deleted source is not ready");
+      R.equal([state.current.state, cap.notice, cap.actions], ["error", state.current.error, []], "the caption shows the dataset's error with no action");
       R.equal([(await this.attributes()).data_shape, await this.dialogs(), await this.T(() => document.querySelectorAll(".tv-modal").length)], [this.shapes.fusar, dialogs, 0], "window, dialogs and boxes unchanged");
       return cap.notice;
     });
