@@ -1858,6 +1858,7 @@ class TomogramView {
     this.resumeView     = null;
     this.pendingUse     = null;
     this.stale          = false;
+    this.listing        = false;
     this.selectSeq      = 0;
 
     this.mapTitle   = this.topdown.closest(".cube-map").querySelector(".cube-panel-title");
@@ -1942,7 +1943,8 @@ class TomogramView {
 
   async enter(param = null) {
     const state = this._parseState(param);
-    this.active = true;
+    this.active  = true;
+    this.listing = true;
     if (state) this.pendingState = state;
 
     if (this.entered) {
@@ -1951,6 +1953,7 @@ class TomogramView {
       this.entered = true;
       await this.refresh();
     }
+    this.listing = false;
 
     if (state) this._use(state.id);
     this._applyPendingState();
@@ -1983,7 +1986,7 @@ class TomogramView {
 
   _followCurrent() {
     const current = this.bridge.state ? this.bridge.state.current : null;
-    if (!this.active || !current || this.pendingState || this.pendingUse || this.polling) return;
+    if (!this.active || this.listing || !current || this.pendingState || this.pendingUse || this.polling) return;
     if (current.id !== this.selectedId) this.select(current.id);
   }
 
