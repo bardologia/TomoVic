@@ -40,6 +40,7 @@ class RunInspector:
         LAUNCHES           : Piece key to the entry script and button label that create it.
         RUN_ONLY_NOTE      : Note of a tool that needs a preprocessing run, on an import.
         PREPROCESSING_NOTE : Note of a piece or tool a run lacks and only preprocessing writes.
+        MOVED_SOURCE       : Error of an import whose linked tomogram file was moved or deleted.
     """
 
     PIECES       = ("tomogram", "channel", "height_range", "primary", "spacing", "dem", "geometry", "passes", "polarimetry", "params")
@@ -85,6 +86,7 @@ class RunInspector:
     LAUNCHES           = {"params": ("extract_params", "Fit with Extract Params"), "polarimetry": ("extract_polarimetry", "Run Extract Polarimetry")}
     RUN_ONLY_NOTE      = "Needs a preprocessing run made from raw F-SAR data; not available for TomoVis imports."
     PREPROCESSING_NOTE = "Missing from this run; rerun Pre Process to create it."
+    MOVED_SOURCE       = "{name} was moved or deleted: {path} is gone. Put the file back, or import it again in TomoVis."
 
     def __init__(self) -> None:
         """Starts with an empty file cache."""
@@ -448,7 +450,12 @@ class RunInspector:
         channels = self.channel_count(cube)
         tomovis  = self.tomovis(record, links, pieces)
         state    = "ready" if record is None else record.state
+        error    = "" if record is None else record.error
         kind     = "run" if record is None else record.source["kind"]
+
+        if imported and state == "ready" and pieces["tomogram"]["problem"]:
+            state = "error"
+            error = self.MOVED_SOURCE.format(name=record.name, path=record.source["path"])
 
         if state == "preparing":
             stage    = progress[0] if progress is not None else record.stage
@@ -470,7 +477,7 @@ class RunInspector:
             "state"        : state,
             "stage"        : stage,
             "progress"     : float(fraction),
-            "error"        : "" if record is None else record.error,
+            "error"        : error,
             "footprint"    : None if footprint is None else list(footprint),
             "cube"         : None if cube is None else {"shape": list(cube[0]), "dtype": cube[1], "channels": channels, "bytes": self.nbytes(cube)},
             "tomogram"     : tomogram,

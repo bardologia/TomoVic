@@ -808,7 +808,7 @@ class DatasetCard extends DatasetLayer {
     if (piece.problem) row.appendChild(this._text(piece.problem, "ds-row__problem"));
     row.appendChild(form);
 
-    if (piece.addable) {
+    if (piece.addable && dataset.state !== "error") {
       const toggle = DatasetCompleter.button(this._actionLabel(key, piece), "ds-piece__toggle");
       toggle.addEventListener("click", () => this._toggleForm(dataset, key, form));
       actions.appendChild(toggle);

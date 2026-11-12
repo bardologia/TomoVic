@@ -287,3 +287,18 @@ def test_other_npy_inputs_are_ready(tmp_path, name):
 
     assert case.dataset["state"] == "ready", case.dataset["error"]
     assert np.isfinite(case.array("primary.npy")).all()
+
+
+def test_a_moved_npy_source_is_an_error_with_what_to_do(tmp_path):
+    """Renaming an imported .npy breaks its tomogram link: the dataset reads as an error naming the file, not as missing pieces."""
+
+    source  = FixtureCopies(tmp_path / "files").copy(INPUTS / "npy_real.npy", "copy.npy")
+    harness = BridgeHarness(tmp_path)
+    record  = harness.imported("npy", source)
+    source.rename(tmp_path / "files" / "renamed.npy")
+    dataset = harness.dataset(record.id)
+
+    assert dataset["state"] == "error"
+    assert dataset["error"] == f"copy.npy was moved or deleted: {source} is gone. Put the file back, or import it again in TomoVis."
+    assert dataset["pieces"]["tomogram"]["problem"] == f"file moved or deleted: {source}"
+    assert not dataset["tomovis"]["ready"]
