@@ -1689,7 +1689,8 @@ class PgImageItem {
 }
 
 class PgAxisItem {
-  static FONT = "16px 'Noto Sans', 'DejaVu Sans', sans-serif";
+  static FONT_SPEC = { family: "'Noto Sans', 'DejaVu Sans', sans-serif", px: 17 };
+  static FONT      = QtFontMetrics.css(PgAxisItem.FONT_SPEC);
 
   constructor(orientation, { linkView = null, maxTickLength = -5, pen = "d", textPen = "d" } = {}) {
     this.orientation = orientation;
@@ -1941,8 +1942,7 @@ class PgAxisItem {
       if (strings.length === 0) continue;
       const rects = strings.map((s, j) => {
         if (tickPositions[i][j] === null) return null;
-        const m   = ctx.measureText(s);
-        const rect = { w: Math.ceil(m.width), h: Math.ceil((m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) * 0.8) };
+        const rect = { w: QtFontMetrics.advance(s, PgAxisItem.FONT_SPEC), h: QtFontMetrics.height(PgAxisItem.FONT_SPEC) * 0.8 };
         textRects.push(rect);
         return rect;
       });

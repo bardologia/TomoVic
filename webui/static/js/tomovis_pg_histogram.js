@@ -543,6 +543,9 @@ class PgGradientEditor {
     ctx.strokeStyle = "#000";
     ctx.lineWidth   = 1;
     ctx.strokeRect(r.x + 0.5, r.y, r.w, r.h);
+    ctx.beginPath();
+    ctx.rect(r.x + r.w, this.rect.y, this.rect.w - r.w, this.rect.h);
+    ctx.clip();
     for (const tick of this.ticks.keys()) {
       if (tick.visible) tick.paint(ctx);
     }
@@ -764,7 +767,7 @@ class PgHistogramLut {
 
   layout(w, h) {
     const inner = { x: 1, y: 1, w: w - 2, h: h - 2 };
-    const axisW = Math.round(this.axis.preferredWidth());
+    const axisW = this.axis.preferredWidth();
     const gradW = this.gradient.visible ? 30 : 0;
     const vbW   = Math.max(45, Math.min(152, inner.w - axisW - gradW));
     this.axis.setGeometry(inner.x, inner.y, axisW, inner.h);

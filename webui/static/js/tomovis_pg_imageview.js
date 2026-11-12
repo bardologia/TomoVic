@@ -180,8 +180,8 @@ class PgRoiPlot {
   }
 
   layout(w, h) {
-    const leftW   = this.left.visible ? Math.round(this.left.preferredWidth()) : 0;
-    const bottomH = this.bottom.visible ? Math.round(this.bottom.preferredHeight() * 10) / 10 : 0;
+    const leftW   = this.left.visible ? this.left.preferredWidth() : 0;
+    const bottomH = this.bottom.visible ? this.bottom.preferredHeight() : 0;
     const vbW     = Math.max(0, w - 2 - leftW);
     const vbH     = Math.max(0, h - 2 - bottomH);
     this.left.setGeometry(1, 1, leftW, vbH);
