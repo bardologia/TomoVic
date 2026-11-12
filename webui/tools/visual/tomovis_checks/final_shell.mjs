@@ -79,6 +79,49 @@ class FinalShellChecks {
     });
   }
 
+  async menuState() {
+    return this.T(() => ({ menus: document.querySelectorAll(".tv-menu").length, modal: window.TomoVisModal.stack.length ? document.querySelector(".tv-modal:last-of-type .tv-modal__title").textContent : null, tab: window.app.tomovisPage.tabs.current, status: document.querySelector("#tv-status").textContent }));
+  }
+
+  async shortcutsInPopups() {
+    await this.run.check("SH-04", "Ctrl+O and Ctrl+F do nothing while a menu or combo popup is open, as in the original", async () => {
+      await this.fresh();
+      await H.menu(this.page, "File", "Import", "npy");
+      await H.chooseFile(this.page, path.join(this.inputs, "npy_real.npy"));
+      await this.page.click('[data-widget="tab1PlotButton"]');
+      await H.waitIdle(this.page);
+      const seen = {};
+      for (const [menu, keys] of [["file", "Control+o"], ["data", "Control+o"], ["file", "Control+f"], ["data", "Control+f"]]) {
+        await this.page.click(`.tv-menubar__item[data-menu="${menu}"]`);
+        await this.page.keyboard.press(keys);
+        await this.page.waitForTimeout(300);
+        await H.waitIdle(this.page);
+        seen[`${menu} ${keys}`] = await this.menuState();
+        await this.page.keyboard.press("Escape");
+      }
+      await this.page.click('[data-widget="tab2ComboBox"]');
+      await this.page.keyboard.press("Control+o");
+      await this.page.waitForTimeout(300);
+      seen["combo Control+o"] = { ...(await this.menuState()), popup: await this.T(() => document.querySelectorAll(".tv-combo__popup").length) };
+      await this.page.keyboard.press("Escape");
+      await this.page.keyboard.press("Control+o");
+      await this.page.waitForSelector(".tv-filedialog");
+      seen["no popup Control+o"] = await this.menuState();
+      await this.page.keyboard.press("Escape");
+      await this.page.waitForSelector(".tv-filedialog", { state: "detached" });
+      await H.waitIdle(this.page);
+
+      for (const key of ["file Control+o", "data Control+o", "file Control+f", "data Control+f"]) R.equal([seen[key].menus, seen[key].modal, seen[key].tab], [1, null, 1], `${key} with the menu open`);
+      R.equal([seen["combo Control+o"].popup, seen["combo Control+o"].modal, seen["combo Control+o"].tab], [1, null, 1], "Ctrl+O with the colormap combo open");
+      R.equal([seen["no popup Control+o"].menus, seen["no popup Control+o"].modal], [0, "Open File"], "control case without a popup");
+      return "menu stays open, no dialog, tab stays Plot; without a popup Ctrl+O opens Open File";
+    });
+  }
+
+  async closeMenus() {
+    await this.T(() => { if (window.TomoVisMenu.root) window.TomoVisMenu.root.close(); });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -88,6 +131,7 @@ class FinalShellChecks {
 
     if (this.wanted("sessions")) await this.sessionsSurvive();
     if (this.wanted("opengl")) await this.openGlPrint();
+    if (this.wanted("shortcuts")) await this.shortcutsInPopups();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

@@ -233,10 +233,13 @@ class TomoVisShortcuts {
     const keys = TomoVisShortcuts.KEYS[event.key.toLowerCase()];
     if (!keys) return;
     event.preventDefault();
-    if (TomoVisModal.isOpen() || !this.ctx.session.sid) return;
+    if (TomoVisModal.isOpen() || !this.ctx.session.sid || this.popupOpen()) return;
     event.stopPropagation();
-    if (TomoVisMenu.root) TomoVisMenu.root.close();
     this.ctx.session.send({ type: "shortcut", keys }).catch((error) => this.ctx.session.raiseUnreported(error));
+  }
+
+  popupOpen() {
+    return Boolean(TomoVisMenu.root) || Boolean(this.ctx.layer.querySelector(".tv-combo__popup"));
   }
 }
 
