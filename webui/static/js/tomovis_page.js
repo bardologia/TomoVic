@@ -14,6 +14,7 @@ class TomoVisStatusLine {
 class TomoVisMenuBar {
   static IMPORT_ACTIONS  = ["openFUSAR", "openRAT", "openUAVSAR", "openNpy"];
   static CHANNEL_ACTIONS = ["allChMenu", "ch1Menu", "ch2Menu", "ch3Menu"];
+  static ITEM_CHROME     = 8;
 
   constructor(ctx, element) {
     this.ctx     = ctx;
@@ -23,6 +24,7 @@ class TomoVisMenuBar {
     this.openKey = null;
 
     this.titles.forEach((title) => {
+      title.style.width = `${QtFontMetrics.sizeWidth(title.textContent, QtFontMetrics.WINDOW) + TomoVisMenuBar.ITEM_CHROME}px`;
       title.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
         event.preventDefault();
@@ -128,6 +130,8 @@ class TomoVisMenuBar {
 }
 
 class TomoVisTabStrip {
+  static TAB_HSPACE = 25;
+
   constructor(ctx, element, panels, has3d) {
     this.ctx     = ctx;
     this.element = element;
@@ -143,6 +147,7 @@ class TomoVisTabStrip {
     }
 
     this.tabs.forEach((tab, index) => {
+      tab.style.width = `${QtFontMetrics.sizeWidth(tab.textContent, QtFontMetrics.WINDOW) + TomoVisTabStrip.TAB_HSPACE}px`;
       tab.addEventListener("click", () => this.choose(index));
       tab.addEventListener("keydown", (event) => this.key(event));
     });

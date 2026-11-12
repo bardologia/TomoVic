@@ -266,7 +266,7 @@ class Fixer2Checks {
         const b      = await button.boundingBox();
         await page.mouse.click(Math.min(b.x + b.width - 2, fit.client - 3), b.y + b.height / 2);
         await page.waitForTimeout(250);
-        const menu = await page.evaluate(() => { const m = [...document.querySelectorAll(".tv-menu")].pop(); const r = m.getBoundingClientRect(); return { right: r.right, width: r.width, natural: m.scrollWidth + 4 }; });
+        const menu = await page.evaluate(() => { const m = [...document.querySelectorAll(".tv-menu")].pop(); const r = m.getBoundingClientRect(); return { right: r.right, width: r.width, natural: m.scrollWidth + m.offsetWidth - m.clientWidth }; });
         await page.screenshot({ path: path.join(this.out, `gl01_scrollbars_${width}x${height}.png`) });
         await page.close();
         R.assert(fit.win[0] >= 0 && fit.win[1] <= fit.client, `${width}x${height}: window ${JSON.stringify(fit.win)} inside the ${fit.client} px client width`);

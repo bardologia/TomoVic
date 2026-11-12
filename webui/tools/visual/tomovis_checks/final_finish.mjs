@@ -3,6 +3,11 @@ import path from "node:path";
 import { TomoVisHarness as H, TomoVisCheckRun as R, REPO } from "./harness.mjs";
 
 class FinalFinishChecks {
+  static QT = {
+    tabs    : [["Slicer", 9, 36, 63, 32], ["Plot", 72, 36, 51, 32], ["Profile", 123, 36, 70, 32], ["3D", 193, 36, 43, 32]],
+    menubar : [["File", 6, 0, 33, 25], ["Data", 45, 0, 39, 25]],
+  };
+
   constructor(options) {
     this.options = options;
     this.run     = new R("final-finish");
@@ -147,6 +152,34 @@ class FinalFinishChecks {
     });
   }
 
+  async tabsAndMenus() {
+    await this.run.check("LS-01", "tabs are contiguous, 32 px tall from y 36 at Qt's widths; menu bar items and menu rows have Qt's geometry, submenus open at the row with a 1 px overlap", async () => {
+      await this.fresh();
+      const seen = await this.T(() => {
+        const win = document.querySelector("#tv-window").getBoundingClientRect();
+        const rel = (e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left - win.left), Math.round(b.top - win.top), Math.round(b.width), Math.round(b.height)]; };
+        return { tabs: [...document.querySelectorAll(".tv-tab")].filter((t) => t.offsetParent).map((t) => [t.textContent, ...rel(t)]), menubar: [...document.querySelectorAll(".tv-menubar__item")].map((t) => [t.textContent, ...rel(t)]) };
+      });
+      await this.page.click('.tv-menubar__item[data-menu="file"]');
+      await this.page.locator(".tv-menu .tv-menu__item", { hasText: "Import" }).hover();
+      await this.page.waitForFunction(() => document.querySelectorAll(".tv-menu").length === 2);
+      const menus = await this.T(() => {
+        const [file, sub] = document.querySelectorAll(".tv-menu");
+        const f = file.getBoundingClientRect();
+        const s = sub.getBoundingClientRect();
+        const row = [...file.querySelectorAll(".tv-menu__item")].find((r) => r.textContent.includes("Import")).getBoundingClientRect();
+        return { rows: [...file.children].map((c) => Math.round(c.getBoundingClientRect().height)), subRows: [...sub.children].map((c) => Math.round(c.getBoundingClientRect().height)), border: file.offsetWidth - file.clientWidth, sub: [Math.round(s.left - f.right), Math.round(s.top - row.top)] };
+      });
+      await this.page.keyboard.press("Escape");
+      await this.page.keyboard.press("Escape");
+
+      R.equal(seen.tabs, FinalFinishChecks.QT.tabs, "tabs against the original's tab rects");
+      R.equal(seen.menubar, FinalFinishChecks.QT.menubar, "menu bar items against the original");
+      R.equal([menus.rows, menus.subRows, menus.border, menus.sub], [[32, 32, 2, 32], [32, 32, 32, 32], 0, [-1, 0]], "File and Import menu rows, frame, submenu offset");
+      return `tabs end at ${seen.tabs.at(-1)[1] + seen.tabs.at(-1)[3]}, menu rows ${menus.rows.join("/")}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -159,6 +192,7 @@ class FinalFinishChecks {
     if (this.wanted("popup")) await this.sharedPopup();
     if (this.wanted("sizes")) await this.textSizes();
     if (this.wanted("elide")) await this.elidedCells();
+    if (this.wanted("tabs")) await this.tabsAndMenus();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

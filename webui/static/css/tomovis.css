@@ -85,7 +85,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   grid-column: 1;
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: 6px;
   padding: 0 6px;
   border-bottom: 2px solid var(--line);
   user-select: none;
@@ -93,7 +93,8 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-menubar__item {
   display: inline-flex;
   align-items: center;
-  padding: 0 10px;
+  justify-content: center;
+  padding: 0;
   border: 0;
   border-radius: var(--r-input);
   background: transparent;
@@ -108,8 +109,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 
 .tv-tabs {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: flex-start;
   height: 39px;
   padding: 9px 9px 0;
   user-select: none;
@@ -118,21 +118,44 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 30px;
-  padding: 0 14px;
-  border: 2px solid var(--line);
-  border-bottom-color: transparent;
-  border-radius: var(--r-input) var(--r-input) 0 0;
-  background: var(--bg-1);
   color: var(--ink-faint);
   font-family: var(--sans);
   font-size: var(--tv-label);
   cursor: default;
 }
 .tv-tab:hover { color: var(--ink); }
-.tv-tab.is-current { height: 34px; margin: -2px 0; background: var(--tv-surface); color: var(--ink); border-bottom-color: var(--tv-surface); z-index: 1; }
 .tv-tab[hidden] { display: none; }
 .tv-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.tv-tabs .tv-tab {
+  flex: none;
+  justify-content: center;
+  height: 32px;
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
+  isolation: isolate;
+}
+.tv-tabs .tv-tab::before {
+  content: "";
+  position: absolute;
+  inset: 2px 0;
+  z-index: -1;
+  border: 2px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--r-input) var(--r-input) 0 0;
+  background: var(--bg-1);
+}
+.tv-tabs .tv-tab.is-current { z-index: 1; padding-top: 0; color: var(--ink); }
+.tv-tabs .tv-tab.is-current::before { inset: 0; background: var(--tv-surface); }
+.tv-mpl-tabs .tv-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 2px solid var(--line);
+  border-bottom-color: transparent;
+  border-radius: var(--r-input) var(--r-input) 0 0;
+  background: var(--bg-1);
+}
+.tv-mpl-tabs .tv-tab.is-current { height: 34px; margin: -2px 0; background: var(--tv-surface); color: var(--ink); border-bottom-color: var(--tv-surface); z-index: 1; }
 
 .tv-stack {
   display: grid;
@@ -556,13 +579,12 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-menu {
   position: absolute;
   min-width: 170px;
-  padding: 4px 0;
+  padding: 0;
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--frost);
   backdrop-filter: var(--frost);
-  border: 2px solid var(--line-strong);
   border-radius: var(--r-input);
-  box-shadow: 0 16px 38px var(--tv-shadow);
+  box-shadow: 0 0 0 2px var(--line-strong), 0 16px 38px var(--tv-shadow);
   outline: none;
   user-select: none;
 }
@@ -571,7 +593,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   grid-template-columns: 22px minmax(0, 1fr) auto 14px;
   align-items: center;
   column-gap: 6px;
-  min-height: 26px;
+  min-height: 32px;
   padding: 0 8px 0 4px;
   white-space: nowrap;
   color: var(--ink);
@@ -579,9 +601,9 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
 .tv-menu__item.is-active { background: var(--accent); color: var(--on-accent); }
 .tv-menu__item.is-disabled { color: var(--ink-hint); opacity: 1; }
 .tv-menu__item.is-disabled.is-active { background: var(--surface-2); color: var(--ink-hint); }
-.tv-menu__item--widget { grid-template-columns: 22px minmax(0, 1fr); padding: 3px 8px 3px 4px; }
+.tv-menu__item--widget { grid-template-columns: 22px minmax(0, 1fr); min-height: 0; padding: 3px 8px 3px 4px; }
 .tv-menu__item--widget.is-active { background: var(--surface-2); color: var(--ink); }
-.tv-menu--plain { min-width: 0; padding: 0; border: 0; outline: 2px solid var(--line-strong); }
+.tv-menu--plain { min-width: 0; }
 .tv-menu__item--plain { display: block; min-height: 0; padding: 0; }
 .tv-menu__item--plain.is-active { background: var(--surface-2); color: var(--ink); }
 .tv-menu__shortcut {
@@ -623,7 +645,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   border-radius: 50%;
   background: currentColor;
 }
-.tv-menu__separator { height: 2px; margin: 4px 8px; background: var(--line); }
+.tv-menu__separator { height: 2px; margin: 0 4px; background: var(--line); }
 
 .tv-modal__scrim {
   position: absolute;

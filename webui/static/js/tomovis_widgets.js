@@ -112,6 +112,10 @@ class QtFontMetrics {
     return `${chars.slice(0, left).join("")}\u2026${chars.slice(right).join("")}`;
   }
 
+  static sizeWidth(text, font) {
+    return Math.ceil(QtFontMetrics.advance(text, font) - 1e-6);
+  }
+
   static labelWidth(text, font) {
     const m = QtFontMetrics.measure(text, font);
     return Math.ceil(Math.max(m.width, m.actualBoundingBoxRight) - 1e-6);
@@ -1820,7 +1824,8 @@ class QtLabelView extends QtWidgetView {
 }
 
 class TomoVisMenu {
-  static SUBMENU_DELAY = 225;
+  static SUBMENU_DELAY   = 225;
+  static SUBMENU_OVERLAP = 1;
   static root          = null;
 
   constructor(ctx, items, { onClose = null, parent = null, ignore = null } = {}) {
@@ -1960,7 +1965,7 @@ class TomoVisMenu {
     const rect = this.rows[i].getBoundingClientRect();
     this.child      = new TomoVisMenu(this.ctx, item.submenu, { parent: this });
     this.childIndex = i;
-    this.child.openAt(rect.right - 2, rect.top - 4, { flipRight: rect.left + 2 });
+    this.child.openAt(rect.right - TomoVisMenu.SUBMENU_OVERLAP, rect.top, { flipRight: rect.left + TomoVisMenu.SUBMENU_OVERLAP });
     this.child.el.addEventListener("pointerenter", () => {
       clearTimeout(this.timer);
       this.rows.forEach((row, k) => row.classList.toggle("is-active", k === i));
