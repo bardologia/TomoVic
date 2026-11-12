@@ -42,16 +42,20 @@ The router is `webui/routers/tomovis_router.py` (`/api/tomovis`).
   within one run of TomoVis, a dialog opened without a folder of its own starts in the last folder any
   dialog of the page browsed to, also when that dialog was cancelled or its save failed. The first dialog
   of a page starts in the server user's home folder, where the original starts in the folder TomoVis was
-  launched from. A reload starts over, as a new start of TomoVis does. The dialog is Qt's non-native
-  QFileDialog at its 645x436 size: a Look in drop-down (the folder, its ancestors, Computer, then Recent
-  Places), Back, Forward, Parent Directory, Create New Folder (`New Folder`, `New Folder2`, ... renamed in
-  place), List View and Detail View, the Computer and home places, and the columns Name, Size, Type and
-  Date Modified (`M/d/yy h:mm AP`). Recent Places and the view mode live in the browser's `localStorage`
-  and are written when a dialog closes. Qt keeps them in `QtProject.conf` and writes them when a dialog is
-  destroyed, which for TomoVis's four import dialogs happens only when the window closes, because they
-  stay alive as children of the window. Not carried over: the list's right-click menu (Rename, Delete,
-  Show hidden files, New Folder), resizing the columns and the sidebar, file name completion, and
-  bookmarking folders by dragging them onto the sidebar.
+  launched from. Browsing to Computer counts as well: Qt then stores an empty folder, so the next dialog
+  starts again in the launch folder, which is the home folder here. A reload starts over, as a new start
+  of TomoVis does. The dialog is Qt's non-native QFileDialog at its 645x436 size: a Look in drop-down (the
+  folder, its ancestors, Computer, then Recent Places), Back, Forward, Parent Directory, Create New Folder
+  (`New Folder`, `New Folder2`, ... renamed in place), List View and Detail View, the Computer and home
+  places, and the columns Name, Size, Type and Date Modified (`M/d/yy h:mm AP`); a text wider than its
+  column is elided in the middle, measured with Qt's font as Qt does. Recent Places and the view mode live
+  in the browser's `localStorage` and are written when a dialog closes. Qt keeps them in `QtProject.conf`
+  and writes them when a dialog is destroyed, which in TomoVis also happens as soon as a dialog closes:
+  the import callbacks keep their `QFileDialog` in a local variable, so PyQt deletes it when the callback
+  returns, and the static `getOpenFileName` and `getSaveFileName` dialogs live on the stack of the call.
+  Not carried over: the list's right-click menu (Rename, Delete, Show hidden files, New Folder), resizing
+  the columns and the sidebar, file name completion, and bookmarking folders by dragging them onto the
+  sidebar.
 - **D-7.** Every `print` of TomoVis goes to the console log with the prefix `TomoVis: `. The startup 3D check
   that `visualizer.py` prints when it is imported is printed once per window session: the browser's WebGL2
   probe stands in for `has_usable_opengl()`, so the line is `OpenGL context OK, version=(2, 0), profile=0`

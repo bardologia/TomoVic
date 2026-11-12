@@ -208,6 +208,41 @@ class FinalFinishChecks {
     });
   }
 
+  async computerPlace() {
+    await this.run.check("NEW-2 NEW-3", "after Computer and Cancel the next dialog starts in the launch folder, as Qt's empty lastVisited does; Recent Places is written as the dialog closes and README D-4 says why", async () => {
+      await this.fresh();
+      await this.T(() => window.localStorage.removeItem("tomovis.fileDialogHistory"));
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      const home = await this.T(() => document.querySelector(".tv-filedialog").dataset.dir);
+      await this.page.fill(".tv-filedialog__name", this.inputs);
+      await this.page.press(".tv-filedialog__name", "Enter");
+      await this.page.waitForFunction((d) => document.querySelector(".tv-filedialog").dataset.dir === d, this.inputs);
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      const afterInputs = await this.T(() => document.querySelector(".tv-filedialog").dataset.dir);
+      await this.page.click(".tv-filedialog__lookin");
+      const recent = await this.T(() => [...document.querySelectorAll(".tv-filedialog__lookinpopup .tv-combo__option")].map((o) => o.textContent));
+      await this.page.keyboard.press("Escape");
+      await this.page.locator(".tv-filedialog__place", { hasText: "Computer" }).click();
+      await this.page.waitForFunction(() => document.querySelector(".tv-filedialog").dataset.dir === "computer:");
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      await H.menu(this.page, "File", "Import", "npy");
+      await this.page.waitForSelector(".tv-filedialog[data-dir]");
+      const afterComputer = await this.T(() => document.querySelector(".tv-filedialog").dataset.dir);
+      await this.page.click(".tv-filedialog .tv-filedialog__cancel");
+
+      const d4 = fs.readFileSync(path.join(REPO, "webui/tomovis/README.md"), "utf-8").split("- **D-4.**")[1].split("- **D-7.**")[0].replace(/\s+/g, " ");
+      R.equal([afterInputs, afterComputer], [this.inputs, home], "start folders after a cancel in inputs and after Computer");
+      R.equal(recent.slice(recent.indexOf("Recent Places")), ["Recent Places", this.inputs], "Recent Places right after the first dialog closed");
+      R.assert(d4.includes("Browsing to Computer") && d4.includes("PyQt deletes it") && !d4.includes("only when the window closes"), "README D-4 explains the Computer start folder and when Qt writes Recent Places");
+      return `after inputs: ${afterInputs}; after Computer: ${afterComputer}`;
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -222,6 +257,7 @@ class FinalFinishChecks {
     if (this.wanted("elide")) await this.elidedCells();
     if (this.wanted("tabs")) await this.tabsAndMenus();
     if (this.wanted("lookin")) await this.lookInPopup();
+    if (this.wanted("computer")) await this.computerPlace();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

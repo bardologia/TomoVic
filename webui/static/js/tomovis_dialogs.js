@@ -475,7 +475,7 @@ class TomoVisFileDialog {
     this.writable = listing.writable;
     this.entries  = listing.entries;
     this.selected = -1;
-    if (!listing.computer) this.place.lastVisited = listing.path;
+    this.place.lastVisited = listing.computer ? "" : listing.path;
 
     this.modal.el.dataset.dir     = this.dir;
     this.modal.el.dataset.listing = `${this.dir}|${this.filter}`;
