@@ -158,6 +158,17 @@ def test_a_session_without_metadata_has_no_facts(tmp_path):
     assert not case.piece("height_range")["present"]
 
 
+def test_a_session_holding_tomovis_defaults_has_no_facts(tmp_path):
+    """green_plot.hd5 saved z 0..15 (the range-sample default) and 1 x 1 spacing: neither counts as a measured value."""
+
+    case = Prepared(tmp_path, "session", SESSIONS / "green_plot.hd5")
+    slab = Prepared(tmp_path / "slice", "session", SESSIONS / "slice_mode.hd5")
+
+    assert case.dataset["state"] == "ready"
+    assert not case.piece("height_range")["present"] and not case.piece("spacing")["present"]
+    assert slab.piece("height_range")["value"] == [0.0, 45.0] and not slab.piece("spacing")["present"]
+
+
 def test_three_channels_give_the_combined_channel_then_channel_two(tmp_path):
     """npy_channels_3: the tomogram is sqrt(sum_c |x_c|^2); choosing channel index 1 rewrites it as |x_1|."""
 

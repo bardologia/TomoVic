@@ -22,6 +22,7 @@ import numpy as np
 
 from bridge.dataset_record    import DatasetRecord
 from bridge.dataset_workspace import DatasetWorkspace
+from bridge.tomovis_link      import TomoVisLink
 from tomovis.cube_readers     import CubeReaders
 from tomovis.session_file     import SessionFile
 from web_logger               import WebLogger
@@ -171,7 +172,27 @@ class CubePreparer:
         meta               = self.sessions.metadata(path) if has_metadata else {}
         heights            = [float(meta["z_min"]), float(meta["z_max"])] if "z_min" in meta and "z_max" in meta else None
         spacing            = [float(meta["x_res"]), float(meta["y_res"])] if "x_res" in meta and "y_res" in meta else None
+        if heights == self.sample_heights(data):
+            heights = None
+        if spacing == list(TomoVisLink.DEFAULT_SPACING):
+            spacing = None
         return data, heights, spacing, "TomoVis session"
+
+    def sample_heights(self, data: np.ndarray) -> list[float]:
+        """Returns the elevation range TomoVis sets after an import that brings no heights (F-015): 0 to the last axis's length minus one.
+
+        A session saved with this range, or with TomoVis's default 1.0 x 1.0
+        spacing, holds TomoVis's defaults rather than measured values, so the
+        dataset still asks for them like the file the session came from.
+
+        Args:
+            data : Session cube, the last axis being range.
+
+        Returns:
+            [0.0, shape[-1] - 1].
+        """
+
+        return [0.0, float(data.shape[-1] - 1)]
 
     def convert(self, record: DatasetRecord) -> None:
         """Writes the source as data/tomovis_cube.npy with its height range and spacing, then the TomoVis link.
