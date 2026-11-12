@@ -149,6 +149,7 @@ class TomoVisPlotTab {
       const box  = chain[i];
       const item = Math.min(box.size, cell.max || QtLayoutStruct.MAX);
       const top  = Math.trunc((TomoVisPlotTab.ROW_HEIGHT - cell.height) / 2);
+
       cell.el.style.left   = `${box.pos + Math.trunc((box.size - item) / 2)}px`;
       cell.el.style.top    = `${top}px`;
       cell.el.style.width  = `${Math.max(item, cell.floor || 0)}px`;

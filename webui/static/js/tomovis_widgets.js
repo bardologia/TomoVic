@@ -114,6 +114,7 @@ class QtFontMetrics {
     if (QtFontMetrics.advance(text, font) <= width) return text;
     const chars     = [...text];
     const available = width - QtFontMetrics.advance("\u2026", font);
+
     let left      = 0;
     let right     = chars.length;
     let nextLeft  = 0;
@@ -1113,26 +1114,6 @@ class QtSpinBoxView extends QtWidgetView {
     return [this.input, this.up, this.down];
   }
 
-  textFromValue(value) {
-    return this.decimals > 0 ? Number(value).toFixed(this.decimals) : String(Math.round(value));
-  }
-
-  format(value) {
-    return `${this.prefix}${this.textFromValue(value)}${this.suffix}`;
-  }
-
-  sizeHint(font) {
-    const fixed = `${this.prefix}${this.suffix} `;
-    const texts = [this.minimum, this.maximum].map((value) => this.textFromValue(value).slice(0, 18) + fixed);
-    return QtFontMetrics.widest(texts, font) + 2 + QtSpinBoxView.CHROME;
-  }
-
-  renderHint() {
-    const root = this.input.parentElement;
-    root.style.setProperty("--tv-spin-hint-window", `${this.sizeHint(QtFontMetrics.WINDOW)}px`);
-    root.style.setProperty("--tv-spin-hint-app", `${this.sizeHint(QtFontMetrics.APP)}px`);
-  }
-
   apply(state, previous) {
     if ("decimals" in state) this.decimals = state.decimals;
     if ("minimum" in state) this.minimum = state.minimum;
@@ -1148,6 +1129,18 @@ class QtSpinBoxView extends QtWidgetView {
     this.value       = state.value;
     this.input.value = this.format(state.value);
     this.renderSteps();
+  }
+
+  renderHint() {
+    const root = this.input.parentElement;
+    root.style.setProperty("--tv-spin-hint-window", `${this.sizeHint(QtFontMetrics.WINDOW)}px`);
+    root.style.setProperty("--tv-spin-hint-app", `${this.sizeHint(QtFontMetrics.APP)}px`);
+  }
+
+  sizeHint(font) {
+    const fixed = `${this.prefix}${this.suffix} `;
+    const texts = [this.minimum, this.maximum].map((value) => this.textFromValue(value).slice(0, 18) + fixed);
+    return QtFontMetrics.widest(texts, font) + 2 + QtSpinBoxView.CHROME;
   }
 
   editing() {
@@ -1314,6 +1307,14 @@ class QtSpinBoxView extends QtWidgetView {
     this.renderSteps();
     this.changed(this.value, how);
     return true;
+  }
+
+  format(value) {
+    return `${this.prefix}${this.textFromValue(value)}${this.suffix}`;
+  }
+
+  textFromValue(value) {
+    return this.decimals > 0 ? Number(value).toFixed(this.decimals) : String(Math.round(value));
   }
 
   key(event) {

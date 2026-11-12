@@ -293,7 +293,8 @@ class PgGraphicsView {
     this.hoverItems  = new Set();
     this.lastHover   = null;
     this.overlays    = [];
-    this.exportAntialias = false;
+
+    this.exportAntialias    = false;
     this.sigPrepareForPaint = new PgSignal();
     host.append(this.el);
 
@@ -1592,9 +1593,11 @@ class PgImageItem {
     const w      = this.shape[0];
     const h      = this.shape[1];
     const padded = document.createElement("canvas");
+
     padded.width  = w + 2;
     padded.height = h + 2;
-    const ctx    = padded.getContext("2d");
+
+    const ctx = padded.getContext("2d");
     ctx.drawImage(this.canvas, 1, 1);
     ctx.drawImage(this.canvas, 0, 0, w, 1, 1, 0, w, 1);
     ctx.drawImage(this.canvas, 0, h - 1, w, 1, 1, h + 1, w, 1);

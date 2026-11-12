@@ -203,9 +203,9 @@ class PgExporter {
   }
 
   setValue(name, value) {
-    const p = this.param(name);
-    p.value = value;
+    const p     = this.param(name);
     const state = { bool: { checked: value }, list: { index: p.limits ? p.limits.indexOf(value) : -1 }, str: { text: value } }[p.type] || { value };
+    p.value     = value;
     if (p.view) p.view.set(state);
     if (p.refresh) p.refresh();
   }
@@ -638,18 +638,19 @@ class PgExportDialog {
   }
 
   build() {
-    const el    = TomoVisInput.el;
-    this.el     = el("div", "tv-modal tv-pg-export");
-    this.el.setAttribute("role", "dialog");
-    this.title  = el("div", "tv-modal__title", "Export");
-    const body  = el("div", "tv-modal__body");
-    this.tree   = el("div", "tv-pg-export__tree tv-qt-scroll");
-    this.list   = el("div", "tv-pg-export__formats tv-qt-scroll");
-    this.params = el("div", "tv-pg-export__params tv-qt-scroll");
+    const el      = TomoVisInput.el;
+    const body    = el("div", "tv-modal__body");
     const buttons = el("div", "tv-pg-export__buttons");
+
+    this.el        = el("div", "tv-modal tv-pg-export");
+    this.title     = el("div", "tv-modal__title", "Export");
+    this.tree      = el("div", "tv-pg-export__tree tv-qt-scroll");
+    this.list      = el("div", "tv-pg-export__formats tv-qt-scroll");
+    this.params    = el("div", "tv-pg-export__params tv-qt-scroll");
     this.copyBtn   = el("button", "tv-button", "Copy");
     this.exportBtn = el("button", "tv-button", "Export");
     this.closeBtn  = el("button", "tv-button", "Close");
+    this.el.setAttribute("role", "dialog");
     for (const b of [this.copyBtn, this.exportBtn, this.closeBtn]) {
       b.type = "button";
       TomoVisInput.plainPushButton(b);
@@ -715,9 +716,10 @@ class PgExportDialog {
       const branch = TomoVisInput.el("span", "tv-pg-export__branch");
       const text   = TomoVisInput.el("span", "tv-pg-export__text", target.label);
       const next   = this.items[i + 1];
-      target.parent   = [...this.items.slice(0, i)].reverse().find((t) => t.depth < target.depth) || null;
-      target.expanded = true;
-      target.hasKids  = Boolean(next && next.depth > target.depth);
+
+      target.parent         = [...this.items.slice(0, i)].reverse().find((t) => t.depth < target.depth) || null;
+      target.expanded       = true;
+      target.hasKids        = Boolean(next && next.depth > target.depth);
       row.style.paddingLeft = `${target.depth * PgExportDialog.INDENT}px`;
       if (target.hasKids) {
         branch.dataset.kids = "true";
@@ -761,7 +763,7 @@ class PgExportDialog {
     this.list.replaceChildren();
     const width = QtFontMetrics.widest(PgExportDialog.EXPORTERS.map((cls) => cls.NAME), QtFontMetrics.APP) + PgExportDialog.LIST_ITEM_CHROME;
     PgExportDialog.EXPORTERS.forEach((cls, i) => {
-      const row = TomoVisInput.el("div", `tv-pg-export__row${i === this.format ? " is-selected" : ""}`, cls.NAME);
+      const row       = TomoVisInput.el("div", `tv-pg-export__row${i === this.format ? " is-selected" : ""}`, cls.NAME);
       row.style.width = `${width}px`;
       row.addEventListener("click", () => {
         this.format = i;
@@ -788,8 +790,9 @@ class PgExportDialog {
       const display = TomoVisInput.el("span", "tv-pg-export__display");
       const reset   = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-button tv-pg-export__default"));
       const icon    = TomoVisInput.el("img", "tv-pg-export__defaulticon");
-      icon.src = PgExportDialog.DEFAULT_ICON;
-      icon.alt = "";
+
+      icon.src   = PgExportDialog.DEFAULT_ICON;
+      icon.alt   = "";
       reset.type = "button";
       reset.setAttribute("aria-label", `Reset ${p.name} to its default`);
       reset.append(icon);
@@ -832,6 +835,7 @@ class PgExportDialog {
     }
     const button = TomoVisInput.plainPushButton(TomoVisInput.el("button", "tv-pg-export__colorbtn"));
     const paint  = () => { button.style.background = PgPen.css(p.value); };
+
     button.type = "button";
     paint();
     button.addEventListener("click", async () => {

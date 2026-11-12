@@ -174,7 +174,7 @@ class TomoVisMessageBox {
 
   static intrinsic(label, sizing) {
     label.style.width = sizing;
-    const width = Math.ceil(label.getBoundingClientRect().width);
+    const width       = Math.ceil(label.getBoundingClientRect().width);
     label.style.width = "";
     return width;
   }
@@ -187,9 +187,9 @@ class TomoVisMessageBox {
 
   static fit(modal, label, buttonCount) {
     const { soft, hard } = TomoVisMessageBox.limits();
-    const chrome  = TomoVisMessageBox.LABEL_X + TomoVisMessageBox.MARGIN;
-    const buttons = 2 * TomoVisMessageBox.MARGIN + buttonCount * 80 + (buttonCount - 1) * 6;
-    let width = Math.max(TomoVisMessageBox.intrinsic(label, "max-content") + chrome, buttons);
+    const chrome         = TomoVisMessageBox.LABEL_X + TomoVisMessageBox.MARGIN;
+    const buttons        = 2 * TomoVisMessageBox.MARGIN + buttonCount * 80 + (buttonCount - 1) * 6;
+    let   width          = Math.max(TomoVisMessageBox.intrinsic(label, "max-content") + chrome, buttons);
     if (width > soft) {
       label.classList.add("is-wrapped");
       width = Math.max(soft, TomoVisMessageBox.intrinsic(label, "min-content") + chrome, buttons);
@@ -207,7 +207,8 @@ class TomoVisMessageBox {
     const modal = new TomoVisModal({ title, className: "tv-messagebox", buttons, layer, escape: escape || (buttons.length === 1 ? buttons[0] : buttons[buttons.length - 1]), defaultButton });
     const icon  = TomoVisInput.el("div", `tv-messagebox__icon is-${level}`);
     const label = rich ? TomoVisMessageBox.richText(text) : TomoVisMessageBox.plainText(text);
-    icon.innerHTML = TomoVisMessageBox.ICONS[level];
+
+    icon.innerHTML         = TomoVisMessageBox.ICONS[level];
     modal.el.dataset.level = level;
     modal.body.append(icon, TomoVisInput.el("span", "tv-messagebox__indent"), label);
     const answer = modal.open();
@@ -356,7 +357,8 @@ class TomoVisFileDialog {
 
   buildTop() {
     const top = TomoVisInput.el("div", "tv-filedialog__top");
-    this.lookIn = TomoVisInput.el("div", "tv-combo tv-filedialog__lookin");
+
+    this.lookIn          = TomoVisInput.el("div", "tv-combo tv-filedialog__lookin");
     this.lookIn.tabIndex = 0;
     this.lookIn.setAttribute("role", "combobox");
     this.lookIn.setAttribute("aria-haspopup", "listbox");
@@ -384,7 +386,8 @@ class TomoVisFileDialog {
 
   toolButton(label, className, action) {
     const button = TomoVisInput.el("button", `tv-button tv-button--tool ${className}`);
-    button.type = "button";
+
+    button.type  = "button";
     button.title = label;
     button.setAttribute("aria-label", label);
     button.addEventListener("click", action);
@@ -396,17 +399,18 @@ class TomoVisFileDialog {
     this.sidebar = TomoVisInput.el("div", "tv-filedialog__sidebar");
     this.sidebar.setAttribute("role", "listbox");
 
-    this.listWrap = TomoVisInput.el("div", "tv-filedialog__list");
+    this.listWrap          = TomoVisInput.el("div", "tv-filedialog__list");
     this.listWrap.tabIndex = 0;
     this.listWrap.addEventListener("keydown", (event) => this.listKey(event));
 
-    this.table = TomoVisInput.el("table", "tv-filedialog__table");
     const columns = TomoVisInput.el("colgroup");
     const head    = TomoVisInput.el("thead");
     const headRow = TomoVisInput.el("tr");
+    this.table    = TomoVisInput.el("table", "tv-filedialog__table");
     this.headers  = {};
     for (const [key, label, width] of TomoVisFileDialog.COLUMNS) {
       const col = TomoVisInput.el("col");
+
       col.style.width = `${width}px`;
       columns.append(col);
       const th = TomoVisInput.el("th", `tv-filedialog__col--${key}`, label);
@@ -446,6 +450,7 @@ class TomoVisFileDialog {
     this.filterCombo.el.classList.add("tv-filedialog__filter");
 
     const cancel = TomoVisInput.el("button", "tv-button tv-filedialog__cancel", "Cancel");
+
     cancel.type = "button";
     cancel.addEventListener("click", () => this.modal.close({ accepted: false, path: null, filter: this.filter }));
 
@@ -475,6 +480,7 @@ class TomoVisFileDialog {
     this.writable = listing.writable;
     this.entries  = listing.entries;
     this.selected = -1;
+
     this.place.lastVisited = listing.computer ? "" : listing.path;
 
     this.modal.el.dataset.dir     = this.dir;
@@ -503,9 +509,10 @@ class TomoVisFileDialog {
 
   renderLookIn() {
     const computer = this.dir === TomoVisFileDialog.COMPUTER;
-    this.lookInIcon.className = `tv-filedialog__icon ${computer ? "is-computer" : (this.dir === "/" ? "is-drive" : "is-dir")}`;
-    this.lookIn.title         = computer ? "" : this.dir;
-    this.lookIn.dataset.path  = this.dir;
+
+    this.lookInIcon.className   = `tv-filedialog__icon ${computer ? "is-computer" : (this.dir === "/" ? "is-drive" : "is-dir")}`;
+    this.lookIn.title           = computer ? "" : this.dir;
+    this.lookIn.dataset.path    = this.dir;
     this.lookInText.textContent = computer ? "Computer" : this.dir;
     TomoVisFileDialog.elide([this.lookInText]);
   }
@@ -613,16 +620,18 @@ class TomoVisFileDialog {
     const entry = this.view[i];
     const label = this.rows[i].querySelector(".tv-filedialog__entryname");
     const input = TomoVisInput.el("input", "tv-line tv-filedialog__editor");
+
     input.type       = "text";
     input.spellcheck = false;
     input.value      = entry.name;
     label.replaceChildren(input);
     this.editor = input;
-    let done = false;
+
+    let   done   = false;
     const finish = (commit) => {
       if (done) return;
-      done = true;
-      this.editor = null;
+      done              = true;
+      this.editor       = null;
       label.textContent = entry.name;
       if (commit) this.rename(entry.name, input.value);
       else this.listWrap.focus({ preventScroll: true });
@@ -701,8 +710,9 @@ class TomoVisFileDialog {
   }
 
   renderList() {
-    this.view = this.sorted();
     const detail = this.viewMode === "Detail";
+
+    this.view         = this.sorted();
     this.table.hidden = !detail;
     this.icons.hidden = detail;
     this.tbody.replaceChildren();
@@ -712,6 +722,7 @@ class TomoVisFileDialog {
       let row;
       if (detail) {
         row = TomoVisInput.el("tr", entry.dir ? "is-dir" : "is-file");
+
         const cell = TomoVisInput.el("td", "tv-filedialog__cell--name");
         const wrap = TomoVisInput.el("span", "tv-filedialog__namecell");
         wrap.append(TomoVisInput.el("span", this.icon(entry)), name);
@@ -1146,9 +1157,9 @@ class TomoVisColorDialog {
     if (source !== "html") this.html.set({ text: hex });
 
     this.swatch.style.background = `rgba(${this.rgb.join(",")},${this.a / 255})`;
-    this.cross.style.left = `${(360 - hue) / 360 * 100}%`;
-    this.cross.style.top  = `${(255 - this.hsv[1]) / 255 * 100}%`;
-    this.arrow.style.top  = `${(255 - this.hsv[2]) / 255 * 100}%`;
+    this.cross.style.left        = `${(360 - hue) / 360 * 100}%`;
+    this.cross.style.top         = `${(255 - this.hsv[1]) / 255 * 100}%`;
+    this.arrow.style.top         = `${(255 - this.hsv[2]) / 255 * 100}%`;
     this.paintStrip();
     if (this.live && source !== undefined) this.live([...this.rgb, this.a]);
   }

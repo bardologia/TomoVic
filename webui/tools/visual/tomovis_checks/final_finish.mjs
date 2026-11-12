@@ -124,11 +124,13 @@ class FinalFinishChecks {
       seen.dialogLabel = await font(".tv-filedialog .tv-label");
       seen.dialogLine  = await font(".tv-filedialog__name");
       seen.dialogCell  = await font(".tv-filedialog__cell--size");
+
       const cells = await this.T(() => [...document.querySelectorAll(".tv-filedialog__cell--size")].filter((c) => c.textContent).map((c) => { const range = document.createRange(); range.selectNodeContents(c); return [c.textContent, range.getBoundingClientRect().right <= c.getBoundingClientRect().right]; }));
+
       seen.cancelWidth = await this.T(() => document.querySelector(".tv-filedialog__cancel").getBoundingClientRect().width);
       await this.page.click(".tv-filedialog .tv-filedialog__cancel");
 
-      const readme = fs.readFileSync(path.join(REPO, "webui/tomovis/README.md"), "utf-8").split("\n").find((line) => line.includes("| Colours and fonts") || line.includes("| F-001, F-008")) || "";
+      const readme   = fs.readFileSync(path.join(REPO, "webui/tomovis/README.md"), "utf-8").split("\n").find((line) => line.includes("| Colours and fonts") || line.includes("| F-001, F-008")) || "";
       const window14 = ["label", "button", "check", "tab", "menubar", "status", "line", "spin", "readout"].map((k) => seen[k].split("|")[0]);
       const app17    = ["combo1", "combo2", "popup", "menu", "shortcut", "message", "dialogLabel", "dialogLine", "dialogCell"].map((k) => seen[k].split("|")[0]);
       R.equal(window14, Array(9).fill("14px"), "window text sizes");
@@ -175,9 +177,9 @@ class FinalFinishChecks {
       await this.page.waitForFunction(() => document.querySelectorAll(".tv-menu").length === 2);
       const menus = await this.T(() => {
         const [file, sub] = document.querySelectorAll(".tv-menu");
-        const f = file.getBoundingClientRect();
-        const s = sub.getBoundingClientRect();
-        const row = [...file.querySelectorAll(".tv-menu__item")].find((r) => r.textContent.includes("Import")).getBoundingClientRect();
+        const f           = file.getBoundingClientRect();
+        const s           = sub.getBoundingClientRect();
+        const row         = [...file.querySelectorAll(".tv-menu__item")].find((r) => r.textContent.includes("Import")).getBoundingClientRect();
         return { rows: [...file.children].map((c) => Math.round(c.getBoundingClientRect().height)), subRows: [...sub.children].map((c) => Math.round(c.getBoundingClientRect().height)), border: file.offsetWidth - file.clientWidth, sub: [Math.round(s.left - f.right), Math.round(s.top - row.top)] };
       });
       await this.page.keyboard.press("Escape");
@@ -282,8 +284,8 @@ class FinalFinishChecks {
   async noDimming() {
     await this.run.check("LS-15", "message boxes and the file dialog dim nothing behind them, as Qt does, and still refuse clicks on the window", async () => {
       await this.fresh();
-      const point = await this.T(() => { const r = document.querySelector(".tv-slicer__label").getBoundingClientRect(); return { x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }; });
-      const pixel = async () => { const shot = await this.page.screenshot({ clip: { x: point.x, y: point.y, width: 1, height: 1 } }); return shot.toString("base64"); };
+      const point  = await this.T(() => { const r = document.querySelector(".tv-slicer__label").getBoundingClientRect(); return { x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }; });
+      const pixel  = async () => { const shot = await this.page.screenshot({ clip: { x: point.x, y: point.y, width: 1, height: 1 } }); return shot.toString("base64"); };
       const before = await pixel();
       await this.T(() => { window.TomoVisMessageBox.show({ level: "warning", title: "No data", text: "There is no data loaded to save.", layer: window.app.tomovisPage.ctx.layer }); });
       await this.page.waitForSelector(".tv-messagebox");
@@ -388,6 +390,7 @@ class FinalFinishChecks {
         const look = (el) => { const st = getComputedStyle(el); return [st.borderTopColor, st.backgroundColor]; };
         const tool = document.querySelector('#tv-panel-plot .tv-mpl-tool[data-method="pan"]');
         const ref  = document.createElement("button");
+
         ref.className = "tv-button is-checked";
         document.querySelector("#tv-panel-plot").append(ref);
         const out = { tool: look(tool), button: look(ref), checked: tool.classList.contains("is-checked") };
@@ -421,12 +424,38 @@ class FinalFinishChecks {
     });
   }
 
+  async codeOrder() {
+    await this.run.check("CR-06 CR-07", "the reviewed assignment runs are aligned or split into blocks, and QtSpinBoxView keeps its helpers below their last callers", async () => {
+      const read  = (file) => fs.readFileSync(path.join(REPO, file), "utf-8");
+      const runs  = [
+        ["webui/static/js/tomovis_pg_view.js", "    this.exportAntialias    = false;\n    this.sigPrepareForPaint = new PgSignal();"],
+        ["webui/static/js/tomovis_pg_view.js", "    padded.width  = w + 2;\n    padded.height = h + 2;\n\n    const ctx = padded.getContext"],
+        ["webui/static/js/tomovis_dialogs.js", "    const chrome         = TomoVisMessageBox.LABEL_X"],
+        ["webui/static/js/tomovis_dialogs.js", "    this.table    = TomoVisInput.el(\"table\""],
+        ["webui/static/js/tomovis_dialogs.js", "    this.lookInText.textContent = computer"],
+        ["webui/static/js/tomovis_dialogs.js", "      done              = true;\n      this.editor       = null;\n      label.textContent = entry.name;"],
+        ["webui/static/js/tomovis_dialogs.js", "    this.view         = this.sorted();\n    this.table.hidden = !detail;"],
+        ["webui/static/js/tomovis_pg_export.js", "      target.parent         = ["],
+        ["tests/webui/test_tomovis_scripts.py", "    messages, _ = slicer.drain(\"f:\")\n    window      = ["],
+      ];
+      const missing = runs.filter(([file, text]) => !read(file).includes(text)).map(([file, text]) => `${file}: ${text.split("\n")[0].trim()}`);
+      const widgets = read("webui/static/js/tomovis_widgets.js");
+      const spin    = widgets.slice(widgets.indexOf("class QtSpinBoxView"), widgets.indexOf("class QtDoubleSpinBoxView"));
+      const order   = [...spin.matchAll(/^  ([a-zA-Z]+)\(.*\) \{$/gm)].map((m) => m[1]);
+      const at      = (name) => order.indexOf(name);
+      R.equal(missing, [], "aligned runs");
+      R.assert(at("apply") < at("renderHint") && at("renderHint") < at("sizeHint") && at("sizeHint") < at("editing") && at("stepBy") < at("format") && at("format") < at("textFromValue") && at("textFromValue") < at("key"), `QtSpinBoxView order: ${order.join(", ")}`);
+      return order.join(" > ");
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
+
     this.options.base = opened.base;
-    this.context = opened.context;
-    this.browser = opened.browser;
-    this.page    = opened.page;
+    this.context      = opened.context;
+    this.browser      = opened.browser;
+    this.page         = opened.page;
     await H.openTomoVis(this.page);
 
     if (this.wanted("hints")) await this.widthHints();
@@ -442,6 +471,7 @@ class FinalFinishChecks {
     if (this.wanted("export")) await this.exportParams();
     if (this.wanted("tools")) await this.checkedTools();
     if (this.wanted("folders")) await this.folderFailures();
+    if (this.wanted("code")) await this.codeOrder();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

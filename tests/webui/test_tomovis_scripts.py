@@ -79,7 +79,7 @@ def test_slicer_window_keys_reach_the_browser(slicer, key, message):
     quiet, _ = slicer.drain("f:")
     press(slicer, key)
     messages, _ = slicer.drain("f:")
-    window = [entry["type"] for entry in messages if entry["type"] in ("full_screen_toggle", "close")]
+    window      = [entry["type"] for entry in messages if entry["type"] in ("full_screen_toggle", "close")]
 
     assert [entry["type"] for entry in quiet if entry["type"] in ("full_screen_toggle", "close")] == []
     assert window == [message]
