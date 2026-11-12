@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import queue
 import threading
-import time
 import traceback
 from pathlib import Path
 
@@ -118,23 +117,6 @@ class CubePreparer:
 
         with self.lock:
             return self.running.get(dataset_id)
-
-    def settle(self, timeout: float) -> bool:
-        """Waits until no job is queued or running.
-
-        Args:
-            timeout : Seconds to wait at most.
-
-        Returns:
-            Whether the preparer became idle in time.
-        """
-
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.jobs.unfinished_tasks == 0:
-                return True
-            time.sleep(0.02)
-        return False
 
     def report(self, dataset_id: str, stage: str, fraction: float) -> None:
         """Publishes a job's progress; a new stage text is also saved in the record."""

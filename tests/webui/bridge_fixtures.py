@@ -87,9 +87,12 @@ class BridgeHarness:
         return self.workspace.record(self.bridge.current["id"])
 
     def settle(self) -> None:
-        """Waits for every queued preparation."""
+        """Waits up to 30 s until the preparer has no queued or running job."""
 
-        assert self.bridge.preparer.settle(30.0)
+        deadline = time.monotonic() + 30.0
+        while self.bridge.preparer.jobs.unfinished_tasks:
+            assert time.monotonic() < deadline, "the preparations did not end within 30 s"
+            time.sleep(0.02)
 
     def dataset(self, dataset_id: str) -> dict:
         """Returns the Dataset payload of an id."""
