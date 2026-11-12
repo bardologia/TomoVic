@@ -156,6 +156,7 @@ class DatasetFilePicker extends DatasetLayer {
     this.selected = null;
     this.resolve  = null;
     this.listSeq  = 0;
+    this.typed    = false;
 
     this.root.innerHTML = `
       <div class="ds-picker__box">
@@ -185,6 +186,7 @@ class DatasetFilePicker extends DatasetLayer {
     this.root.querySelector(".ds-picker__cancel").addEventListener("click", () => this.close());
     this.acceptEl.addEventListener("click", () => this._accept());
     this.pathEl.addEventListener("keydown", (ev) => this._onPathKey(ev));
+    this.pathEl.addEventListener("input", () => { this.typed = true; });
   }
 
   static pick({ mode = "file", title = "" } = {}) {
@@ -230,6 +232,7 @@ class DatasetFilePicker extends DatasetLayer {
   async _list(path, fallback = false) {
     const seq     = ++this.listSeq;
     const pattern = this.mode === "file" ? "&pattern=*.npy" : "";
+    this.typed    = false;
     const listing = await Api.get(`/api/tomovis/fs?path=${encodeURIComponent(path)}${pattern}`);
     if (seq !== this.listSeq) return;
 
@@ -245,7 +248,7 @@ class DatasetFilePicker extends DatasetLayer {
     this.dir      = listing.path;
     this.parent   = listing.parent;
     this.selected = null;
-    this.pathEl.value = listing.path;
+    if (!this.typed) this.pathEl.value = listing.path;
     this._showError("");
     this._render(listing.entries);
   }
