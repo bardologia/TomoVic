@@ -1615,6 +1615,8 @@ class QtComboBoxView extends QtWidgetView {
 }
 
 class QtLineEditView extends QtWidgetView {
+  static CHROME = 6;
+
   build() {
     const input = TomoVisInput.el("input", "tv-line");
     input.type         = "text";
@@ -1641,9 +1643,14 @@ class QtLineEditView extends QtWidgetView {
     const input = this.input;
     const width = input.clientWidth;
     if (width === 0) return;
-    const style  = getComputedStyle(input);
-    const inner  = width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    const font   = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const qtFont = input.closest(".tv-layer") ? QtFontMetrics.APP : QtFontMetrics.WINDOW;
+    if (QtFontMetrics.horizontalAdvance(input.value, qtFont) + 1 <= input.offsetWidth - QtLineEditView.CHROME) {
+      input.scrollLeft = 0;
+      return;
+    }
+    const style   = getComputedStyle(input);
+    const inner   = width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const font    = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     const cursorX = QtFontMetrics.cssMeasure(input.value.slice(0, input.selectionEnd), font).width;
     if (cursorX - input.scrollLeft >= inner) input.scrollLeft = Math.ceil(cursorX - inner + 1);
     else if (cursorX < input.scrollLeft) input.scrollLeft = Math.floor(cursorX);

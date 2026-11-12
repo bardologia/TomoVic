@@ -3,6 +3,8 @@ import path from "node:path";
 import { TomoVisHarness as H, TomoVisCheckRun as R, REPO } from "./harness.mjs";
 
 class FinalFinishChecks {
+  static REALISTIC = path.join(REPO, "logs/tomovis_port/fixtures/realistic_traun_hv.hd5");
+
   static QT = {
     tabs    : [["Slicer", 9, 36, 63, 32], ["Plot", 72, 36, 51, 32], ["Profile", 123, 36, 70, 32], ["3D", 193, 36, 43, 32]],
     menubar : [["File", 6, 0, 33, 25], ["Data", 45, 0, 39, 25]],
@@ -300,6 +302,33 @@ class FinalFinishChecks {
     });
   }
 
+  async axisFields() {
+    await this.run.check("NEW-4", "a field shows its start when Qt's line edit fits the text and its end when Qt's overflows: -22.11 keeps its sign; 413.62 is 3 px too wide for Qt's 51 px line and scrolls in both", async () => {
+      await this.fresh();
+      await H.menu(this.page, "File", "Import", "hd5");
+      await H.chooseFile(this.page, FinalFinishChecks.REALISTIC);
+      const c = await this.T(() => { const iv = window.app.tomovisPage.views[0].views.imv1_1; const q = iv.view.mapViewToScene(60, 40); const r = iv.scene.el.getBoundingClientRect(); return { x: r.left + q.x, y: r.top + q.y }; });
+      await this.page.mouse.click(c.x, c.y, { button: "right" });
+      await this.page.locator(".tv-menu .tv-menu__item", { hasText: "X axis" }).first().hover();
+      await this.page.waitForSelector(".tv-menu .tv-pg-axisctrl");
+      await this.page.waitForTimeout(300);
+      const fields = await this.T(() => [...document.querySelectorAll(".tv-menu .tv-pg-axisctrl .tv-line")].map((i) => [i.value, i.scrollLeft, Math.round(QtFontMetrics.horizontalAdvance(i.value, QtFontMetrics.APP)), i.offsetWidth]));
+      await this.page.locator(".tv-menu").last().screenshot({ path: path.join(this.out, "new4_axis_submenu.png") });
+      await this.page.keyboard.press("Escape");
+      await this.page.keyboard.press("Escape");
+
+      await this.page.fill('[data-widget="tab1QLineEdit1"]', "123456789.1234");
+      await this.page.locator('[data-widget="tab1QLineEdit2"]').focus();
+      const roi = await this.T(() => { const i = document.querySelector('[data-widget="tab1QLineEdit1"]'); return [i.value, i.scrollLeft > 0]; });
+
+      const [low, high] = fields;
+      R.equal([low[0], low[1], low[2] + 1 <= low[3] - 6], ["-22.11", 0, true], `min field fits in Qt and shows its start: ${JSON.stringify(low)}`);
+      R.equal([high[0], high[2] + 1 > high[3] - 6, high[1] > 0], ["413.62", true, true], `max field overflows Qt's line and shows its end: ${JSON.stringify(high)}`);
+      R.equal(roi, ["123456789.1234", false], "a typed ROI value keeps the browser's own scrolling while edited");
+      return fields.slice(0, 2).map(([value]) => value).join(" / ");
+    });
+  }
+
   async main() {
     const opened = await H.launch({ port: this.options.port, gl: this.options.gl, viewport: { width: 1100, height: 880 } });
     this.options.base = opened.base;
@@ -317,6 +346,7 @@ class FinalFinishChecks {
     if (this.wanted("computer")) await this.computerPlace();
     if (this.wanted("row")) await this.plotRow();
     if (this.wanted("scrim")) await this.noDimming();
+    if (this.wanted("axis")) await this.axisFields();
 
     await opened.browser.close();
     const errors = [...opened.errors, ...this.errors];

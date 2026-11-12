@@ -454,7 +454,7 @@ body.is-tomovis-page .nav-edge { width: clamp(2px, calc((100% - 1100px) / 2), 12
   width: 120px;
   min-width: 0;
   height: var(--tv-field-h);
-  padding: 0 6px;
+  padding: 0 2px;
   border: 2px solid var(--line);
   border-radius: var(--r-input);
   background: var(--bg-1);
