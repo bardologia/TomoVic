@@ -214,9 +214,9 @@
     <div class="page__head page__head--figure">
       <h2 class="page__title">Tomogram explorer</h2>
       <p class="page__lead">
-        Load a saved tomogram cube, then hover the primary SLC image to cut every tomogram
-        live along range and azimuth. Click to lock a point and read vertical profiles out
-        of the slices.
+        Load a saved tomogram cube, then drag over an area of the primary SLC image to open
+        it with its range and azimuth cuts and the vertical profile under the cursor. Click
+        to lock a point and read profiles out of the cuts.
       </p>
       <hairline-figure name="voxels" class="page__figure" aria-hidden="true"></hairline-figure>
     </div>
@@ -258,7 +258,7 @@
         <span class="cube-modes__tools">
           <label class="lb-check" id="cube-dem-wrap" title="Shift every slice column vertically by its digital elevation model height so the tomograms sit on the terrain" hidden><input type="checkbox" id="cube-dem" /> DEM terrain</label>
           <button type="button" class="btn btn--mini" id="cube-dem-add" hidden>Add DEM</button>
-          <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view and locked pixel exactly as shown">Link</button>
+          <button type="button" class="btn btn--mini" id="cube-link" title="Copy a link that reopens this cube, view, selected area and locked pixel exactly as shown">Link</button>
           <button type="button" class="btn btn--mini" id="cube-story-toggle" title="Record an ordered sequence of view states and replay or share them">Story</button>
           <select id="cube-cmap" class="cube-mselect" aria-label="Tomogram colormap">
             <option value="jet" selected>jet</option>
@@ -289,25 +289,33 @@
         <aside class="cube-map" id="cube-map">
           <div class="cube-map__head">
             <h3 class="cube-panel-title">Primary SLC amplitude</h3>
-            <div class="cube-mctl" role="group" aria-label="Hover magnifier">
-              <label for="cube-lens-zoom" title="Magnify the pixels under the cursor at native resolution">lens</label>
-              <select id="cube-lens-zoom" class="cube-mselect">
-                <option value="0">off</option>
-                <option value="2">2&times;</option>
-                <option value="3" selected>3&times;</option>
-                <option value="4">4&times;</option>
-              </select>
-            </div>
           </div>
           <div class="cube-map__frame">
             <span class="cube-axis cube-axis--y">azimuth &rarr;</span>
             <div class="cube-map__wrap">
-              <img id="cube-topdown" alt="Primary SLC amplitude" />
+              <img id="cube-topdown" alt="Primary SLC amplitude" draggable="false" />
+              <i class="cube-area-box" id="cube-area-box" hidden></i>
+            </div>
+            <span class="cube-axis cube-axis--x">range &rarr;</span>
+          </div>
+          <p class="cube-coords" id="cube-coords">Click and hold on the image, drag over an area and release to open it below</p>
+        </aside>
+
+        <div class="cube-work" id="cube-work" hidden>
+        <aside class="cube-map cube-area" id="cube-area">
+          <div class="cube-map__head">
+            <h3 class="cube-panel-title">Selected area</h3>
+            <span class="cube-slices__at" id="cube-area-at"></span>
+          </div>
+          <div class="cube-map__frame">
+            <span class="cube-axis cube-axis--y">azimuth &rarr;</span>
+            <div class="cube-map__wrap cube-area__wrap">
+              <canvas id="cube-area-canvas" data-fig="selected area"></canvas>
               <i class="cube-cross" id="cube-cross" hidden></i>
             </div>
             <span class="cube-axis cube-axis--x">range &rarr;</span>
           </div>
-          <p class="cube-coords" id="cube-coords">Hover the image to cut every tomogram &middot; click to lock the slices</p>
+          <p class="cube-coords" id="cube-area-coords"></p>
         </aside>
 
         <div class="cube-slices" id="cube-slices" hidden>
@@ -368,7 +376,7 @@
             </div>
             <label class="lb-check" id="cube-prof-mix-wrap" hidden title="Mark every active Gaussian slot of the parametrized tomogram with a stem at its mean, as long as its amplitude"><input type="checkbox" id="cube-prof-mix" /> slots</label>
           </div>
-          <p class="cube-coords" id="cube-prof-at">Hover a slice to read the profiles at that position.</p>
+          <p class="cube-coords" id="cube-prof-at"></p>
           <div class="cube-profiles__grid">
             <figure class="cube-prof" data-source="full" data-fig="vertical profile"><div class="cube-prof__media"><canvas></canvas></div></figure>
           </div>
@@ -380,6 +388,7 @@
             </table>
           </div>
         </aside>
+        </div>
       </div>
       </div>
 

@@ -121,13 +121,6 @@ def test_the_cube_panels_label_every_slice_plane_and_profile():
         assert re.search(rf'<canvas id="{canvas}" data-fig="[^"]+"', html), canvas
 
 
-def test_the_cube_lens_stays_out_of_the_scan():
-    """The hover magnifier is transient chrome, so its canvas opts out of the figure scan."""
-    text = (JS_DIR / "tomogram.js").read_text(encoding="utf-8")
-
-    assert re.search(r'this\.canvas\.className = "cube-lens";\s*this\.canvas\.dataset\.nofig = "";', text)
-
-
 def test_the_volume_view_keeps_its_drawing_buffer():
     """The WebGL volume canvas stays readable so it can be captured like any other figure."""
     assert "preserveDrawingBuffer: true" in (JS_DIR / "volume.js").read_text(encoding="utf-8")

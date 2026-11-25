@@ -513,55 +513,6 @@ class TomogramTransect {
   }
 }
 
-class TomogramLens {
-  static SIZE = 180;
-
-  constructor(media, container, host) {
-    this.host = host;
-    this.media = media;
-    this.canvas = document.createElement("canvas");
-    this.canvas.className = "cube-lens";
-    this.canvas.dataset.nofig = "";
-    this.canvas.width = TomogramLens.SIZE;
-    this.canvas.height = TomogramLens.SIZE;
-    this.canvas.hidden = true;
-    container.appendChild(this.canvas);
-
-    media.addEventListener("mousemove", (ev) => this._onMove(ev));
-    media.addEventListener("mouseleave", () => { this.canvas.hidden = true; });
-  }
-
-  _sourceSize() {
-    if (this.media.naturalWidth !== undefined) return { w: this.media.naturalWidth, h: this.media.naturalHeight };
-    return { w: this.media.width, h: this.media.height };
-  }
-
-  _onMove(ev) {
-    const zoom = this.host.lensZoom;
-    const { w, h } = this._sourceSize();
-    if (!zoom || !w || !h) { this.canvas.hidden = true; return; }
-
-    const rect = this.media.getBoundingClientRect();
-    const fx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    const fy = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
-
-    const size = TomogramLens.SIZE;
-    const sw = Math.min(w, (size / zoom) * (w / rect.width));
-    const sh = Math.min(h, (size / zoom) * (h / rect.height));
-    const sx = Math.min(w - sw, Math.max(0, fx * w - sw / 2));
-    const sy = Math.min(h - sh, Math.max(0, fy * h - sh / 2));
-
-    const ctx = this.canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(this.media, sx, sy, sw, sh, 0, 0, size, size);
-
-    this.canvas.style.left = `${ev.clientX - rect.left - size / 2}px`;
-    this.canvas.style.top = `${ev.clientY - rect.top - size / 2}px`;
-    this.canvas.hidden = false;
-  }
-}
-
 class TomogramCloud {
   static VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
   static SWEEP_MS = 9000;
@@ -1653,11 +1604,11 @@ class TomogramFigures {
 class TomogramView {
   static LABELS = { full: "capon full", param: "parametrized" };
   static SLOT_COLORS = ["#e45756", "#4c78a8", "#54a24b", "#b279a2", "#eeca3b", "#72b7b2", "#f58518", "#9d755d"];
-  static HOLD_SAVE_MS = 4000;
+  static AREA_MIN_PX = 4;
   static STATUS_TIMEOUT_MS = 15000;
   static STALL_AFTER_S = 5;
-  static HOLD_HINT_MS = 800;
   static SWEEP_CACHE_BYTES = 192 * 1024 * 1024;
+  static AREA_PROMPT = "Click and hold on the image, drag over an area and release to open it below";
   static DEM_VIEWS = ["explorer", "azimuth", "range", "transect"];
   static MISSING_TOOLS = { globe: "cube_globe", passes: "cube_passes", pauli: "cube_pauli" };
 
@@ -1714,10 +1665,8 @@ class TomogramView {
     this.focus = null;
     this.focusSeq = 0;
     this.cutsAdopted = 0;
-    this.holdTimer = null;
-    this.holdHintTimer = null;
-    this.holdHintOn = false;
-    this.holdFired = false;
+    this.area = null;
+    this.drag = null;
     this.saving = false;
     this.entered = false;
     this.polling = false;
@@ -1735,7 +1684,6 @@ class TomogramView {
     this.cmap = localStorage.getItem("cube-cmap") || "jet";
     this.dem = localStorage.getItem("cube-dem") === "1";
     this.sweepSpeed = Number(localStorage.getItem("cube-sweep-speed")) || 1;
-    this.lensZoom = Number(localStorage.getItem("cube-lens-zoom") || 3);
     this.bitmapCache = new Map();
     this.bitmapBytes = 0;
 
@@ -1750,25 +1698,30 @@ class TomogramView {
 
     this.mapWrap = this.topdown.closest(".cube-map__wrap");
 
-    this.lenses = [new TomogramLens(this.topdown, this.mapWrap, this)];
-    this.panels.forEach((panel) => this.lenses.push(new TomogramLens(panel.canvas, panel.canvas.parentElement, this)));
+    this.workEl     = refs.work;
+    this.areaBox    = refs.areaBox;
+    this.areaCanvas = refs.areaCanvas;
+    this.areaAt     = refs.areaAt;
+    this.areaCoords = refs.areaCoords;
 
-    this.lensZoomSel = document.getElementById("cube-lens-zoom");
-    if (this.lensZoomSel) {
-      this.lensZoomSel.value = String(this.lensZoom);
-      this.lensZoomSel.addEventListener("change", () => {
-        this.lensZoom = Number(this.lensZoomSel.value);
-        localStorage.setItem("cube-lens-zoom", String(this.lensZoom));
-      });
-    }
+    this.panels.forEach((panel) => {
+      panel.mark = document.createElement("i");
+      panel.mark.className = "cube-mark";
+      panel.mark.hidden = true;
+      panel.canvas.parentElement.appendChild(panel.mark);
+    });
 
-    this.topdown.addEventListener("mousemove", (ev) => this._onMove(ev));
-    this.topdown.addEventListener("mousedown", (ev) => this._onHoldStart(ev));
-    this.topdown.addEventListener("mouseup", () => this._cancelHold());
-    this.topdown.addEventListener("mouseleave", () => this._cancelHold());
-    this.topdown.addEventListener("click", (ev) => this._onClick(ev));
-    this.topdown.addEventListener("load", () => this.mapWrap.classList.remove("is-loading"));
+    this.topdown.addEventListener("mousedown", (ev) => this._onAreaStart(ev));
+    window.addEventListener("mousemove", (ev) => this._onAreaDrag(ev));
+    window.addEventListener("mouseup", () => this._onAreaEnd());
+    this.topdown.addEventListener("load", () => {
+      this.mapWrap.classList.remove("is-loading");
+      this._drawArea();
+    });
     this.topdown.addEventListener("error", () => this.mapWrap.classList.remove("is-loading"));
+
+    this.areaCanvas.addEventListener("mousemove", (ev) => this._onMove(ev));
+    this.areaCanvas.addEventListener("click", (ev) => this._onClick(ev));
 
     this.back.addEventListener("click", () => this._exitSlices());
     document.addEventListener("keydown", (ev) => {
@@ -1897,7 +1850,7 @@ class TomogramView {
 
   _downloadCuts() {
     if (!this.meta || !this.point) {
-      Toast.show("Hover or lock a cut first.", "warn");
+      Toast.show("Select an area on the primary image first.", "warn");
       return;
     }
 
@@ -2031,6 +1984,7 @@ class TomogramView {
       return {
         id       : query.get("id"),
         view     : query.get("view"),
+        area     : query.get("area"),
         az       : query.has("az") ? Number(query.get("az")) : null,
         rg       : query.has("rg") ? Number(query.get("rg")) : null,
         source   : query.get("source"),
@@ -2056,6 +2010,7 @@ class TomogramView {
     query.set("cmap", this.cmap);
 
     const point = this.locked || this.point;
+    if (this.area) query.set("area", [this.area.az0, this.area.rg0, this.area.nAz, this.area.nRg].join(","));
     if (point) {
       query.set("az", String(point.az));
       query.set("rg", String(point.rg));
@@ -2114,13 +2069,12 @@ class TomogramView {
     }
     if (state.source) this._setViewSource(state.source);
 
+    const area = this._parseArea(state.area);
+    if (area) this._setArea(area);
+
     if (Number.isFinite(state.az) && Number.isFinite(state.rg)) {
-      const az = Math.max(0, Math.min(this.meta.n_az - 1, state.az));
-      const rg = Math.max(0, Math.min(this.meta.n_rg - 1, state.rg));
-      const point = { az, rg, fx: (rg + 0.5) / this.meta.n_rg, fy: (az + 0.5) / this.meta.n_az };
       if (this.view !== "explorer") this._setView("explorer");
-      this._follow(point, true);
-      this._enterSlices(point);
+      this._openAt(state.az, state.rg, true);
     }
 
     if (this.pauli) this.pauli.applyState(state);
@@ -2381,8 +2335,13 @@ class TomogramView {
     this.focus = null;
     this.cutsAdopted = this.focusSeq;
     this.mode = "map";
+    this.area = null;
+    this.drag = null;
+    this.workEl.hidden = true;
+    this._paintAreaBox(null);
     this.panels.forEach((panel) => {
       this._releasePanel(panel);
+      panel.mark.hidden = true;
       panel.marker = 0;
       panel.queued = null;
       panel.fetching = false;
@@ -2394,9 +2353,11 @@ class TomogramView {
     this.back.hidden = true;
     this.cross.hidden = true;
     this._hideRefs();
-    this.coords.textContent = "Hover the image to cut every tomogram · click to lock the slices";
+    this.coords.textContent = TomogramView.AREA_PROMPT;
+    this.areaAt.textContent = "";
+    this.areaCoords.textContent = "";
     this.slicesAt.textContent = "";
-    this.profAt.textContent = "Hover a slice to read the profiles at that position.";
+    this.profAt.textContent = "";
     if (this.atLabels.range)   this.atLabels.range.textContent   = "";
     if (this.atLabels.azimuth) this.atLabels.azimuth.textContent = "";
     this._showStage(false);
@@ -2671,7 +2632,7 @@ class TomogramView {
   _display(meta) {
     this.meta = meta;
     this.progress.hidden = true;
-    this.coords.textContent = `loaded in ${meta.timings.total.toFixed(1)} s (${this._slowestStage(meta.timings)}) · hover the image to cut every tomogram · click to lock the slices`;
+    this.coords.textContent = `loaded in ${meta.timings.total.toFixed(1)} s (${this._slowestStage(meta.timings)}) · ${TomogramView.AREA_PROMPT.toLowerCase()}`;
     this._clearBitmapCache();
 
     const css = getComputedStyle(this.stage);
@@ -2750,7 +2711,6 @@ class TomogramView {
 
     this._syncBridgeChrome();
 
-    this._follow({ az: Math.floor(meta.n_az / 2), rg: Math.floor(meta.n_rg / 2), fx: 0.5, fy: 0.5 }, true);
     this._consumeFocus();
     this._applyPendingState();
 
@@ -2773,16 +2733,8 @@ class TomogramView {
     const { az, rg } = this.pendingFocus;
     this.pendingFocus = null;
 
-    const clampedAz = Math.max(0, Math.min(this.meta.n_az - 1, az));
-    const clampedRg = Math.max(0, Math.min(this.meta.n_rg - 1, rg));
-
     this._setView("explorer");
-    this._follow({
-      az : clampedAz,
-      rg : clampedRg,
-      fx : this.meta.n_rg > 1 ? clampedRg / (this.meta.n_rg - 1) : 0.5,
-      fy : this.meta.n_az > 1 ? clampedAz / (this.meta.n_az - 1) : 0.5,
-    }, true);
+    this._openAt(az, rg, false);
   }
 
   _setCmap(cmap) {
@@ -2872,8 +2824,7 @@ class TomogramView {
 
     if (view === "explorer" && this.meta && this.focus && this.cutsAdopted !== this.focusSeq) {
       const point = this.focusPoint();
-      this._follow(point, true);
-      this._enterSlices(point);
+      this._openAt(point.az, point.rg, true);
       return;
     }
 
@@ -3056,19 +3007,166 @@ class TomogramView {
     });
   }
 
-  _pointFromEvent(ev) {
-    if (!this.meta) return null;
-
+  _mapPixel(ev) {
     const rect = this.topdown.getBoundingClientRect();
-    const fx = (ev.clientX - rect.left) / rect.width;
-    const fy = (ev.clientY - rect.top) / rect.height;
+    const fx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const fy = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
 
     return {
-      az: Math.min(this.meta.n_az - 1, Math.max(0, Math.floor(fy * this.meta.n_az))),
-      rg: Math.min(this.meta.n_rg - 1, Math.max(0, Math.floor(fx * this.meta.n_rg))),
-      fx,
-      fy,
+      az: Math.min(this.meta.n_az - 1, Math.floor(fy * this.meta.n_az)),
+      rg: Math.min(this.meta.n_rg - 1, Math.floor(fx * this.meta.n_rg)),
     };
+  }
+
+  _onAreaStart(ev) {
+    if (ev.button !== 0 || !this.meta) return;
+
+    ev.preventDefault();
+    const pixel = this._mapPixel(ev);
+    this.drag = { from: pixel, to: pixel };
+    this._paintAreaBox(this._dragArea());
+  }
+
+  _onAreaDrag(ev) {
+    if (!this.drag) return;
+
+    this.drag.to = this._mapPixel(ev);
+    const area = this._dragArea();
+    this._paintAreaBox(area);
+    this.coords.textContent = `${this._areaText(area)} · release to open this area`;
+  }
+
+  _onAreaEnd() {
+    if (!this.drag) return;
+
+    const area = this._dragArea();
+    this.drag = null;
+
+    if (area.nAz < TomogramView.AREA_MIN_PX || area.nRg < TomogramView.AREA_MIN_PX) {
+      this._paintAreaBox(this.area);
+      this.coords.textContent = TomogramView.AREA_PROMPT;
+      return;
+    }
+
+    this._setArea(area);
+  }
+
+  _dragArea() {
+    const { from, to } = this.drag;
+
+    return {
+      az0 : Math.min(from.az, to.az),
+      rg0 : Math.min(from.rg, to.rg),
+      nAz : Math.abs(from.az - to.az) + 1,
+      nRg : Math.abs(from.rg - to.rg) + 1,
+    };
+  }
+
+  _areaText(area) {
+    return `az ${area.az0}–${area.az0 + area.nAz - 1} · rg ${area.rg0}–${area.rg0 + area.nRg - 1} · ${area.nAz} × ${area.nRg} px`;
+  }
+
+  _paintAreaBox(area) {
+    this.areaBox.hidden = !area;
+    if (!area) return;
+
+    this.areaBox.style.left   = `${(area.rg0 / this.meta.n_rg) * 100}%`;
+    this.areaBox.style.top    = `${(area.az0 / this.meta.n_az) * 100}%`;
+    this.areaBox.style.width  = `${(area.nRg / this.meta.n_rg) * 100}%`;
+    this.areaBox.style.height = `${(area.nAz / this.meta.n_az) * 100}%`;
+  }
+
+  _parseArea(text) {
+    const values = String(text || "").split(",").map(Number);
+    if (values.length !== 4 || !values.every(Number.isInteger)) return null;
+
+    const az0 = this._clampInt(values[0], this.meta.n_az);
+    const rg0 = this._clampInt(values[1], this.meta.n_rg);
+
+    return {
+      az0,
+      rg0,
+      nAz : Math.max(1, Math.min(this.meta.n_az - az0, values[2])),
+      nRg : Math.max(1, Math.min(this.meta.n_rg - rg0, values[3])),
+    };
+  }
+
+  _areaAround(az, rg) {
+    if (!this.area) return { az0: 0, rg0: 0, nAz: this.meta.n_az, nRg: this.meta.n_rg };
+
+    const { nAz, nRg } = this.area;
+
+    return {
+      az0 : Math.max(0, Math.min(this.meta.n_az - nAz, az - Math.floor(nAz / 2))),
+      rg0 : Math.max(0, Math.min(this.meta.n_rg - nRg, rg - Math.floor(nRg / 2))),
+      nAz,
+      nRg,
+    };
+  }
+
+  _inArea(az, rg) {
+    const area = this.area;
+    return !!area && az >= area.az0 && az < area.az0 + area.nAz && rg >= area.rg0 && rg < area.rg0 + area.nRg;
+  }
+
+  _areaPoint(az, rg) {
+    return { az, rg, fx: (rg - this.area.rg0 + 0.5) / this.area.nRg, fy: (az - this.area.az0 + 0.5) / this.area.nAz };
+  }
+
+  _setArea(area) {
+    this._exitSlices();
+    this.area = area;
+
+    this._paintAreaBox(area);
+    this.coords.textContent = `${this._areaText(area)} · drag again to pick another area`;
+    this.areaAt.textContent = this._areaText(area);
+    this.workEl.hidden = false;
+    this._drawArea();
+    this.workEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    this._follow(this._areaPoint(area.az0 + Math.floor(area.nAz / 2), area.rg0 + Math.floor(area.nRg / 2)), true);
+  }
+
+  _drawArea() {
+    if (!this.area || !this.topdown.naturalWidth) return;
+
+    const { az0, rg0, nAz, nRg } = this.area;
+    const sx = this.topdown.naturalWidth / this.meta.n_rg;
+    const sy = this.topdown.naturalHeight / this.meta.n_az;
+    const shown = this.topdown.getBoundingClientRect();
+    const pixelAspect = shown.height ? (shown.width / this.meta.n_rg) / (shown.height / this.meta.n_az) : 1;
+
+    this.areaCanvas.width  = nRg;
+    this.areaCanvas.height = nAz;
+    this.areaCanvas.parentElement.style.setProperty("--area-ar", String((nRg / nAz) * pixelAspect));
+
+    const ctx = this.areaCanvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.topdown, rg0 * sx, az0 * sy, nRg * sx, nAz * sy, 0, 0, nRg, nAz);
+  }
+
+  _openAt(az, rg, lock) {
+    const clampedAz = this._clampInt(az, this.meta.n_az);
+    const clampedRg = this._clampInt(rg, this.meta.n_rg);
+
+    if (!this._inArea(clampedAz, clampedRg)) this._setArea(this._areaAround(clampedAz, clampedRg));
+
+    const point = this._areaPoint(clampedAz, clampedRg);
+    this._follow(point, true);
+    if (lock) this._enterSlices(point);
+  }
+
+  _pointFromEvent(ev) {
+    if (!this.meta || !this.area) return null;
+
+    const rect = this.areaCanvas.getBoundingClientRect();
+    const fx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const fy = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
+
+    const az = this.area.az0 + Math.min(this.area.nAz - 1, Math.floor(fy * this.area.nAz));
+    const rg = this.area.rg0 + Math.min(this.area.nRg - 1, Math.floor(fx * this.area.nRg));
+
+    return this._areaPoint(az, rg);
   }
 
   _onMove(ev) {
@@ -3079,54 +3177,10 @@ class TomogramView {
   }
 
   _onClick(ev) {
-    if (this.holdFired) {
-      this.holdFired = false;
-      return;
-    }
-    if (this.mode !== "map") return;
     const point = this._pointFromEvent(ev);
     if (!point) return;
     this._follow(point, true);
     this._enterSlices(point);
-  }
-
-  _onHoldStart(ev) {
-    if (this.mode !== "map" || ev.button !== 0 || !this.meta) return;
-
-    ev.preventDefault();
-    this.holdFired = false;
-    this._cancelHold();
-
-    this.holdHintTimer = setTimeout(() => {
-      this.holdHintOn = true;
-      this.coords.textContent = "keep holding to save the slice figures…";
-    }, TomogramView.HOLD_HINT_MS);
-
-    this.holdTimer = setTimeout(() => this._fireHoldSave(), TomogramView.HOLD_SAVE_MS);
-  }
-
-  _cancelHold() {
-    clearTimeout(this.holdHintTimer);
-    clearTimeout(this.holdTimer);
-    this.holdHintTimer = null;
-    this.holdTimer = null;
-    this.holdHintOn = false;
-  }
-
-  async _fireHoldSave() {
-    this._cancelHold();
-    if (this.mode !== "map" || !this.meta || !this.point) return;
-
-    this.holdFired = true;
-    this.holdHintOn = true;
-
-    const { az, rg } = this.point;
-    this.coords.innerHTML = ThinkingOrb.busy("composing", `saving slice figures at az = ${az} · rg = ${rg}…`);
-
-    await this._saveSlices(az, rg);
-
-    this.holdHintOn = false;
-    if (this.point) this.coords.textContent = `az = ${this.point.az} · rg = ${this.point.rg} · click to lock`;
   }
 
   _printSlices() {
@@ -3163,10 +3217,8 @@ class TomogramView {
 
     const az = this._clampInt(this.jumpAz ? this.jumpAz.value : 0, this.meta.n_az);
     const rg = this._clampInt(this.jumpRg ? this.jumpRg.value : 0, this.meta.n_rg);
-    const point = { az, rg, fx: (rg + 0.5) / this.meta.n_rg, fy: (az + 0.5) / this.meta.n_az };
 
-    this._follow(point, true);
-    this._enterSlices(point);
+    this._openAt(az, rg, true);
     this._syncCutInputs(az, rg, true);
   }
 
@@ -3201,7 +3253,7 @@ class TomogramView {
     this.cutsAdopted = this.focusSeq;
     this.deck.dataset.mode = "slices";
     this.back.hidden = false;
-    this.slicesAt.textContent = `locked at az = ${point.az} · rg = ${point.rg} · hover a slice for profiles · Esc to go back`;
+    this.slicesAt.textContent = `locked at az = ${point.az} · rg = ${point.rg} · hover a cut for profiles · Esc to unlock`;
     this._queueProfiles(point.az, point.rg);
   }
 
@@ -3213,6 +3265,7 @@ class TomogramView {
     this.back.hidden = true;
     this.slicesAt.textContent = "";
     this._hideRefs();
+    if (this.point) this._queueProfiles(this.point.az, this.point.rg);
   }
 
   _hideRefs() {
@@ -3226,8 +3279,8 @@ class TomogramView {
 
     const rect = panel.canvas.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    const n    = panel.axis === "range" ? this.meta.n_az : this.meta.n_rg;
-    const idx  = Math.min(n - 1, Math.floor(frac * n));
+    const win  = this._cutWindow(panel.axis);
+    const idx  = win.start + Math.min(win.count - 1, Math.floor(frac * win.count));
 
     this.panels.forEach((p) => {
       if (!p.ref || p.root.hidden) return;
@@ -3252,10 +3305,11 @@ class TomogramView {
 
     this.point = point;
     this._moveCross(point);
-    if (!this.holdHintOn) this.coords.textContent = `az = ${point.az} · rg = ${point.rg} · click to lock`;
+    this.areaCoords.textContent = `az = ${point.az} · rg = ${point.rg} · click to lock`;
     this._syncCutInputs(point.az, point.rg);
 
     this._drawSlices(point.az, point.rg);
+    if (this.mode === "map") this._queueProfiles(point.az, point.rg);
   }
 
   _moveCross(point) {
@@ -3286,7 +3340,8 @@ class TomogramView {
 
   _updatePanel(panel, az, rg) {
     const key = panel.axis === "range" ? rg : az;
-    panel.marker = panel.axis === "range" ? az / this.meta.n_az : rg / this.meta.n_rg;
+    const win = this._cutWindow(panel.axis);
+    panel.marker = ((panel.axis === "range" ? az : rg) - win.start + 0.5) / win.count;
 
     if (panel.bitmap && panel.key === key && panel.drawnSpace === this.space) {
       this._paintSlice(panel);
@@ -3334,35 +3389,25 @@ class TomogramView {
     }
   }
 
+  _cutWindow(axis) {
+    return axis === "range" ? { start: this.area.az0, count: this.area.nAz } : { start: this.area.rg0, count: this.area.nRg };
+  }
+
   _paintSlice(panel) {
     const bitmap = panel.bitmap;
     const canvas = panel.canvas;
+    const win    = this._cutWindow(panel.axis);
 
-    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-      canvas.width = bitmap.width;
+    if (canvas.width !== win.count || canvas.height !== bitmap.height) {
+      canvas.width = win.count;
       canvas.height = bitmap.height;
     }
 
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0);
+    ctx.drawImage(bitmap, win.start, 0, win.count, bitmap.height, 0, 0, win.count, bitmap.height);
 
-    const x = panel.marker * canvas.width;
-
-    ctx.setLineDash([2, 3]);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-    ctx.lineWidth = 3.2;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
-
-    ctx.strokeStyle = this.colors[panel.axis] || "#fff";
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    panel.mark.style.left = `${panel.marker * 100}%`;
+    panel.mark.hidden = false;
   }
 
   _queueProfiles(az, rg) {
