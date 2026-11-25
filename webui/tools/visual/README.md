@@ -1,7 +1,7 @@
 # Console tour recorder
 
 `record_tour.js` renders a short product-style video of the console: the Cube tab opening a
-run, the Cuts view with the hover lens and the live range and azimuth cuts, the azimuth
+run, the Cuts view with an area dragged on the SLC image and its range and azimuth cuts, the azimuth
 sweep, a transect traced on the SLC map, the Slice collector filling its basket, and the
 globe flying a camera tour over the point cloud. Nothing is captured in real time. The
 headless shell runs under begin-frame control with virtual time, so the recorder advances

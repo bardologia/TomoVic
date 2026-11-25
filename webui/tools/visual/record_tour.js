@@ -270,6 +270,13 @@ class TourRecorder {
     ]);
   }
 
+  dragEvent(type, p) {
+    return this.page.evaluate(([kind, x, y]) => {
+      const target = kind === "mousedown" ? document.getElementById("cube-topdown") : window;
+      target.dispatchEvent(new MouseEvent(kind, { clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true }));
+    }, [type, p.x, p.y]);
+  }
+
   pushOn(center, from, to, end, push) {
     const amount = 1 + (push || this.push);
     return new Track([[0, { ...center, z: 1 }], [from, { ...center, z: 1 }], [to, { ...center, z: amount }], [end, { ...center, z: amount }]]);
@@ -320,18 +327,33 @@ class TourRecorder {
     const strip  = await this.rectOf("#cube-topdown");
     const mapTop = await this.topOf("#cube-map", 30);
     const at     = (fx, fy) => this.centerAt(strip, mapTop, fx, fy);
-    const hover  = new Track([[0, this.pt(1300, 780)], [1.5, at(0.14, 0.55)], [3.2, at(0.36, 0.40)], [4.9, at(0.60, 0.62)], [6.4, at(0.78, 0.46)], [6.8, at(0.79, 0.47)]]);
-    const settle = new Track([[0, 0], [0.2, 0], [1.2, mapTop], [6.8, mapTop]]);
-    await this.shoot(6.8, { scroll: settle, mouse: hover, clicks: [6.6], cam: new Track([[0, Camera.still(720, 500)]]) }, 0);
+    const drag   = new Track([[0, this.pt(1300, 780)], [1.4, at(0.30, 0.28)], [1.8, at(0.30, 0.28)], [3.4, at(0.56, 0.74)], [4.0, at(0.56, 0.74)]]);
+    const settle = new Track([[0, 0], [0.2, 0], [1.2, mapTop], [4.0, mapTop]]);
+    const steps  = [[1.6, "mousedown"], [3.6, "mouseup"]];
+    let held     = false;
+    const pull   = async (t) => {
+      if (steps.length && t >= steps[0][0]) {
+        const kind = steps.shift()[1];
+        held = kind === "mousedown";
+        await this.dragEvent(kind, drag.at(t));
+      } else if (held) {
+        await this.dragEvent("mousemove", drag.at(t));
+      }
+    };
+    await this.shoot(4.0, { scroll: settle, mouse: drag, cam: new Track([[0, Camera.still(720, 500)]]) }, 0, pull);
+    await this.until("!document.getElementById('cube-work').hidden && !!document.querySelector('#cube-slices.is-in')", 15);
 
-    const cuts    = (await this.rectOf("#cube-slices")) || { left: 0, top: mapTop + 500, width: 1440, height: 400 };
-    const cutsTop = Math.max(mapTop, Math.round(cuts.top - 70));
-    const focus   = this.centerAt(cuts, cutsTop, 0.5, Math.min(0.5, 360 / Math.max(cuts.height, 1)));
-    const scroll  = new Track([[6.8, mapTop], [7.2, mapTop], [8.6, cutsTop], [10.0, cutsTop]]);
-    const parked  = hover.at(6.8);
-    const mouse   = new Track([[6.8, parked], [7.2, parked], [8.2, this.pt(1424, 300)], [10.0, this.pt(1424, 420)]]);
+    const work    = await this.rectOf("#cube-work");
+    const area    = await this.rectOf("#cube-area-canvas");
+    const cut     = await this.rectOf('.cube-slice[data-axis="range"] canvas');
+    const workTop = Math.max(mapTop, Math.round(work.top - 70));
+    const inArea  = (fx, fy) => this.centerAt(area, workTop, fx, fy);
+    const inCut   = (fx, fy) => this.centerAt(cut, workTop, fx, fy);
+    const focus   = this.centerAt(work, workTop, 0.5, Math.min(0.5, 360 / Math.max(work.height, 1)));
+    const scroll  = new Track([[4.0, mapTop], [4.3, mapTop], [5.5, workTop], [10.0, workTop]]);
+    const mouse   = new Track([[4.0, drag.at(4.0)], [5.6, inArea(0.2, 0.3)], [7.2, inArea(0.7, 0.6)], [7.7, inArea(0.7, 0.6)], [8.6, inCut(0.3, 0.5)], [10.0, inCut(0.75, 0.5)]]);
     const cam     = this.pushOn(focus, 8.6, 10.0, 10.0, 0.04);
-    await this.shoot(3.2, { scroll, mouse, cam }, 6.8);
+    await this.shoot(6.0, { scroll, mouse, cam, clicks: [7.4] }, 4.0);
   }
 
   async sceneSweep() {
