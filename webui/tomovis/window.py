@@ -360,18 +360,18 @@ class TomoVisWindow:
         self.allChMenu.setChecked(True)
 
         self.ch1Menu = QtAction(self.boundary, "ch1Menu", "&Red", self.ChMenu, checkable=True)
-        self.ch1Menu.setStatusTip("First channel")
+        self.ch1Menu.setStatusTip("Second channel")
         self.ch1Menu.triggered.connect(self.chChanged)
 
         self.ch2Menu = QtAction(self.boundary, "ch2Menu", "&Green", self.ChMenu, checkable=True)
-        self.ch2Menu.setStatusTip("Second channel")
+        self.ch2Menu.setStatusTip("First channel")
         self.ch2Menu.triggered.connect(self.chChanged)
 
         self.ch3Menu = QtAction(self.boundary, "ch3Menu", "&Blue", self.ChMenu, checkable=True)
         self.ch3Menu.setStatusTip("Third channel")
         self.ch3Menu.triggered.connect(self.chChanged)
 
-        self.chOpt = {self.ch1Menu: 0, self.ch2Menu: 1, self.ch3Menu: 2}
+        self.chOpt = {self.ch1Menu: 1, self.ch2Menu: 0, self.ch3Menu: 2}
 
         self.ag = QtActionGroup()
         self.ag.addAction(self.allChMenu)
@@ -807,11 +807,11 @@ class TomoVisWindow:
             self.initializeVisualizerWithData()
 
     def setDefaultElevRangeIfMissing(self):
-        """Sets the elevation range to [0, shape[-1] - 1] (F-015, Q-001) (visualizer.py:941)."""
+        """Sets the elevation range to [0, shape[-3] - 1], the height axis being third from the end (F-015, Q-001) (visualizer.py:941)."""
 
         if self.data is None:
             return
-        nz = self.data.shape[-1]
+        nz = self.data.shape[-3]
         self.z_range = [0, (nz - 1)]
 
     def initializeVisualizerWithData(self):
@@ -870,7 +870,7 @@ class TomoVisWindow:
                     self.imv1_1.addItem(self.slice_line)
 
             nz = self.data.shape[-1]
-            self.z_axis = np.linspace(float(self.z_range[0]), float(self.z_range[1]), num=nz)
+            self.z_axis = np.linspace(float(self.z_range[0]), float(self.z_range[1]), num=self.data.shape[-3])
             self.z_range = [float(self.z_axis[0]), float(self.z_axis[-1])]
             self.z_view_range = [float(self.z_range[0]), float(self.z_range[1])]
 
@@ -906,9 +906,12 @@ class TomoVisWindow:
             self.volume_present = True
 
         if not self.volume_rendered:
-            dataV = exposure.equalize_hist(np.abs(self.data), 2048).astype(np.float32)
+            dataV = exposure.equalize_hist(self.tools.sanitize_for_display(np.abs(self.data)), 2048).astype(np.float32)
 
-            dataV = dataV[::8, ::8, ::2]
+            dataV = dataV[..., ::2, ::8, ::8]
+
+            if dataV.ndim == 4:
+                dataV = np.moveaxis(dataV, 0, -1)
 
             self.volume_data = np.ascontiguousarray(dataV)
             self.volume_serial += 1
@@ -1271,8 +1274,8 @@ class TomoVisWindow:
             for j in range(self.nChannels):
                 if self.tab2ChkBox1.isChecked() is True:
                     for i in range(d2toPlot.T.shape[-1]):
-                        self.rgbArray[:, i, j] = self.tools.normalize(d2toPlot[i, :, j].T, 0, 1)
-                        rgbArray[:, i, j] = self.tools.normalize(self.rgbArray[:, i, j], 0, 255)
+                        self.rgbArray[:, i, j] = self.tools.normalize_peak(d2toPlot[i, :, j].T)
+                        rgbArray[:, i, j] = 255 * self.rgbArray[:, i, j]
                 else:
                     self.rgbArray[..., j] = d2toPlot[..., j].T
                     rgbArray[..., j] = self.tools.normalize(self.rgbArray[..., j], 0, 255)
@@ -1290,7 +1293,7 @@ class TomoVisWindow:
 
             if self.tab2ChkBox1.isChecked() is True:
                 for i in range(d2toPlot.T.shape[-1]):
-                    self.d2Norm[:, i] = self.tools.normalize(d2toPlot.T[:, i], 0, 1)
+                    self.d2Norm[:, i] = self.tools.normalize_peak(d2toPlot.T[:, i])
             else:
                 self.d2Norm = d2toPlot.T
 
@@ -1558,13 +1561,17 @@ class TomoVisWindow:
         return x0, y0, x1, y1, theta_eff, d_eff
 
     def createClippedROI(self, target_view):
-        """Adds a temporary ROI on the clipped line to a view (visualizer.py:1688)."""
+        """Adds a temporary ROI on the clipped line to a view; an azimuth or range cut starts at the low coordinate (visualizer.py:1688)."""
 
         line = self.getEffectiveROILine()
         if line is None:
             return None
 
         x0, y0, x1, y1, _, _ = line
+
+        mode = self.getROIAxisMode()
+        if (mode == "azimuth" and x0 > x1) or (mode == "range" and y0 > y1):
+            x0, y0, x1, y1 = x1, y1, x0, y0
 
         roi = PgLineSegmentRoiModel(
             [[x0, y0], [x1, y1]],

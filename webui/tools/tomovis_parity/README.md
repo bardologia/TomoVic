@@ -55,17 +55,13 @@ their innermost frames; outside actions it hands exceptions to the default hook.
 Two harness pieces change what runs, and both are switched per scenario and named in the
 scenario's `toolkit_shims` list:
 
-- `RgbLevelsShim`. TomoVis passes per-channel level lists to `ImageView.setLevels` for its RGB
-  views. pyqtgraph 0.14 raises `TypeError: unhashable type: 'list'` there, so on the
-  `tomovis` environment the RGB top view keeps levels (0, 1) and saturates, the RGB tomogram
-  is never computed, and the RGB Plot and Profile fail. With the shim on, those calls go to
-  pyqtgraph's own per-channel mechanism (level mode `rgba`, one pair per channel); every
-  other call is untouched and TomoVis code runs unmodified. Scenarios ending in `_as_is` and
-  the plain `import_npy_channels_*` ones run without it.
-- `NumpyLegacyNames`. STEtools' `rrat` uses `np.int` and `srat` uses `np.ctypeslib.array`
-  and `np.product`, all gone in numpy 2. The RAT fixture is written with them restored, and
-  `import_rat_legacy_numpy` reads it with them restored; `import_rat_numpy2` shows the
-  original failing.
+- `RgbLevelsShim`. It routes `ImageView.setLevels(list, list)`, which raises in pyqtgraph
+  0.14, to pyqtgraph's per-channel level mode `rgba`. TomoVis now sets its RGB levels through
+  that mode itself and no longer makes the call, so the shim changes nothing: scenarios with
+  and without it (`_as_is`, the plain `import_npy_channels_*`) record the same views.
+- `NumpyLegacyNames`. STEtools' `srat` uses `np.ctypeslib.array`, gone in numpy 2, so the RAT
+  fixture is written with the legacy names restored. TomoVis's `rrat` reads under numpy 2, so
+  `import_rat_numpy2` and `import_rat_legacy_numpy` record the same import.
 
 ## What is written
 
@@ -78,8 +74,8 @@ tests/webui/fixtures/tomovis/
   tables/      tables.json + tables.npz: colortables, pyqtgraph LUTs, colormap lists
 ```
 
-The synthetic cubes follow the axis order TomoVis's code works with, which differs from the
-(Nx, Ny, Nz) its README states: axis 0 is elevation, axis 1 azimuth, axis 2 range (the top
+The synthetic cubes follow the axis order TomoVis works with: axis 0 is elevation, axis 1
+azimuth, axis 2 range (the top
 view sums axis 0, the tomogram plots axis 0 against height, the ROI slices axes 1 and 2 and
 labels them azimuth and range, the slice slider walks axis 2). The DLR-TomoSAR cubes use the
 same order. Multi-channel cubes put the channel first, the

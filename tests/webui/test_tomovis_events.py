@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import h5py
+import numpy as np
 import pytest
 
-from tests.webui.test_tomovis_goldens import GoldenReplay
+from tests.webui.test_tomovis_goldens import FIXTURES, GoldenReplay
 from tomovis.events                   import TomoVisEventError
+
+INPUTS = FIXTURES / "inputs"
 
 
 @pytest.fixture
@@ -206,3 +210,73 @@ def test_invalid_events_are_rejected(loaded, event):
         loaded.window.handle(event)
 
     assert error.value.status == 400
+
+
+@pytest.fixture
+def channels(tmp_path) -> GoldenReplay:
+    """A window with the three-channel cube (3, 10, 24, 16) imported."""
+
+    replay = GoldenReplay(tmp_path)
+    replay.perform("import", {"kind": "npy", "path": "<fixtures>/inputs/npy_channels_3.npy"})
+    return replay
+
+
+@pytest.mark.parametrize("mode, plane, channel", [("Red", 0, 1), ("Green", 1, 0), ("Blue", 2, 2)])
+def test_a_channel_menu_entry_shows_the_channel_painted_that_colour(channels, mode, plane, channel):
+    """The RGB composite paints channel 1 red and channel 0 green; Red and Green show those same channels alone."""
+
+    window = channels.window
+    cube   = np.load(INPUTS / "npy_channels_3.npy")
+    power  = (np.abs(cube[channel]).sum(axis=0) ** 2).astype(np.float64)
+    scaled = 255 * (power - power.min()) / (power.max() - power.min())
+
+    assert np.abs(window.img[..., plane] - scaled).max() <= 1.0
+
+    channels.perform("channel", {"mode": mode})
+
+    assert np.allclose(window.img, np.abs(cube[channel]).sum(axis=0) ** 0.5, rtol=1e-6)
+
+
+def test_a_cut_drawn_from_high_to_low_azimuth_is_not_mirrored(loaded):
+    """A line from azimuth 7 back to 3 at range 2 gives the cut of the line from 3 to 7: row 0 is azimuth 3, as the axis says."""
+
+    window = loaded.window
+    with h5py.File(INPUTS / "fusar_two_key_elev.hd5", "r") as h5f:
+        cube = np.abs(h5f["tomogram"][:])
+
+    loaded.perform("set_roi", {"ax": 3.0, "ay": 2.0, "angle": 0.0, "length": 4.0, "pos_x": 0.0, "pos_y": 0.0})
+    forward = window.d2.copy()
+    loaded.perform("set_roi", {"ax": 7.0, "ay": 2.0, "angle": 180.0, "length": 4.0, "pos_x": 0.0, "pos_y": 0.0})
+
+    assert window.getROIAxisMode() == "azimuth"
+    assert (window.x_min, window.x_max) == (3 * window.x_res, 7 * window.x_res)
+    assert np.allclose(window.d2, forward, rtol=1e-5)
+    assert np.allclose(np.sort(window.d2[0]), np.sort(cube[:, 3, 2]), rtol=1e-5)
+    assert np.allclose(np.sort(window.d2[1]), np.sort(cube[:, 4, 2]), rtol=1e-5)
+
+
+def test_the_normalized_plot_divides_each_column_by_its_peak(loaded):
+    """Normalize on the Plot tab is peak division, as in the Cube tab and PyRAT: the floor of a column is kept, not subtracted."""
+
+    window = loaded.window
+    loaded.send({"type": "click", "widget": "tab1PlotButton"})
+    loaded.send({"type": "check", "widget": "tab2ChkBox1", "checked": True})
+    columns = window.d2.T.astype(np.float64)
+
+    assert np.allclose(window.d2Norm, columns / columns.max(axis=0), rtol=1e-6)
+    assert window.d2Norm.min() > 0.0
+
+
+def test_the_volume_keeps_every_channel_and_decimates_height_least(channels):
+    """A (3, 10, 24, 16) cube gives height / 2, azimuth / 8 and range / 8 with the channels last, one visual each."""
+
+    channels.send({"type": "tab", "index": 3})
+
+    assert channels.window.volume_data.shape == (5, 3, 2, 3)
+
+
+def test_the_default_elevation_range_counts_the_height_bins(channels):
+    """Without heights the range is 0 to the height-axis length minus one (10 bins), not the 16 range samples."""
+
+    assert channels.window.z_range == [0.0, 9.0]
+    assert channels.window.z_axis.size == 10

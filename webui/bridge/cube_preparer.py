@@ -167,20 +167,20 @@ class CubePreparer:
         return data, heights, spacing, "TomoVis session"
 
     def sample_heights(self, data: np.ndarray) -> list[float]:
-        """Returns the elevation range TomoVis sets after an import that brings no heights (F-015): 0 to the last axis's length minus one.
+        """Returns the elevation range TomoVis sets after an import that brings no heights (F-015): 0 to the height axis's length minus one.
 
         A session saved with this range, or with TomoVis's default 1.0 x 1.0
         spacing, holds TomoVis's defaults rather than measured values, so the
         dataset still asks for them like the file the session came from.
 
         Args:
-            data : Session cube, the last axis being range.
+            data : Session cube, the height axis being third from the end.
 
         Returns:
-            [0.0, shape[-1] - 1].
+            [0.0, shape[-3] - 1].
         """
 
-        return [0.0, float(data.shape[-1] - 1)]
+        return [0.0, float(data.shape[-3] - 1)]
 
     def convert(self, record: DatasetRecord) -> None:
         """Writes the source as data/tomovis_cube.npy with its height range and spacing, then the TomoVis link.

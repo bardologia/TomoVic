@@ -13,7 +13,7 @@ The server runs the copied slots in the original order with the original numpy c
 | `qt_widgets.py` | Qt stand-ins with Qt's signal order, clamping and decimal rounding. `SlotBoundary` reports a slot exception and lets emission go on, as pyqtgraph's excepthook did |
 | `pg_models.py` | ImageView, LineSegmentROI (pyqtgraph's `stateChanged` with QPointF fuzzy compare), InfiniteLine, ColorMap, Point |
 | `pg_affine.py` | pyqtgraph 0.14 `affineSlice` and order-1 `interpolateArray` |
-| `tools.py` | `normalize`, the 19 `colortables` (verbatim), `sanitize_for_display`, `add_dem_to_tomogram`, the 71 Plot colormap names |
+| `tools.py` | `normalize`, `normalize_peak`, the 19 `colortables` (verbatim), `sanitize_for_display`, `add_dem_to_tomogram`, the 71 Plot colormap names |
 | `rat_file.py` | STEtools RAT 1.0/2.0 read path |
 | `cube_readers.py` | read halves of the four imports |
 | `session_file.py` | session `.hd5` writer and reader |
@@ -73,10 +73,11 @@ the reason a run lacks a piece that only preprocessing writes.
 ## Behaviour decisions
 
 - **D-1.** RGB views get per-channel levels through pyqtgraph's `rgba` level mode, one `(lo, hi)` pair
-  per channel. The original's `setLevels(list, list)` raises in pyqtgraph 0.14. This fixes E-001, E-002
-  and E-004, and E-003 goes away with them.
+  per channel, as the original now does; its earlier `setLevels(list, list)` raised in pyqtgraph 0.14.
+  This fixes E-001, E-002 and E-004, and E-003 goes away with them.
 - **D-2.** hd5 attributes are parsed with the scripts' `parse_h5_attr`, not with `eval`: bytes are
-  decoded, strings go through `ast.literal_eval`, and any other value passes through.
+  decoded, strings go through `ast.literal_eval`, and any other value passes through. The original
+  does the same now. The cube of an hd5 import is the dataset named `tomogram`, in both.
 - **D-3.** Imports are atomic. A read failure shows the critical message `Import error` /
   `Could not import file:\n<error>` and keeps the previous cube. Files are always closed.
 - **D-4.** File dialogs browse the server, and every save writes on the server. As Qt's file dialog does

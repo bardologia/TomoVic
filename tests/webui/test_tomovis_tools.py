@@ -53,6 +53,21 @@ def test_normalize_scales_to_the_range_and_zeroes_constant_input():
     assert constant.tolist() == [0.0, 0.0]
 
 
+def test_normalize_scales_over_the_finite_values():
+    """One NaN no longer blanks the array: the finite values keep their scale and the NaN becomes 0."""
+
+    scaled = TomoVisTools.normalize(np.array([2.0, np.nan, 4.0, 6.0]), 0, 255)
+
+    assert scaled.tolist() == [0.0, 0.0, 127.5, 255.0]
+
+
+def test_normalize_peak_divides_by_the_maximum():
+    """normalize_peak keeps the floor of a profile (1 / 4 here) where min-max scaling returned 0; an empty profile stays zero."""
+
+    assert TomoVisTools.normalize_peak(np.array([1.0, 2.0, 4.0])).tolist() == [0.25, 0.5, 1.0]
+    assert TomoVisTools.normalize_peak(np.zeros(3)).tolist() == [0.0, 0.0, 0.0]
+
+
 def test_sanitize_takes_magnitudes_and_zeroes_non_finite_values():
     """Complex values become magnitudes, NaN and infinities become 0, and the dtype is cast."""
 

@@ -88,7 +88,7 @@ def readers() -> CubeReaders:
     ("fusar_numeric_attrs.hd5", (8, 12, 10), [-1.0, 4.0], 0.3, None),
 ])
 def test_fusar_reader(readers, name, shape, z_range, x_res, y_res):
-    """The dataset is key 1 (key 0 alone); elevation_limits wins over range; spacings come from the root (D-2 for bytes and numbers)."""
+    """The dataset is the one named tomogram, also when it is not key 1 (fusar_three_keys holds DEM, theta, tomogram); elevation_limits wins over range; spacings come from the root (D-2 for bytes and numbers)."""
 
     cube = readers.fusar(INPUTS / name)
 
@@ -173,7 +173,7 @@ def test_imports_through_the_window_follow_the_menu_flow():
     driver.window.drain()
 
     assert driver.window.img.shape == (20, 16)
-    assert driver.window.z_range == [0.0, 15.0]
+    assert driver.window.z_range == [0.0, 11.0]
 
 
 class BrokenInputs:

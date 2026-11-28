@@ -392,19 +392,19 @@ class ScenarioBook:
         """
 
         cases = [
-            ("import_fusar_two_key_elev",   "hd5", "fusar_two_key_elev.hd5",   {}, "FuSAR .hd5 with two keys: key index 1 is read; elevation_limits sets z_range; ps_az and ps_rg set x_res and y_res."),
-            ("import_fusar_one_key_range",  "hd5", "fusar_one_key_range.hd5",  {}, "FuSAR .hd5 with one key: key index 0; the range attribute sets z_range."),
+            ("import_fusar_two_key_elev",   "hd5", "fusar_two_key_elev.hd5",   {}, "FuSAR .hd5 with two keys: the dataset named tomogram is read; elevation_limits sets z_range; ps_az and ps_rg set x_res and y_res."),
+            ("import_fusar_one_key_range",  "hd5", "fusar_one_key_range.hd5",  {}, "FuSAR .hd5 with one key, tomogram; the range attribute sets z_range."),
             ("import_fusar_both_attrs",     "hd5", "fusar_both_attrs.hd5",     {}, "elevation_limits wins over range."),
-            ("import_fusar_no_attrs",       "hd5", "fusar_no_attrs.hd5",       {}, "No z attribute: z_range = [0, shape[-1] - 1] (the range axis length, a quirk)."),
-            ("import_fusar_three_keys",     "hd5", "fusar_three_keys.hd5",     {}, "Three keys: key index 1 is read whatever its name."),
-            ("import_fusar_bytes_attrs",    "hd5", "fusar_bytes_attrs.hd5",    {}, "Attributes stored as numpy bytes: eval accepts bytes."),
-            ("import_fusar_numeric_attrs",  "hd5", "fusar_numeric_attrs.hd5",  {}, "Numeric attributes: eval raises TypeError inside the slot; data and z_range are left half-updated."),
+            ("import_fusar_no_attrs",       "hd5", "fusar_no_attrs.hd5",       {}, "No z attribute: z_range = [0, shape[-3] - 1], the height axis length."),
+            ("import_fusar_three_keys",     "hd5", "fusar_three_keys.hd5",     {}, "The three layers PyRAT writes (DEM, theta, tomogram): tomogram is read by name, not theta at key index 1."),
+            ("import_fusar_bytes_attrs",    "hd5", "fusar_bytes_attrs.hd5",    {}, "Attributes stored as numpy bytes: parse_h5_attr decodes them."),
+            ("import_fusar_numeric_attrs",  "hd5", "fusar_numeric_attrs.hd5",  {}, "Numeric attributes: parse_h5_attr passes them through."),
             ("import_uavsar_three_keys",    "h5",  "uavsar_three_keys.h5",     {}, "UAVSAR .h5: key index 2, np.rollaxis(x, 1, 0), default z_range."),
             ("import_npy_real",             "npy", "npy_real.npy",             {}, "float32 .npy."),
             ("import_npy_float64",          "npy", "npy_float64.npy",          {}, "float64 .npy."),
             ("import_npy_complex_nan_inf",  "npy", "npy_complex_nan_inf.npy",  {}, "complex64 .npy with NaN and inf: sanitize_for_display zeroes them in the views."),
             ("import_npy_one_range_line",   "npy", "npy_one_range_line.npy",   {}, "shape[-1] == 1: the slider mid value is 0, valueChanged never fires and nothing is displayed."),
-            ("import_rat_numpy2",           "rat", "rat_complex.rat",          {}, "RAT import as the original runs under numpy 2: rrat raises AttributeError (np.int) inside the slot."),
+            ("import_rat_numpy2",           "rat", "rat_complex.rat",          {}, "RAT import under numpy 2."),
             ("import_rat_legacy_numpy",     "rat", "rat_complex.rat",          {"legacy_numpy": True}, "RAT import with np.int restored: the behaviour the port must reproduce."),
             ("import_npy_channels_2",       "npy", "npy_channels_2.npy",       {}, "Two channels: Blue menu entry disabled, RGB composite with an empty third plane."),
             ("import_npy_channels_3",       "npy", "npy_channels_3.npy",       {}, "Three channels: RGB composite with channels 0 and 1 swapped (index [1, 0, 2])."),
@@ -849,7 +849,7 @@ class ScenarioBook:
             },
             {
                 "name"        : "volume_channels_3",
-                "description" : "3D tab on a three-channel cube: [::8, ::8, ::2] keeps channel 0 only and renderVolume splits the last (range) axis into visuals. RGB levels shim on.",
+                "description" : "3D tab on a three-channel cube: height is decimated by 2, azimuth and range by 8, and the channels move to the last axis, one visual each.",
                 "rgb_levels"  : "rgba_mode",
                 "steps"       : [
                     self.load("npy", "npy_channels_3.npy"),

@@ -1,6 +1,6 @@
 """TomoVis's helper functions and tables, copied from Visualizer/Tools/tools.py and visualizer.py.
 
-``normalize`` and ``colortables`` are copies of TomoVis's ``Tools/tools.py``
+``normalize``, ``normalize_peak`` and ``colortables`` are copies of TomoVis's ``Tools/tools.py``
 (the 19 colour tables verbatim), ``sanitize_for_display`` and
 ``add_dem_to_tomogram`` copies of the functions of the same name in
 ``visualizer.py``, and ``PLOT_COLORMAPS`` its ``pyplotCmaps`` list of the
@@ -64,7 +64,7 @@ class TomoVisTools:
 
     @staticmethod
     def normalize(x, a, b) -> np.ndarray:
-        """Scales ``x`` linearly onto [a, b]; non-finite results (constant input) become 0.
+        """Scales the finite values of ``x`` linearly onto [a, b]; non-finite results (constant or non-finite input) become 0.
 
         Sets numpy's error state to ignore invalid operations, as TomoVis does on
         every call (Q-058); numpy 2 keeps that state per thread.
@@ -79,9 +79,24 @@ class TomoVisTools:
         """
 
         np.seterr(invalid = 'ignore')
-        c = (b - a) * (x - np.amin(x)) / (np.amax(x) - np.amin(x)) + a
+        low = np.nanmin(x)
+        c = (b - a) * (x - low) / (np.nanmax(x) - low) + a
         c[~np.isfinite(c)] = 0.0
         return c
+
+    @staticmethod
+    def normalize_peak(x) -> np.ndarray:
+        """Divides ``x`` by its peak, as PyRAT normalizes a profile.
+
+        Args:
+            x : Non-negative array.
+
+        Returns:
+            ``x / max(x)``, or zeros when the peak is not positive.
+        """
+
+        peak = np.amax(x)
+        return x / peak if peak > 0 else np.zeros(x.shape)
 
     @staticmethod
     def colortables(*args):

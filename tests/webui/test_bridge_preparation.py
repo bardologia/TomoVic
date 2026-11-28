@@ -159,7 +159,7 @@ def test_a_session_without_metadata_has_no_facts(tmp_path):
 
 
 def test_a_session_holding_tomovis_defaults_has_no_facts(tmp_path):
-    """green_plot.hd5 saved z 0..15 (the range-sample default) and 1 x 1 spacing: neither counts as a measured value."""
+    """green_plot.hd5 saved the height-bin default z range and 1 x 1 spacing: neither counts as a measured value."""
 
     case = Prepared(tmp_path, "session", SESSIONS / "green_plot.hd5")
     slab = Prepared(tmp_path / "slice", "session", SESSIONS / "slice_mode.hd5")

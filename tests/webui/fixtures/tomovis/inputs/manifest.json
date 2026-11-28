@@ -28,7 +28,7 @@
   },
   "fusar_no_attrs.hd5": {
     "attributes": {},
-    "description": "no z attributes: default z range [0, shape[-1] - 1]",
+    "description": "no z attributes: default z range [0, shape[-3] - 1]",
     "dtype": "float32",
     "shape": [
       8,
@@ -63,9 +63,9 @@
   },
   "fusar_three_keys.hd5": {
     "attributes": {
-      "b_tomogram.range": "[-1.0, 1.0]"
+      "tomogram.range": "[-1.0, 1.0]"
     },
-    "description": "three keys: the importer always takes key index 1 (b_tomogram)",
+    "description": "the three layers PyRAT writes (DEM, theta, tomogram): the importer reads the one named tomogram, which is key index 2",
     "dtype": "float32",
     "shape": [
       8,

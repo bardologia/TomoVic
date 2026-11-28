@@ -229,16 +229,16 @@ class FixtureWriter:
         with h5py.File(path, "w") as h5f:
             cube = small.amplitude()
             h5f.create_dataset("tomogram", data=cube)
-        self._record(path.name, "no z attributes: default z range [0, shape[-1] - 1]", cube, {})
+        self._record(path.name, "no z attributes: default z range [0, shape[-3] - 1]", cube, {})
 
         path = self.root / "fusar_three_keys.hd5"
         with h5py.File(path, "w") as h5f:
             cube = SyntheticCube(14, self.SMALL_SHAPE).amplitude()
-            h5f.create_dataset("a_coherence", data=np.ones(4, dtype=np.float32))
-            dset = h5f.create_dataset("b_tomogram", data=cube)
+            h5f.create_dataset("DEM", data=np.zeros(self.SMALL_SHAPE[1:], dtype=np.float32))
+            h5f.create_dataset("theta", data=np.ones(self.SMALL_SHAPE[1:], dtype=np.float32))
+            dset = h5f.create_dataset("tomogram", data=cube)
             dset.attrs["range"] = "[-1.0, 1.0]"
-            h5f.create_dataset("c_theta", data=np.zeros(4, dtype=np.float32))
-        self._record(path.name, "three keys: the importer always takes key index 1 (b_tomogram)", cube, {"b_tomogram.range": "[-1.0, 1.0]"})
+        self._record(path.name, "the three layers PyRAT writes (DEM, theta, tomogram): the importer reads the one named tomogram, which is key index 2", cube, {"tomogram.range": "[-1.0, 1.0]"})
 
         path = self.root / "fusar_bytes_attrs.hd5"
         with h5py.File(path, "w") as h5f:

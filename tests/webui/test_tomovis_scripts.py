@@ -85,7 +85,7 @@ def test_slicer_window_keys_reach_the_browser(slicer, key, message):
     assert window == [message]
 
 
-@pytest.mark.parametrize("name, message", [("fusar_no_attrs.hd5", "No attribute 'range'."), ("fusar_three_keys.hd5", "Invalid dataset")])
+@pytest.mark.parametrize("name, message", [("fusar_no_attrs.hd5", "No attribute 'range'."), ("uavsar_three_keys.h5", "Invalid dataset")])
 def test_slicer_reader_errors(name, message):
     """The script's own errors: no range attribute, no tomogram key among several."""
 

@@ -236,13 +236,13 @@ def test_tables_metadata_and_volume(server):
     header, _ = client.event(sid, {"type": "tab", "index": 3})
     volume    = header["snapshot"]["volume"]
 
-    assert volume == {"serial": 1, "rendered": True, "shape": [2, 4, 12]}
+    assert volume == {"serial": 1, "rendered": True, "shape": [8, 4, 3]}
     assert header["snapshot"]["controls"]["isoThresholdTab4Slider"] == {"enabled": True, "minimum": 1, "maximum": 100, "value": 1}
 
     status, raw    = client.request("GET", f"volume?sid={sid}&serial=1")
     vheader, blobs = client.unpack(raw)
 
-    assert status == 200 and vheader["shape"] == [2, 4, 12]
+    assert status == 200 and vheader["shape"] == [8, 4, 3]
     assert blobs["volume"].dtype == np.float32
     assert client.request("GET", f"volume?sid={sid}&serial=5")[0] == 404
     assert client.request("GET", "metadata?sid=missing")[0] == 404

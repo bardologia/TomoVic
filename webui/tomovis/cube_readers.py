@@ -80,7 +80,7 @@ class CubeReaders:
     def fusar(self, name: str) -> FusarCube:
         """Reads a FuSAR Tomo .hd5 file.
 
-        The dataset is the second key, or the only one; elevation limits come
+        The dataset is the one named ``tomogram``; elevation limits come
         from the dataset attribute ``elevation_limits``, else ``range``; pixel
         spacings from the root attributes ``ps_az`` and ``ps_rg``.
 
@@ -92,10 +92,7 @@ class CubeReaders:
         """
 
         with h5py.File(name, 'r') as h5f:
-            index = 1
-            if len(list(h5f.keys())) == 1:
-                index = 0
-            dataset = h5f[list(h5f.keys())[index]]
+            dataset = h5f['tomogram']
             data    = dataset[:]
 
             z_range = None
