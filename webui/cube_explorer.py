@@ -645,6 +645,7 @@ class CubeExplorer:
     GLOBE_TOUR_MAX_BYTES = 768 * 1024 * 1024
     GLOBE_TOUR_NAME_RE   = re.compile(r"[^a-z0-9]+")
     LIMIT_SAMPLE         = 1_000_000
+    AMPLITUDE_FLOOR      = 1e-12
     PNG_ENCODE           = {"format": "png", "pil_kwargs": {"compress_level": 1}}
 
     CMAPS = ("jet", "viridis", "inferno", "turbo", "gray")
@@ -1435,8 +1436,8 @@ class CubeExplorer:
                     return None
                 crop = np.asarray(raw[index - 1])
 
-            db         = 20.0 * np.log10(np.maximum(np.abs(crop).astype(np.float32), 1e-12))
-            vmin, vmax = np.percentile(db, [1.0, 99.0])
+            db         = 20.0 * np.log10(np.maximum(np.abs(crop).astype(np.float32), self.AMPLITUDE_FLOOR))
+            vmin, vmax = self._primary_clim(db)
             data       = db
             palette    = cmap if cmap in self.CMAPS else "gray"
         elif kind == "phase":
@@ -2746,14 +2747,14 @@ class CubeExplorer:
         """Wraps an in-memory cube as a float32 entry with display colour limits.
 
         Args:
-            raw    : Cube of shape (elevation, azimuth, range); complex cubes are reduced to their magnitude.
+            raw    : Cube of shape (elevation, azimuth, range); every cube is reduced to its magnitude, as in the TomoVis window.
             x_axis : Elevation axis in metres.
 
         Returns:
             Entry with the float32 ``cube``, its ``x_axis`` and the 1st and 99th
             percentile colour limits estimated on a bounded subsample.
         """
-        cube       = np.abs(raw) if np.iscomplexobj(raw) else np.asarray(raw, dtype=np.float32)
+        cube       = np.abs(raw).astype(np.float32, copy=False)
         vmin, vmax = self._colour_limits(cube)
 
         return {
@@ -2768,13 +2769,12 @@ class CubeExplorer:
         """Estimates 1st and 99th percentile colour limits on a bounded subsample.
 
         Args:
-            raw : Cube of any shape; complex values are reduced to their magnitude.
+            raw : Cube of any shape; values are reduced to their magnitude.
 
         Returns:
             Tuple (vmin, vmax), or (0, 1) when the cube holds no finite value.
         """
-        sample = cls._limit_sample(raw)
-        sample = np.abs(sample) if np.iscomplexobj(sample) else sample
+        sample = np.abs(cls._limit_sample(raw))
         if not sample.size:
             return 0.0, 1.0
 
@@ -2783,9 +2783,19 @@ class CubeExplorer:
 
     @classmethod
     def _limit_sample(cls, raw: np.ndarray) -> np.ndarray:
-        """Returns at most LIMIT_SAMPLE finite values taken at a fixed stride over the flattened cube."""
-        flat   = raw.reshape(-1)
-        sample = np.asarray(flat[:: max(1, flat.size // cls.LIMIT_SAMPLE)])
+        """Returns about LIMIT_SAMPLE finite values taken at a fixed stride over the flattened cube.
+
+        The stride is raised until it shares no factor with the azimuth x range
+        footprint, so the sample visits every range column and azimuth line
+        instead of a regular subset of them.
+        """
+        flat      = raw.reshape(-1)
+        footprint = raw.shape[-1] * raw.shape[-2]
+        step      = max(1, flat.size // cls.LIMIT_SAMPLE)
+        while math.gcd(step, footprint) > 1:
+            step += 1
+
+        sample = np.asarray(flat[::step])
 
         return sample[np.isfinite(sample)]
 
@@ -2804,7 +2814,7 @@ class CubeExplorer:
 
         Returns:
             Float32 array of shape (n_az, n_rg) holding 20 log10 of the amplitude,
-            floored at 1e-12 before the logarithm.
+            floored at AMPLITUDE_FLOOR before the logarithm.
 
         Raises:
             FileNotFoundError: If the run stores no primary SLC.
@@ -2818,12 +2828,21 @@ class CubeExplorer:
             raise ValueError(f"primary SLC shape {raw.shape} does not match the {n_az}x{n_rg} tomogram footprint in {reader.where}")
 
         amplitude = np.abs(np.asarray(raw)).astype(np.float32)
-        return 20.0 * np.log10(np.maximum(amplitude, 1e-12))
+        return 20.0 * np.log10(np.maximum(amplitude, self.AMPLITUDE_FLOOR))
 
-    @staticmethod
-    def _primary_clim(primary: np.ndarray) -> tuple[float, float]:
-        """Returns the 1st and 99th percentile of a primary amplitude map, in dB."""
-        return tuple(float(v) for v in np.percentile(primary, [1.0, 99.0]))
+    @classmethod
+    def _primary_clim(cls, primary: np.ndarray) -> tuple[float, float]:
+        """Returns the 1st and 99th percentile of an amplitude map in dB, over its finite pixels above the zero-fill floor.
+
+        Returns:
+            Tuple (vmin, vmax), or (0, 1) when no pixel qualifies.
+        """
+        floor = 20.0 * math.log10(cls.AMPLITUDE_FLOOR)
+        valid = primary[np.isfinite(primary) & (primary > floor)]
+        if not valid.size:
+            return 0.0, 1.0
+
+        return tuple(float(v) for v in np.percentile(valid, [1.0, 99.0]))
 
     @classmethod
     def _encode_primary(cls, primary: np.ndarray, clim: tuple[float, float]) -> bytes:
@@ -3279,7 +3298,7 @@ class SliceCollector:
         az   = int(np.clip(az, 0, n_az - 1))
         rg   = int(np.clip(rg, 0, n_rg - 1))
         data = np.asarray(cube[:, :, rg] if axis == "range" else cube[:, az, :])
-        data = np.abs(data).astype(np.float32) if np.iscomplexobj(data) else data.astype(np.float32)
+        data = np.abs(data).astype(np.float32)
 
         data, vmin, vmax = CubeExplorer._normalize_cut(entry, data, space)
 
